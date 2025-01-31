@@ -1089,7 +1089,7 @@ export class FastMCP extends FastMCPEventEmitter {
         session,
       });
 
-      console.error(`server is running on stdio`);
+      console.info(`server is running on stdio`);
     } else if (options.transportType === "sse") {
       this.#sseServer = await startSSEServer<FastMCPSession>({
         endpoint: options.sse.endpoint as `/${string}`,
