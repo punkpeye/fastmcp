@@ -1135,3 +1135,14 @@ export class FastMCP extends FastMCPEventEmitter {
     }
   }
 }
+
+export type { Context };
+export type { Tool, ToolParameters };
+export type { Content, TextContent, ImageContent, ContentResult };
+export type { Progress, SerializableValue };
+export type { Resource, ResourceResult };
+export type { ResourceTemplate, ResourceTemplateArgument };
+export type { Prompt, PromptArgument };
+export type { InputPrompt, InputPromptArgument };
+export type { ServerOptions, LoggingLevel };
+export type { FastMCPEvents, FastMCPSessionEvents };
