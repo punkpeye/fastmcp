@@ -692,6 +692,7 @@ npx fastmcp inspect server.ts
 > If you've developed a server using FastMCP, please [submit a PR](https://github.com/punkpeye/fastmcp) to showcase it here!
 
 - https://github.com/apinetwork/piapi-mcp-server
+- https://github.com/Meeting-Baas/meeting-mcp - Meeting BaaS MCP server that enables AI assistants to create meeting bots, search transcripts, and manage recording data
 
 ## Acknowledgements
 
