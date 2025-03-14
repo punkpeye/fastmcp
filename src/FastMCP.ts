@@ -568,10 +568,13 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
       console.warn('[warning] FastMCP could not infer client capabilities')
     }
 
-    if (this.#clientCapabilities?.roots) {
-      const roots = await this.#server.listRoots();
-
-      this.#roots = roots.roots;
+    if (this.#clientCapabilities?.roots?.listChanged) {
+      try {
+        const roots = await this.#server.listRoots();
+        this.#roots = roots.roots;
+      } catch(e) {
+        console.error(`[error] FastMCP received error listing roots.\n\n${e instanceof Error ? e.stack : JSON.stringify(e)}`)
+      }
     }
 
     this.#pingInterval = setInterval(async () => {
