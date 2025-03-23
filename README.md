@@ -17,6 +17,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [SSE](#sse)
 - CORS (enabled by default)
 - [Progress notifications](#progress)
+- [Extra arguments for tools](#extra-arguments)
 - [Typed server events](#typed-server-events)
 - [Prompt argument auto-completion](#prompt-argument-auto-completion)
 - [Sampling](#requestsampling)
@@ -342,6 +343,56 @@ server.addTool({
   },
 });
 ```
+
+#### Extra Arguments
+
+FastMCP supports passing "hidden" arguments to tools that aren't defined in the tool's parameter schema. This is useful for passing sensitive information like API tokens without exposing them in the tool's schema documentation.
+
+When a client passes arguments that aren't defined in the tool's parameter schema, FastMCP extracts these as "extra arguments" and makes them available in the `extraArgs` property of the context object:
+
+```js
+server.addTool({
+  name: "fetchData",
+  description: "Fetch data from an API",
+  parameters: z.object({
+    endpoint: z.string(),
+    query: z.string().optional(),
+  }),
+  execute: async (args, context) => {
+    // Access the validated parameters
+    const { endpoint, query } = args;
+    
+    // Access the token from extra arguments
+    const token = context.extraArgs?.token as string | undefined;
+    
+    if (!token) {
+      return "No token provided";
+    }
+    
+    // Use the token for authentication
+    const response = await fetch(endpoint, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+    
+    return await response.text();
+  },
+});
+```
+
+This allows clients to pass sensitive information like API tokens without them being exposed in the tool's schema or documentation:
+
+```js
+// Client code
+await client.callTool("fetchData", {
+  endpoint: "https://api.example.com/data",
+  query: "example",
+  token: "secret-api-token" // This will be passed as an extra argument
+});
+```
+
+The `token` argument won't appear in the tool's schema when clients request it, but it will be available in the `context.extraArgs` object when the tool is executed.
 
 ### Resources
 
