@@ -1624,6 +1624,7 @@ test("provides auth to tools", async () => {
     a: 1,
     b: 2,
   }, {
+    extraArgs: {}, // Explicitly expect the extraArgs property
     log: {
       debug: expect.any(Function),
       error: expect.any(Function),
