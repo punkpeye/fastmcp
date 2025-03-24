@@ -1,5 +1,5 @@
 {
-  "name": "@missionsquad/fastmcp",
+  "name": "fastmcp",
   "version": "1.0.0",
   "main": "dist/FastMCP.js",
   "scripts": {
