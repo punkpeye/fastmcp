@@ -140,6 +140,8 @@ type Context<T extends FastMCPSessionAuth> = {
     info: (message: string, data?: SerializableValue) => void;
     warn: (message: string, data?: SerializableValue) => void;
   };
+  // Add extraArgs to hold arguments not defined in the schema
+  extraArgs?: Record<string, unknown>;
 };
 
 type TextContent = {
@@ -736,6 +738,7 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
       }
 
       let args: any = undefined;
+      let extraArgs: Record<string, unknown> = {};
 
       if (tool.parameters) {
         const parsed = tool.parameters.safeParse(request.params.arguments);
@@ -748,6 +751,23 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
         }
 
         args = parsed.data;
+        
+        // Extract extra arguments (those not defined in the schema)
+        if (request.params.arguments && typeof request.params.arguments === 'object') {
+          // Get the shape of the schema to determine which fields are defined
+          const schemaShape = tool.parameters._def.shape?.();
+          const schemaKeys = schemaShape ? Object.keys(schemaShape) : [];
+          
+          // Extract keys from originalArgs that aren't in the schema
+          for (const key in request.params.arguments) {
+            if (!schemaKeys.includes(key)) {
+              extraArgs[key] = request.params.arguments[key];
+            }
+          }
+        }
+      } else {
+        // If no parameters are defined, all arguments are "extra"
+        extraArgs = { ...request.params.arguments };
       }
 
       const progressToken = request.params?._meta?.progressToken;
@@ -808,6 +828,7 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
           reportProgress,
           log,
           session: this.#auth,
+          extraArgs, // Pass the extra arguments here
         });
 
         if (typeof maybeStringResult === "string") {
