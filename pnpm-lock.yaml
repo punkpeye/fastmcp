@@ -11,6 +11,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.6.0
         version: 1.6.0
+      '@standard-schema/spec':
+        specifier: ^1.0.0
+        version: 1.0.0
       execa:
         specifier: ^9.5.2
         version: 9.5.2
@@ -32,6 +35,9 @@ importers:
       uri-templates:
         specifier: ^0.2.0
         version: 0.2.0
+      xsschema:
+        specifier: 0.2.0-beta.2
+        version: 0.2.0-beta.2(zod-to-json-schema@3.24.5(zod@3.24.2))
       yargs:
         specifier: ^17.7.2
         version: 17.7.2
@@ -39,8 +45,8 @@ importers:
         specifier: ^3.24.2
         version: 3.24.2
       zod-to-json-schema:
-        specifier: ^3.24.3
-        version: 3.24.3(zod@3.24.2)
+        specifier: ^3.24.5
+        version: 3.24.5(zod@3.24.2)
     devDependencies:
       '@sebbo2002/semantic-release-jsr':
         specifier: ^2.0.4
@@ -549,6 +555,9 @@ packages:
   '@sindresorhus/merge-streams@4.0.0':
     resolution: {integrity: sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==}
     engines: {node: '>=18'}
+
+  '@standard-schema/spec@1.0.0':
+    resolution: {integrity: sha512-m2bOd0f2RT9k8QJx1JN85cZYyH1RqFBdlwtkSlf4tBDYLCiiZnv1fIIwacK6cqwXavOydf0NPToMQgpKq+dVlA==}
 
   '@tokenizer/inflate@0.2.7':
     resolution: {integrity: sha512-MADQgmZT1eKjp06jpI2yozxaU9uVs4GzzgSL+uEq7bVcJ9V1ZXQkeGNql1fsSI0gMy1vhvNTNbUqrx+pZfJVmg==}
@@ -2559,6 +2568,23 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
+  xsschema@0.2.0-beta.2:
+    resolution: {integrity: sha512-yaU1SLQVQNboZHHK7iXpCoHzF+sbWvkygAKG6qMKvnpbNdm0SMWAIIj1uasDpCQ21HspPTdEYGg0c0qZYXVQFg==}
+    peerDependencies:
+      '@valibot/to-json-schema': ^1.0.0
+      arktype: ^2.1.13
+      effect: ^3.14.2
+      zod-to-json-schema: ^3.24.5
+    peerDependenciesMeta:
+      '@valibot/to-json-schema':
+        optional: true
+      arktype:
+        optional: true
+      effect:
+        optional: true
+      zod-to-json-schema:
+        optional: true
+
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
     engines: {node: '>=0.4'}
@@ -2591,8 +2617,8 @@ packages:
     resolution: {integrity: sha512-GQHQqAopRhwU8Kt1DDM8NjibDXHC8eoh1erhGAJPEyveY9qqVeXvVikNKrDz69sHowPMorbPUrH/mx8c50eiBQ==}
     engines: {node: '>=18'}
 
-  zod-to-json-schema@3.24.3:
-    resolution: {integrity: sha512-HIAfWdYIt1sssHfYZFCXp4rU1w2r8hVVXYIlmoa0r0gABLs5di3RCqPU5DDROogVz1pAdYBaz7HK5n9pSUNs3A==}
+  zod-to-json-schema@3.24.5:
+    resolution: {integrity: sha512-/AuWwMP+YqiPbsJx5D6TfgRTc4kTLjsh5SOcd4bLsfUg2RcEXrFMJl1DGgdHy2aCfsIA/cr/1JM0xcB2GZji8g==}
     peerDependencies:
       zod: ^3.24.1
 
@@ -2778,7 +2804,7 @@ snapshots:
       pkce-challenge: 4.1.0
       raw-body: 3.0.0
       zod: 3.24.2
-      zod-to-json-schema: 3.24.3(zod@3.24.2)
+      zod-to-json-schema: 3.24.5(zod@3.24.2)
     transitivePeerDependencies:
       - supports-color
 
@@ -3007,6 +3033,8 @@ snapshots:
   '@sindresorhus/merge-streams@2.3.0': {}
 
   '@sindresorhus/merge-streams@4.0.0': {}
+
+  '@standard-schema/spec@1.0.0': {}
 
   '@tokenizer/inflate@0.2.7':
     dependencies:
@@ -4946,6 +4974,10 @@ snapshots:
 
   wrappy@1.0.2: {}
 
+  xsschema@0.2.0-beta.2(zod-to-json-schema@3.24.5(zod@3.24.2)):
+    optionalDependencies:
+      zod-to-json-schema: 3.24.5(zod@3.24.2)
+
   xtend@4.0.2: {}
 
   y18n@5.0.8: {}
@@ -4978,7 +5010,7 @@ snapshots:
 
   yoctocolors@2.1.1: {}
 
-  zod-to-json-schema@3.24.3(zod@3.24.2):
+  zod-to-json-schema@3.24.5(zod@3.24.2):
     dependencies:
       zod: 3.24.2
 

@@ -18,7 +18,8 @@ import {
   ServerCapabilities,
   SetLevelRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { StandardSchemaV1 } from "@standard-schema/spec";
+import { toJsonSchema } from "xsschema";
 import { z } from "zod";
 import { setTimeout as delay } from "timers/promises";
 import { readFile } from "fs/promises";
@@ -111,7 +112,7 @@ export class UnexpectedStateError extends FastMCPError {
  */
 export class UserError extends UnexpectedStateError {}
 
-type ToolParameters = z.ZodTypeAny;
+type ToolParameters = StandardSchemaV1;
 
 type Literal = boolean | null | number | string | undefined;
 
@@ -225,7 +226,7 @@ type Tool<T extends FastMCPSessionAuth, Params extends ToolParameters = ToolPara
   description?: string;
   parameters?: Params;
   execute: (
-    args: z.infer<Params>,
+    args: StandardSchemaV1.InferOutput<Params>,
     context: Context<T>,
   ) => Promise<string | ContentResult | TextContent | ImageContent>;
 };
@@ -713,15 +714,15 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
   private setupToolHandlers(tools: Tool<T>[]) {
     this.#server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        tools: tools.map((tool) => {
+        tools: await Promise.all(tools.map(async (tool) => {
           return {
             name: tool.name,
             description: tool.description,
             inputSchema: tool.parameters
-              ? zodToJsonSchema(tool.parameters)
+              ? await toJsonSchema(tool.parameters)
               : undefined,
           };
-        }),
+        })),
       };
     });
 
@@ -738,16 +739,18 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
       let args: any = undefined;
 
       if (tool.parameters) {
-        const parsed = tool.parameters.safeParse(request.params.arguments);
+        const parsed = await tool.parameters["~standard"].validate(
+          request.params.arguments
+        );
 
-        if (!parsed.success) {
+        if (parsed.issues) {
           throw new McpError(
             ErrorCode.InvalidParams,
             `Invalid ${request.params.name} parameters`,
           );
         }
 
-        args = parsed.data;
+        args = parsed.value;
       }
 
       const progressToken = request.params?._meta?.progressToken;

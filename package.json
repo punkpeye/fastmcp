@@ -22,6 +22,7 @@
   "types": "dist/FastMCP.d.ts",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.0",
+    "@standard-schema/spec": "^1.0.0",
     "execa": "^9.5.2",
     "file-type": "^20.3.0",
     "fuse.js": "^7.1.0",
@@ -29,9 +30,10 @@
     "strict-event-emitter-types": "^2.0.0",
     "undici": "^7.4.0",
     "uri-templates": "^0.2.0",
+    "xsschema": "0.2.0-beta.2",
     "yargs": "^17.7.2",
     "zod": "^3.24.2",
-    "zod-to-json-schema": "^3.24.3"
+    "zod-to-json-schema": "^3.24.5"
   },
   "repository": {
     "url": "https://github.com/punkpeye/fastmcp"
