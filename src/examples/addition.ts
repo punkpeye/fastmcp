@@ -3,20 +3,60 @@
  */
 import { FastMCP } from "../FastMCP.js";
 import { z } from "zod";
+import { type } from "arktype";
+import * as v from "valibot";
 
 const server = new FastMCP({
   name: "Addition",
   version: "1.0.0",
 });
 
+// --- Zod Example ---
+const AddParamsZod = z.object({
+  a: z.number().describe("The first number"),
+  b: z.number().describe("The second number"),
+});
+
 server.addTool({
-  name: "add",
-  description: "Add two numbers",
-  parameters: z.object({
-    a: z.number(),
-    b: z.number(),
-  }),
+  name: "add-zod",
+  description: "Add two numbers (using Zod schema)",
+  parameters: AddParamsZod,
   execute: async (args) => {
+    // args is typed as { a: number, b: number }
+    console.log(`[Zod] Adding ${args.a} and ${args.b}`);
+    return String(args.a + args.b);
+  },
+});
+
+// --- ArkType Example ---
+const AddParamsArkType = type({
+  a: "number",
+  b: "number",
+});
+
+server.addTool({
+  name: "add-arktype",
+  description: "Add two numbers (using ArkType schema)",
+  parameters: AddParamsArkType,
+  execute: async (args) => {
+    // args is typed as { a: number, b: number } based on AddParamsArkType.infer
+    console.log(`[ArkType] Adding ${args.a} and ${args.b}`);
+    return String(args.a + args.b);
+  },
+});
+
+// --- Valibot Example ---
+const AddParamsValibot = v.object({
+  a: v.number("The first number"),
+  b: v.number("The second number"),
+});
+
+server.addTool({
+  name: "add-valibot",
+  description: "Add two numbers (using Valibot schema)",
+  parameters: AddParamsValibot,
+  execute: async (args) => {
+    console.log(`[Valibot] Adding ${args.a} and ${args.b}`);
     return String(args.a + args.b);
   },
 });

@@ -37,7 +37,7 @@ importers:
         version: 0.2.0
       xsschema:
         specifier: 0.2.0-beta.2
-        version: 0.2.0-beta.2(zod-to-json-schema@3.24.5(zod@3.24.2))
+        version: 0.2.0-beta.2(@valibot/to-json-schema@1.0.0(valibot@1.0.0(typescript@5.7.3)))(arktype@2.1.16)(zod-to-json-schema@3.24.5(zod@3.24.2))
       yargs:
         specifier: ^17.7.2
         version: 17.7.2
@@ -63,6 +63,12 @@ importers:
       '@types/yargs':
         specifier: ^17.0.33
         version: 17.0.33
+      '@valibot/to-json-schema':
+        specifier: ^1.0.0
+        version: 1.0.0(valibot@1.0.0(typescript@5.7.3))
+      arktype:
+        specifier: ^2.1.16
+        version: 2.1.16
       eslint:
         specifier: ^9.21.0
         version: 9.21.0
@@ -90,11 +96,20 @@ importers:
       typescript:
         specifier: ^5.7.3
         version: 5.7.3
+      valibot:
+        specifier: ^1.0.0
+        version: 1.0.0(typescript@5.7.3)
       vitest:
         specifier: ^3.0.7
         version: 3.0.7(@types/node@22.13.5)
 
 packages:
+
+  '@ark/schema@0.45.6':
+    resolution: {integrity: sha512-uI/z6kAabOKeFxbJK2w26dD0FZLutL0LTw0o3EZsX+UC4exc34YUVkm7/wuUMvc5Z27IVDjoaZp9o7X4jOFAbg==}
+
+  '@ark/util@0.45.6':
+    resolution: {integrity: sha512-eI8Y1X0+271Q1p8qU39tkyrzIVMZIuymzixzVD0UL7k+HJaPhbbrjuKW/1CZzQ64tc+ugl7z2kP01YlAMA5h7A==}
 
   '@babel/code-frame@7.26.2':
     resolution: {integrity: sha512-RJlIHRueQgwWitWgF8OdFYGZX328Ax5BCemNGlqHfplnRT9ESi8JkFlvaVYbS+UubVY6dpv87Fs2u5M29iNFVQ==}
@@ -615,6 +630,11 @@ packages:
     resolution: {integrity: sha512-EwVHlp5l+2vp8CoqJm9KikPZgi3gbdZAtabKT9KPShGeOcJhsv4Zdo3oc8T8I0uKEmYoU4ItyxbptjF08enaxg==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
+  '@valibot/to-json-schema@1.0.0':
+    resolution: {integrity: sha512-/9crJgPptVsGCL6X+JPDQyaJwkalSZ/52WuF8DiRUxJgcmpNdzYRfZ+gqMEP8W3CTVfuMWPqqvIgfwJ97f9Etw==}
+    peerDependencies:
+      valibot: ^1.0.0
+
   '@vitest/expect@3.0.7':
     resolution: {integrity: sha512-QP25f+YJhzPfHrHfYHtvRn+uvkCFCqFtW9CktfBxmB+25QqWsx7VB2As6f4GmwllHLDhXNHvqedwhvMmSnNmjw==}
 
@@ -701,6 +721,9 @@ packages:
 
   argv-formatter@1.0.0:
     resolution: {integrity: sha512-F2+Hkm9xFaRg+GkaNnbwXNDV5O6pnCFEmqyhvfC/Ic5LbgOWjJh3L+mN/s91rxVL3znE7DYVpW0GJFT+4YBgWw==}
+
+  arktype@2.1.16:
+    resolution: {integrity: sha512-KEuoEtpmbNVAIZqyLE+ox4Ga/6ED7Oe3Ra90sxGe4ZnufLz8AH49Xqis0i6oNEq23KmpduRLZRfS+iTAkjnfDw==}
 
   array-ify@1.0.0:
     resolution: {integrity: sha512-c5AMf34bKdvPhQ7tBGhqkgKNUzMr4WUs+WDtC2ZUGOUncbxKMTvqxYctiseW3+L4bA8ec+GcZ6/A/FW4m8ukng==}
@@ -2454,6 +2477,14 @@ packages:
     resolution: {integrity: sha512-pMZTvIkT1d+TFGvDOqodOclx0QWkkgi6Tdoa8gC8ffGAAqz9pzPTZWAybbsHHoED/ztMtkv/VoYTYyShUn81hA==}
     engines: {node: '>= 0.4.0'}
 
+  valibot@1.0.0:
+    resolution: {integrity: sha512-1Hc0ihzWxBar6NGeZv7fPLY0QuxFMyxwYR2sF1Blu7Wq7EnremwY2W02tit2ij2VJT8HcSkHAQqmFfl77f73Yw==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
   validate-npm-package-license@3.0.4:
     resolution: {integrity: sha512-DpKm2Ui/xN7/HQKCtpZxoRWBhZ9Z0kqtygG8XCgNQ8ZlDnxuQmWhj566j8fN4Cu3/JmbhsDo7fcAJq4s9h27Ew==}
 
@@ -2626,6 +2657,12 @@ packages:
     resolution: {integrity: sha512-lY7CDW43ECgW9u1TcT3IoXHflywfVqDYze4waEz812jR/bZ8FHDsl7pFQoSZTz5N+2NqRXs8GBwnAwo3ZNxqhQ==}
 
 snapshots:
+
+  '@ark/schema@0.45.6':
+    dependencies:
+      '@ark/util': 0.45.6
+
+  '@ark/util@0.45.6': {}
 
   '@babel/code-frame@7.26.2':
     dependencies:
@@ -3103,6 +3140,10 @@ snapshots:
       '@typescript-eslint/types': 8.24.1
       eslint-visitor-keys: 4.2.0
 
+  '@valibot/to-json-schema@1.0.0(valibot@1.0.0(typescript@5.7.3))':
+    dependencies:
+      valibot: 1.0.0(typescript@5.7.3)
+
   '@vitest/expect@3.0.7':
     dependencies:
       '@vitest/spy': 3.0.7
@@ -3191,6 +3232,11 @@ snapshots:
   argparse@2.0.1: {}
 
   argv-formatter@1.0.0: {}
+
+  arktype@2.1.16:
+    dependencies:
+      '@ark/schema': 0.45.6
+      '@ark/util': 0.45.6
 
   array-ify@1.0.0: {}
 
@@ -4864,6 +4910,10 @@ snapshots:
 
   utils-merge@1.0.1: {}
 
+  valibot@1.0.0(typescript@5.7.3):
+    optionalDependencies:
+      typescript: 5.7.3
+
   validate-npm-package-license@3.0.4:
     dependencies:
       spdx-correct: 3.2.0
@@ -4974,8 +5024,10 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  xsschema@0.2.0-beta.2(zod-to-json-schema@3.24.5(zod@3.24.2)):
+  xsschema@0.2.0-beta.2(@valibot/to-json-schema@1.0.0(valibot@1.0.0(typescript@5.7.3)))(arktype@2.1.16)(zod-to-json-schema@3.24.5(zod@3.24.2)):
     optionalDependencies:
+      '@valibot/to-json-schema': 1.0.0(valibot@1.0.0(typescript@5.7.3))
+      arktype: 2.1.16
       zod-to-json-schema: 3.24.5(zod@3.24.2)
 
   xtend@4.0.2: {}
