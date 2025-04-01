@@ -38,7 +38,7 @@ npm install fastmcp
 
 ```ts
 import { FastMCP } from "fastmcp";
-import { z } from "zod"; // Zod is one option, see below for ArkType and Valibot
+import { z } from "zod"; // Or any validation library that supports Standard Schema
 
 const server = new FastMCP({
   name: "My Server",
@@ -48,14 +48,12 @@ const server = new FastMCP({
 server.addTool({
   name: "add",
   description: "Add two numbers",
-  // Define parameters using a schema library that implements Standard Schema (Zod, ArkType, Valibot, etc.)
-  parameters: z.object({ // Zod example
+  parameters: z.object({
     a: z.number(),
     b: z.number(),
   }),
-  // 'args' will be typed according to the schema definition
   execute: async (args) => {
-    return String(args.a + args.b); // args is { a: number, b: number }
+    return String(args.a + args.b);
   },
 });
 
