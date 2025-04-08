@@ -70,7 +70,8 @@ You can test the server in terminal with:
 git clone https://github.com/punkpeye/fastmcp.git
 cd fastmcp
 
-npm install
+pnpm install
+pnpm build
 
 # Test the addition server example using CLI:
 npx fastmcp dev src/examples/addition.ts
