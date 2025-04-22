@@ -378,6 +378,61 @@ server.addTool({
 });
 ```
 
+#### Return combination type
+
+You can combine various types in this way and send them back to AI
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "text",
+          text: "Hello, world!",
+        },
+        {
+          type: "image",
+          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+          mimeType: "image/png",
+        },
+        {
+          type: "audio",
+          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+          mimeType: "audio/mpeg",
+        },
+      ],
+    };
+  },
+
+  // or...
+  // execute: async (args) => {
+  //   const imgContent = imageContent({
+  //     url: "https://example.com/image.png",
+  //   });
+  //   const audContent = audioContent({
+  //     url: "https://example.com/audio.mp3",
+  //   });
+  //   return {
+  //     content: [
+  //       {
+  //         type: "text",
+  //         text: "Hello, world!",
+  //       },
+  //       imgContent,
+  //       audContent,
+  //     ],
+  //   };
+  // },
+});
+```
+
+
 #### Logging
 
 Tools can log messages to the client using the `log` object in the context object:
