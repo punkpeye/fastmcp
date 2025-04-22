@@ -96,7 +96,7 @@ server.start({
 });
 ```
 
-This will start the server and listen for SSE connections on `http://localhost:8080/sse`.
+To listen for SSE connections on http://localhost:8080/sse, simply run the project using `npm run start`.
 
 You can then use `SSEClientTransport` to connect to the server:
 
