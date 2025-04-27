@@ -32,9 +32,7 @@ import { startSSEServer } from "mcp-proxy";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import parseURITemplate from "uri-templates";
 import http from "http";
-import {
-  fetch
-} from "undici";
+import { fetch } from "undici";
 
 export type SSEServer = {
   close: () => Promise<void>;
@@ -87,7 +85,9 @@ export const imageContent = async (
   } as const;
 };
 
-export const audioContent = async (input: { url: string } | { path: string } | { buffer: Buffer }): Promise<AudioContent> => {
+export const audioContent = async (
+  input: { url: string } | { path: string } | { buffer: Buffer },
+): Promise<AudioContent> => {
   let rawData: Buffer;
 
   if ("url" in input) {
@@ -103,7 +103,9 @@ export const audioContent = async (input: { url: string } | { path: string } | {
   } else if ("buffer" in input) {
     rawData = input.buffer;
   } else {
-    throw new Error("Invalid input: Provide a valid 'url', 'path', or 'buffer'");
+    throw new Error(
+      "Invalid input: Provide a valid 'url', 'path', or 'buffer'",
+    );
   }
 
   const mimeType = await fileTypeFromBuffer(rawData);
@@ -252,14 +254,57 @@ const CompletionZodSchema = z.object({
   hasMore: z.optional(z.boolean()),
 }) satisfies z.ZodType<Completion>;
 
-type Tool<T extends FastMCPSessionAuth, Params extends ToolParameters = ToolParameters> = {
+/**
+ * Tool annotations as defined in MCP Specification (2025-03-26)
+ * These provide hints about a tool's behavior.
+ */
+type ToolAnnotations = {
+  /**
+   * A human-readable title for the tool, useful for UI display
+   */
+  title?: string;
+
+  /**
+   * If true, indicates the tool does not modify its environment
+   * @default false
+   */
+  readOnlyHint?: boolean;
+
+  /**
+   * If true, the tool may perform destructive updates
+   * Only meaningful when readOnlyHint is false
+   * @default true
+   */
+  destructiveHint?: boolean;
+
+  /**
+   * If true, calling the tool repeatedly with the same arguments has no additional effect
+   * Only meaningful when readOnlyHint is false
+   * @default false
+   */
+  idempotentHint?: boolean;
+
+  /**
+   * If true, the tool may interact with an "open world" of external entities
+   * @default true
+   */
+  openWorldHint?: boolean;
+};
+
+type Tool<
+  T extends FastMCPSessionAuth,
+  Params extends ToolParameters = ToolParameters,
+> = {
   name: string;
   description?: string;
   parameters?: Params;
+  annotations?: ToolAnnotations;
   execute: (
     args: StandardSchemaV1.InferOutput<Params>,
     context: Context<T>,
-  ) => Promise<string | ContentResult | TextContent | ImageContent | AudioContent>;
+  ) => Promise<
+    string | ContentResult | TextContent | ImageContent | AudioContent
+  >;
 };
 
 type ResourceResult =
@@ -403,7 +448,9 @@ type SamplingResponse = {
 
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
 
-export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> extends FastMCPSessionEventEmitter {
+export class FastMCPSession<
+  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+> extends FastMCPSessionEventEmitter {
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
   #loggingLevel: LoggingLevel = "info";
@@ -600,15 +647,17 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
     }
 
     if (!this.#clientCapabilities) {
-      console.warn('[FastMCP warning] could not infer client capabilities')
+      console.warn("[FastMCP warning] could not infer client capabilities");
     }
 
     if (this.#clientCapabilities?.roots?.listChanged) {
       try {
         const roots = await this.#server.listRoots();
         this.#roots = roots.roots;
-      } catch(e) {
-        console.error(`[FastMCP error] received error listing roots.\n\n${e instanceof Error ? e.stack : JSON.stringify(e)}`)
+      } catch (e) {
+        console.error(
+          `[FastMCP error] received error listing roots.\n\n${e instanceof Error ? e.stack : JSON.stringify(e)}`,
+        );
       }
     }
 
@@ -619,8 +668,8 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
         } catch {
           // The reason we are not emitting an error here is because some clients
           // seem to not respond to the ping request, and we don't want to crash the server,
-          // e.g., https://github.com/punkpeye/fastmcp/issues/38. 
-          console.warn("[FastMCP warning] server is not responding to ping")
+          // e.g., https://github.com/punkpeye/fastmcp/issues/38.
+          console.warn("[FastMCP warning] server is not responding to ping");
         }
       }, 1000);
     }
@@ -751,15 +800,18 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
   private setupToolHandlers(tools: Tool<T>[]) {
     this.#server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        tools: await Promise.all(tools.map(async (tool) => {
-          return {
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.parameters
-              ? await toJsonSchema(tool.parameters)
-              : undefined,
-          };
-        })),
+        tools: await Promise.all(
+          tools.map(async (tool) => {
+            return {
+              name: tool.name,
+              description: tool.description,
+              inputSchema: tool.parameters
+                ? await toJsonSchema(tool.parameters)
+                : undefined,
+              annotations: tool.annotations,
+            };
+          }),
+        ),
       };
     });
 
@@ -777,7 +829,7 @@ export class FastMCPSession<T extends FastMCPSessionAuth = FastMCPSessionAuth> e
 
       if (tool.parameters) {
         const parsed = await tool.parameters["~standard"].validate(
-          request.params.arguments
+          request.params.arguments,
         );
 
         if (parsed.issues) {
@@ -1068,7 +1120,9 @@ class FastMCPEventEmitter extends FastMCPEventEmitterBase {}
 
 type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
 
-export class FastMCP<T extends Record<string, unknown> | undefined = undefined> extends FastMCPEventEmitter {
+export class FastMCP<
+  T extends Record<string, unknown> | undefined = undefined,
+> extends FastMCPEventEmitter {
   #options: ServerOptions<T>;
   #prompts: InputPrompt[] = [];
   #resources: Resource[] = [];
@@ -1154,7 +1208,6 @@ export class FastMCP<T extends Record<string, unknown> | undefined = undefined> 
       this.emit("connect", {
         session,
       });
-
     } else if (options.transportType === "sse") {
       this.#sseServer = await startSSEServer<FastMCPSession<T>>({
         endpoint: options.sse.endpoint as `/${string}`,

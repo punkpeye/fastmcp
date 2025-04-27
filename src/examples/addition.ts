@@ -21,6 +21,11 @@ server.addTool({
   name: "add-zod",
   description: "Add two numbers (using Zod schema)",
   parameters: AddParamsZod,
+  annotations: {
+    title: "Addition (Zod)",
+    readOnlyHint: true, // This tool doesn't modify anything
+    openWorldHint: false, // This tool doesn't interact with external systems
+  },
   execute: async (args) => {
     // args is typed as { a: number, b: number }
     console.log(`[Zod] Adding ${args.a} and ${args.b}`);
@@ -38,6 +43,13 @@ server.addTool({
   name: "add-arktype",
   description: "Add two numbers (using ArkType schema)",
   parameters: AddParamsArkType,
+  annotations: {
+    title: "Addition (ArkType)",
+    readOnlyHint: false, // Example showing a modifying tool
+    destructiveHint: true, // This would perform destructive operations
+    idempotentHint: true, // But operations can be repeated safely
+    openWorldHint: true, // Interacts with external systems
+  },
   execute: async (args) => {
     // args is typed as { a: number, b: number } based on AddParamsArkType.infer
     console.log(`[ArkType] Adding ${args.a} and ${args.b}`);
@@ -55,6 +67,11 @@ server.addTool({
   name: "add-valibot",
   description: "Add two numbers (using Valibot schema)",
   parameters: AddParamsValibot,
+  annotations: {
+    title: "Addition (Valibot)",
+    readOnlyHint: true,
+    openWorldHint: false,
+  },
   execute: async (args) => {
     console.log(`[Valibot] Adding ${args.a} and ${args.b}`);
     return String(args.a + args.b);

@@ -432,7 +432,6 @@ server.addTool({
 });
 ```
 
-
 #### Logging
 
 Tools can log messages to the client using the `log` object in the context object:
@@ -516,6 +515,40 @@ server.addTool({
   },
 });
 ```
+
+#### Tool Annotations
+
+As of the MCP Specification (2025-03-26), tools can include annotations that provide richer context and control by adding metadata about a tool's behavior:
+
+```typescript
+server.addTool({
+  name: "fetch-content",
+  description: "Fetch content from a URL",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  annotations: {
+    title: "Web Content Fetcher", // Human-readable title for UI display
+    readOnlyHint: true, // Tool doesn't modify its environment
+    openWorldHint: true, // Tool interacts with external entities
+  },
+  execute: async (args) => {
+    return await fetchWebpageContent(args.url);
+  },
+});
+```
+
+The available annotations are:
+
+| Annotation        | Type    | Default | Description                                                                                                                          |
+| :---------------- | :------ | :------ | :----------------------------------------------------------------------------------------------------------------------------------- |
+| `title`           | string  | -       | A human-readable title for the tool, useful for UI display                                                                           |
+| `readOnlyHint`    | boolean | `false` | If true, indicates the tool does not modify its environment                                                                          |
+| `destructiveHint` | boolean | `true`  | If true, the tool may perform destructive updates (only meaningful when `readOnlyHint` is false)                                     |
+| `idempotentHint`  | boolean | `false` | If true, calling the tool repeatedly with the same arguments has no additional effect (only meaningful when `readOnlyHint` is false) |
+| `openWorldHint`   | boolean | `true`  | If true, the tool may interact with an "open world" of external entities                                                             |
+
+These annotations help clients and LLMs better understand how to use the tools and what to expect when calling them.
 
 ### Resources
 
@@ -712,10 +745,10 @@ import { AuthError } from "fastmcp";
 const server = new FastMCP({
   name: "My Server",
   version: "1.0.0",
-  authenticate: ({request}) => {
+  authenticate: ({ request }) => {
     const apiKey = request.headers["x-api-key"];
 
-    if (apiKey !== '123') {
+    if (apiKey !== "123") {
       throw new Response(null, {
         status: 401,
         statusText: "Unauthorized",
@@ -725,7 +758,7 @@ const server = new FastMCP({
     // Whatever you return here will be accessible in the `context.session` object.
     return {
       id: 1,
-    }
+    };
   },
 });
 ```
@@ -749,7 +782,8 @@ You can provide instructions to the server using the `instructions` option:
 const server = new FastMCP({
   name: "My Server",
   version: "1.0.0",
-  instructions: "Instructions describing how to use the server and its features.\n\nThis can be used by clients to improve the LLM's understanding of available tools, resources, etc. It can be thought of like a \"hint\" to the model. For example, this information MAY be added to the system prompt.",
+  instructions:
+    'Instructions describing how to use the server and its features.\n\nThis can be used by clients to improve the LLM\'s understanding of available tools, resources, etc. It can be thought of like a "hint" to the model. For example, this information MAY be added to the system prompt.',
 });
 ```
 
@@ -882,10 +916,7 @@ Follow the guide https://modelcontextprotocol.io/quickstart/user and add the fol
   "mcpServers": {
     "my-mcp-server": {
       "command": "npx",
-      "args": [
-        "tsx",
-        "/PATH/TO/YOUR_PROJECT/src/index.ts"
-      ],
+      "args": ["tsx", "/PATH/TO/YOUR_PROJECT/src/index.ts"],
       "env": {
         "YOUR_ENV_VAR": "value"
       }

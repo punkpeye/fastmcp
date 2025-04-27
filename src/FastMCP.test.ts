@@ -14,7 +14,7 @@ import {
   PingRequestSchema,
   Root,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createEventSource, EventSourceClient } from 'eventsource-client';
+import { createEventSource, EventSourceClient } from "eventsource-client";
 
 const runWithTestServer = async ({
   run,
@@ -68,7 +68,6 @@ const runWithTestServer = async ({
 
     const session = await new Promise<FastMCPSession>((resolve) => {
       server.on("connect", (event) => {
-        
         resolve(event.session);
       });
 
@@ -1310,7 +1309,9 @@ test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema"
         expect(error.code).toBe(ErrorCode.InvalidParams);
 
         // @ts-expect-error - we know that error is an McpError
-        expect(error.message).toBe("MCP error -32602: MCP error -32602: Invalid add parameters");
+        expect(error.message).toBe(
+          "MCP error -32602: MCP error -32602: Invalid add parameters",
+        );
       }
     },
   });
@@ -1354,7 +1355,9 @@ test("server remains usable after InvalidParams error", async () => {
         expect(error.code).toBe(ErrorCode.InvalidParams);
 
         // @ts-expect-error - we know that error is an McpError
-        expect(error.message).toBe("MCP error -32602: MCP error -32602: Invalid add parameters");
+        expect(error.message).toBe(
+          "MCP error -32602: MCP error -32602: Invalid add parameters",
+        );
       }
 
       expect(
@@ -1515,10 +1518,10 @@ test("closing event source does not produce error", async () => {
   const eventSource = await new Promise<EventSourceClient>((onMessage) => {
     const eventSource = createEventSource({
       onConnect: () => {
-        console.info('connected');
+        console.info("connected");
       },
       onDisconnect: () => {
-        console.info('disconnected');
+        console.info("disconnected");
       },
       onMessage: () => {
         onMessage(eventSource);
@@ -1527,7 +1530,7 @@ test("closing event source does not produce error", async () => {
     });
   });
 
-  expect(eventSource.readyState).toBe('open');
+  expect(eventSource.readyState).toBe("open");
 
   eventSource.close();
 
@@ -1547,7 +1550,7 @@ test("provides auth to tools", async () => {
     };
   });
 
-  const server = new FastMCP<{id: number}>({
+  const server = new FastMCP<{ id: number }>({
     name: "Test",
     version: "1.0.0",
     authenticate,
@@ -1604,7 +1607,10 @@ test("provides auth to tools", async () => {
 
   await client.connect(transport);
 
-  expect(authenticate, "authenticate should have been called").toHaveBeenCalledTimes(1);
+  expect(
+    authenticate,
+    "authenticate should have been called",
+  ).toHaveBeenCalledTimes(1);
 
   expect(
     await client.callTool({
@@ -1620,25 +1626,28 @@ test("provides auth to tools", async () => {
 
   expect(execute, "execute should have been called").toHaveBeenCalledTimes(1);
 
-  expect(execute).toHaveBeenCalledWith({
-    a: 1,
-    b: 2,
-  }, {
-    log: {
-      debug: expect.any(Function),
-      error: expect.any(Function),
-      info: expect.any(Function),
-      warn: expect.any(Function),
+  expect(execute).toHaveBeenCalledWith(
+    {
+      a: 1,
+      b: 2,
     },
-    reportProgress: expect.any(Function),
-    session: { id: 1 },
-  });
+    {
+      log: {
+        debug: expect.any(Function),
+        error: expect.any(Function),
+        info: expect.any(Function),
+        warn: expect.any(Function),
+      },
+      reportProgress: expect.any(Function),
+      session: { id: 1 },
+    },
+  );
 });
 
 test("blocks unauthorized requests", async () => {
   const port = await getRandomPort();
 
-  const server = new FastMCP<{id: number}>({
+  const server = new FastMCP<{ id: number }>({
     name: "Test",
     version: "1.0.0",
     authenticate: async () => {
