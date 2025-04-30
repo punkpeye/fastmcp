@@ -1015,7 +1015,7 @@ export class FastMCPSession<
         if (parsed.issues) {
           throw new McpError(
             ErrorCode.InvalidParams,
-            `Invalid ${request.params.name} parameters`,
+            `Invalid ${request.params.name} parameters: ${JSON.stringify(parsed.issues)}`,
           );
         }
 
