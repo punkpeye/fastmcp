@@ -592,7 +592,7 @@ export class FastMCPSession<
       console.warn("[FastMCP warning] could not infer client capabilities");
     }
 
-    if (this.#clientCapabilities?.roots?.listChanged && this.#capabilities.roots) {
+    if (this.#clientCapabilities?.roots?.listChanged && this.#capabilities.roots !== null) {
       try {
         const roots = await this.#server.listRoots();
         this.#roots = roots.roots;
