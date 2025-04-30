@@ -859,6 +859,47 @@ test("session knows about roots", async () => {
   });
 });
 
+test("doesn't attempt to list roots when server explicitly disables roots capability", async () => {
+  await runWithTestServer({
+    server: {
+      capabilities: {
+        roots: null  
+      }
+    },
+    client: async () => {
+      const client = new Client(
+        {
+          name: "example-client",
+          version: "1.0.0",
+        },
+        {
+          capabilities: {
+            roots: {
+              listChanged: true,
+            },
+          },
+        }
+      );
+      
+      client.setRequestHandler(ListRootsRequestSchema, () => {
+        return {
+          roots: [
+            {
+              name: "Frontend Repository",
+              uri: "file:///home/user/projects/frontend",
+            },
+          ],
+        };
+      });
+      
+      return client;
+    },
+    run: async ({ session }) => {
+      expect(session.roots).toEqual([]);
+    },
+  });
+});
+
 test("session listens to roots changes", async () => {
   const clientRoots: Root[] = [
     {
