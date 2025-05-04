@@ -15,7 +15,14 @@ import { setTimeout as delay } from "timers/promises";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
 
-import { FastMCP, FastMCPSession, imageContent, UserError } from "./FastMCP.js";
+import {
+  FastMCP,
+  FastMCPSession,
+  imageContent,
+  UserError,
+  type TextContent,
+  type ContentResult,
+} from "./FastMCP.js";
 
 const runWithTestServer = async ({
   client: createClient,
@@ -394,6 +401,60 @@ test("sets logging levels", async () => {
       await client.setLoggingLevel("info");
 
       expect(session.loggingLevel).toBe("info");
+    },
+  });
+});
+
+test("handles tool timeout", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const result = await client.callTool({
+        arguments: {
+          a: 1500,
+          b: 2,
+        },
+        name: "add",
+      });
+
+      expect(result.isError).toBe(true);
+
+      const result_typed = result as ContentResult;
+
+      expect(Array.isArray(result_typed.content)).toBe(true);
+      expect(result_typed.content.length).toBe(1);
+
+      const firstItem = result_typed.content[0] as TextContent;
+
+      expect(firstItem.type).toBe("text");
+      expect(firstItem.text).toBeDefined();
+      expect(firstItem.text).toContain("timed out");
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Add two numbers with potential timeout",
+        execute: async (args) => {
+          console.log(`Adding ${args.a} and ${args.b}`);
+
+          if (args.a > 1000 || args.b > 1000) {
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+          }
+
+          return String(args.a + args.b);
+        },
+        name: "add",
+        parameters: z.object({
+          a: z.number(),
+          b: z.number(),
+        }),
+        timeoutMs: 1000,
+      });
+
+      return server;
     },
   });
 });
