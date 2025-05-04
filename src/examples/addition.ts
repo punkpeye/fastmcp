@@ -49,13 +49,26 @@ server.addTool({
     title: "Addition (ArkType)",
   },
   description: "Add two numbers (using ArkType schema)",
-  execute: async (args) => {
+  execute: async (args, { log }) => {
     // args is typed as { a: number, b: number } based on AddParamsArkType.infer
     console.log(`[ArkType] Adding ${args.a} and ${args.b}`);
+
+    // Demonstrate long-running operation that might need a timeout
+    log.info("Starting calculation with potential delay...");
+
+    // Simulate a complex calculation process
+    if (args.a > 1000 || args.b > 1000) {
+      log.warn("Large numbers detected, operation might take longer");
+      // In a real implementation, this delay might be a slow operation
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+
     return String(args.a + args.b);
   },
   name: "add-arktype",
   parameters: AddParamsArkType,
+  // Will abort execution after 2s
+  timeoutMs: 2000,
 });
 
 // --- Valibot Example ---

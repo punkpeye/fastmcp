@@ -48,41 +48,66 @@ type FastMCPSessionEvents = {
   rootsChanged: (event: { roots: Root[] }) => void;
 };
 
-/**
- * Generates an image content object from a URL, file path, or buffer.
- */
 export const imageContent = async (
   input: { buffer: Buffer } | { path: string } | { url: string },
 ): Promise<ImageContent> => {
   let rawData: Buffer;
 
-  if ("url" in input) {
-    const response = await fetch(input.url);
+  try {
+    if ("url" in input) {
+      try {
+        const response = await fetch(input.url);
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch image from URL: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(
+            `Server responded with status: ${response.status} - ${response.statusText}`,
+          );
+        }
+
+        rawData = Buffer.from(await response.arrayBuffer());
+      } catch (error) {
+        throw new Error(
+          `Failed to fetch image from URL (${input.url}): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    } else if ("path" in input) {
+      try {
+        rawData = await readFile(input.path);
+      } catch (error) {
+        throw new Error(
+          `Failed to read image from path (${input.path}): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    } else if ("buffer" in input) {
+      rawData = input.buffer;
+    } else {
+      throw new Error(
+        "Invalid input: Provide a valid 'url', 'path', or 'buffer'",
+      );
     }
 
-    rawData = Buffer.from(await response.arrayBuffer());
-  } else if ("path" in input) {
-    rawData = await readFile(input.path);
-  } else if ("buffer" in input) {
-    rawData = input.buffer;
-  } else {
-    throw new Error(
-      "Invalid input: Provide a valid 'url', 'path', or 'buffer'",
-    );
+    const mimeType = await fileTypeFromBuffer(rawData);
+
+    if (!mimeType || !mimeType.mime.startsWith("image/")) {
+      console.warn(
+        `Warning: Content may not be a valid image. Detected MIME: ${mimeType?.mime || "unknown"}`,
+      );
+    }
+
+    const base64Data = rawData.toString("base64");
+
+    return {
+      data: base64Data,
+      mimeType: mimeType?.mime ?? "image/png",
+      type: "image",
+    } as const;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error;
+    } else {
+      throw new Error(`Unexpected error processing image: ${String(error)}`);
+    }
   }
-
-  const mimeType = await fileTypeFromBuffer(rawData);
-
-  const base64Data = rawData.toString("base64");
-
-  return {
-    data: base64Data,
-    mimeType: mimeType?.mime ?? "image/png",
-    type: "image",
-  } as const;
 };
 
 export const audioContent = async (
@@ -90,33 +115,61 @@ export const audioContent = async (
 ): Promise<AudioContent> => {
   let rawData: Buffer;
 
-  if ("url" in input) {
-    const response = await fetch(input.url);
+  try {
+    if ("url" in input) {
+      try {
+        const response = await fetch(input.url);
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch audio from URL: ${response.statusText}`);
+        if (!response.ok) {
+          throw new Error(
+            `Server responded with status: ${response.status} - ${response.statusText}`,
+          );
+        }
+
+        rawData = Buffer.from(await response.arrayBuffer());
+      } catch (error) {
+        throw new Error(
+          `Failed to fetch audio from URL (${input.url}): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    } else if ("path" in input) {
+      try {
+        rawData = await readFile(input.path);
+      } catch (error) {
+        throw new Error(
+          `Failed to read audio from path (${input.path}): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    } else if ("buffer" in input) {
+      rawData = input.buffer;
+    } else {
+      throw new Error(
+        "Invalid input: Provide a valid 'url', 'path', or 'buffer'",
+      );
     }
 
-    rawData = Buffer.from(await response.arrayBuffer());
-  } else if ("path" in input) {
-    rawData = await readFile(input.path);
-  } else if ("buffer" in input) {
-    rawData = input.buffer;
-  } else {
-    throw new Error(
-      "Invalid input: Provide a valid 'url', 'path', or 'buffer'",
-    );
+    const mimeType = await fileTypeFromBuffer(rawData);
+
+    if (!mimeType || !mimeType.mime.startsWith("audio/")) {
+      console.warn(
+        `Warning: Content may not be a valid audio file. Detected MIME: ${mimeType?.mime || "unknown"}`,
+      );
+    }
+
+    const base64Data = rawData.toString("base64");
+
+    return {
+      data: base64Data,
+      mimeType: mimeType?.mime ?? "audio/mpeg",
+      type: "audio",
+    } as const;
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error;
+    } else {
+      throw new Error(`Unexpected error processing audio: ${String(error)}`);
+    }
   }
-
-  const mimeType = await fileTypeFromBuffer(rawData);
-
-  const base64Data = rawData.toString("base64");
-
-  return {
-    data: base64Data,
-    mimeType: mimeType?.mime ?? "audio/mpeg",
-    type: "audio",
-  } as const;
 };
 
 type Context<T extends FastMCPSessionAuth> = {
@@ -394,6 +447,7 @@ type Tool<
   >;
   name: string;
   parameters?: Params;
+  timeoutMs?: number;
 };
 
 /**
@@ -1076,11 +1130,28 @@ export class FastMCPSession<
           },
         };
 
-        const maybeStringResult = await tool.execute(args, {
+        // Create a promise for tool execution
+        const executeToolPromise = tool.execute(args, {
           log,
           reportProgress,
           session: this.#auth,
         });
+
+        // Handle timeout if specified
+        const maybeStringResult = await (tool.timeoutMs
+          ? Promise.race([
+              executeToolPromise,
+              new Promise<never>((_, reject) => {
+                setTimeout(() => {
+                  reject(
+                    new UserError(
+                      `Tool execution timed out after ${tool.timeoutMs}ms`,
+                    ),
+                  );
+                }, tool.timeoutMs);
+              }),
+            ])
+          : executeToolPromise);
 
         if (typeof maybeStringResult === "string") {
           result = ContentResultZodSchema.parse({
