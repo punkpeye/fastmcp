@@ -118,6 +118,26 @@ server.addPrompt({
   name: "git-commit",
 });
 
-server.start({
-  transportType: "stdio",
-});
+// Start with HTTP Stream support
+console.log("[FastMCP Example] Starting HTTP Stream server on port 5000...");
+server
+  .start({
+    httpStream: {
+      endpoint: "/stream",
+      port: 5000,
+    },
+    transportType: "httpStream",
+  })
+  .then(() => {
+    console.log("[FastMCP Example] Server started successfully");
+
+    // Keep the process alive
+    process.on("SIGINT", async () => {
+      console.log("[FastMCP Example] Shutting down server...");
+      await server.stop();
+      process.exit(0);
+    });
+  })
+  .catch((err) => {
+    console.error("[FastMCP Example] Failed to start server:", err);
+  });

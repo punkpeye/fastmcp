@@ -14,6 +14,9 @@ importers:
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
+      eventsource:
+        specifier: ^3.0.6
+        version: 3.0.6
       execa:
         specifier: ^9.5.2
         version: 9.5.2
@@ -24,8 +27,8 @@ importers:
         specifier: ^7.1.0
         version: 7.1.0
       mcp-proxy:
-        specifier: ^2.12.2
-        version: 2.12.2
+        specifier: ^2.13.0
+        version: 2.13.1
       strict-event-emitter-types:
         specifier: ^2.0.0
         version: 2.0.0
@@ -1924,8 +1927,8 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
-  mcp-proxy@2.12.2:
-    resolution: {integrity: sha512-SkQoKjnprsBUwXcP7cflJnDYEHBK0VnmeMkur5epct3KCtjxGC3rJDI/m41VfW9rk6bbHvt/bPTa1udz2eegpQ==}
+  mcp-proxy@2.13.1:
+    resolution: {integrity: sha512-8e7aknoD9Q3+3OJ+2cpnBZ9T78VUSiwKjCRUio98y+kCsXFpbyAHQx95ZCffk+/Bhk5nTP0JuWX3edbj4zoHAQ==}
     hasBin: true
 
   media-typer@1.1.0:
@@ -4684,7 +4687,7 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
-  mcp-proxy@2.12.2:
+  mcp-proxy@2.13.1:
     dependencies:
       '@modelcontextprotocol/sdk': 1.10.2
       eventsource: 3.0.6

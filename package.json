@@ -23,10 +23,11 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.2",
     "@standard-schema/spec": "^1.0.0",
+    "eventsource": "^3.0.6",
     "execa": "^9.5.2",
     "file-type": "^20.4.1",
     "fuse.js": "^7.1.0",
-    "mcp-proxy": "^2.12.2",
+    "mcp-proxy": "^2.13.0",
     "strict-event-emitter-types": "^2.0.0",
     "undici": "^7.8.0",
     "uri-templates": "^0.2.0",
