@@ -16,6 +16,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Logging](#logging)
 - [Error handling](#errors)
 - [SSE](#sse)
+- [HTTP Streaming](#http-streaming)
 - CORS (enabled by default)
 - [Progress notifications](#progress)
 - [Typed server events](#typed-server-events)
@@ -80,11 +81,15 @@ npx fastmcp dev src/examples/addition.ts
 npx fastmcp inspect src/examples/addition.ts
 ```
 
-### SSE
+### Remote Server Options
 
-[Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) (SSE) provide a mechanism for servers to send real-time updates to clients over an HTTPS connection. In the context of MCP, SSE is primarily used to enable remote MCP communication, allowing an MCP hosted on a remote machine to be accessed and relay updates over the network.
+FastMCP supports multiple transport options for remote communication, allowing an MCP hosted on a remote machine to be accessed over the network.
 
-You can also run the server with SSE support:
+#### SSE
+
+[Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) (SSE) provide a mechanism for servers to send real-time updates to clients over an HTTPS connection.
+
+You can run the server with SSE support:
 
 ```ts
 server.start({
@@ -98,7 +103,27 @@ server.start({
 
 This will start the server and listen for SSE connections on `http://localhost:8080/sse`.
 
-You can then use `SSEClientTransport` to connect to the server:
+#### HTTP Streaming
+
+[HTTP streaming](https://www.cloudflare.com/learning/video/what-is-http-live-streaming/) provides a more efficient alternative to SSE in environments that support it, with potentially better performance for larger payloads.
+
+You can run the server with HTTP streaming support:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    endpoint: "/stream",
+    port: 8080,
+  },
+});
+```
+
+This will start the server and listen for HTTP streaming connections on `http://localhost:8080/stream`.
+
+You can connect to these servers using the appropriate client transport.
+
+For SSE connections:
 
 ```ts
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -114,6 +139,26 @@ const client = new Client(
 );
 
 const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
+
+await client.connect(transport);
+```
+
+For HTTP streaming connections:
+
+```ts
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const client = new Client(
+  {
+    name: "example-client",
+    version: "1.0.0",
+  },
+  {
+    capabilities: {},
+  },
+);
+
+const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:8080/stream`));
 
 await client.connect(transport);
 ```
