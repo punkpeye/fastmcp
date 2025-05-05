@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   CreateMessageRequestSchema,
   ErrorCode,
@@ -1353,7 +1354,7 @@ test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema"
 
         // @ts-expect-error - we know that error is an McpError
         expect(error.message).toBe(
-          "MCP error -32602: MCP error -32602: Invalid add parameters: [{\"code\":\"invalid_type\",\"expected\":\"number\",\"received\":\"string\",\"path\":[\"b\"],\"message\":\"Expected number, received string\"}]",
+          'MCP error -32602: MCP error -32602: Invalid add parameters: [{"code":"invalid_type","expected":"number","received":"string","path":["b"],"message":"Expected number, received string"}]',
         );
       }
     },
@@ -1399,7 +1400,7 @@ test("server remains usable after InvalidParams error", async () => {
 
         // @ts-expect-error - we know that error is an McpError
         expect(error.message).toBe(
-          "MCP error -32602: MCP error -32602: Invalid add parameters: [{\"code\":\"invalid_type\",\"expected\":\"number\",\"received\":\"string\",\"path\":[\"b\"],\"message\":\"Expected number, received string\"}]",
+          'MCP error -32602: MCP error -32602: Invalid add parameters: [{"code":"invalid_type","expected":"number","received":"string","path":["b"],"message":"Expected number, received string"}]',
         );
       }
 
@@ -1746,4 +1747,86 @@ test("blocks unauthorized requests", async () => {
   expect(async () => {
     await client.connect(transport);
   }).rejects.toThrow("SSE error: Non-200 status code (401)");
+});
+
+test("supports HTTP Stream transport", async () => {
+  const port = await getRandomPort();
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Echoes the input",
+    execute: async (args) => {
+      return `Echo: ${args.input}`;
+    },
+    name: "echo",
+    parameters: z.object({
+      input: z.string(),
+    }),
+  });
+
+  const onConnect = vi.fn();
+  const onDisconnect = vi.fn();
+
+  server.on("connect", onConnect);
+  server.on("disconnect", onDisconnect);
+
+  await server.start({
+    httpStream: {
+      endpoint: "/stream",
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://localhost:${port}/stream`),
+  );
+
+  await client.connect(transport);
+  await delay(100);
+
+  expect(onConnect).toHaveBeenCalledTimes(1);
+  expect(onDisconnect).toHaveBeenCalledTimes(0);
+  expect(server.sessions).toEqual([expect.any(FastMCPSession)]);
+
+  const listResult = await client.listResources();
+
+  expect(listResult).toEqual({ resources: [] });
+
+  const toolsResult = await client.listTools();
+
+  expect(toolsResult.tools).toHaveLength(1);
+  expect(toolsResult.tools[0].name).toBe("echo");
+
+  const callResult = await client.callTool({
+    name: "echo",
+    parameters: { input: "hello from HTTP Stream" },
+  });
+  expect(callResult.result).toBe("Echo: hello from HTTP Stream");
+
+  /**
+   * Terminate the session manually—
+   * since `client.close()` doesn't handle it
+   */
+  await transport.terminateSession();
+  await client.close();
+  await delay(100);
+
+  expect(onConnect).toHaveBeenCalledTimes(1);
+  expect(onDisconnect).toHaveBeenCalledTimes(1);
+
+  await server.stop();
 });
