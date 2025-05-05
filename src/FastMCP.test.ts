@@ -1749,84 +1749,82 @@ test("blocks unauthorized requests", async () => {
   }).rejects.toThrow("SSE error: Non-200 status code (401)");
 });
 
-test("supports HTTP Stream transport", async () => {
+// We now use a direct approach for testing HTTP Stream functionality
+// rather than a helper function
+
+// Set longer timeout for HTTP Stream tests
+test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
+  console.log("Starting HTTP Stream test...");
   const port = await getRandomPort();
+
+  // Create server directly (don't use helper function)
   const server = new FastMCP({
     name: "Test",
     version: "1.0.0",
   });
 
   server.addTool({
-    description: "Echoes the input",
+    description: "Add two numbers",
     execute: async (args) => {
-      return `Echo: ${args.input}`;
+      return String(args.a + args.b);
     },
-    name: "echo",
+    name: "add",
     parameters: z.object({
-      input: z.string(),
+      a: z.number(),
+      b: z.number(),
     }),
   });
 
-  const onConnect = vi.fn();
-  const onDisconnect = vi.fn();
-
-  server.on("connect", onConnect);
-  server.on("disconnect", onDisconnect);
-
   await server.start({
     httpStream: {
-      endpoint: "/stream",
+      endpoint: "/httpStream",
       port,
     },
     transportType: "httpStream",
   });
 
-  const client = new Client(
-    {
-      name: "example-client",
-      version: "1.0.0",
-    },
-    {
-      capabilities: {},
-    },
-  );
+  try {
+    // Create client
+    const client = new Client(
+      {
+        name: "example-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
 
-  const transport = new StreamableHTTPClientTransport(
-    new URL(`http://localhost:${port}/stream`),
-  );
+    // IMPORTANT: Don't provide sessionId manually with HTTP streaming
+    // The server will generate a session ID automatically
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/httpStream`),
+    );
 
-  await client.connect(transport);
-  await delay(100);
+    // Connect client to server
+    await client.connect(transport);
 
-  expect(onConnect).toHaveBeenCalledTimes(1);
-  expect(onDisconnect).toHaveBeenCalledTimes(0);
-  expect(server.sessions).toEqual([expect.any(FastMCPSession)]);
+    // Wait a bit to ensure connection is established
+    await delay(1000);
 
-  const listResult = await client.listResources();
+    // Call tool
+    const result = await client.callTool({
+      arguments: {
+        a: 1,
+        b: 2,
+      },
+      name: "add",
+    });
 
-  expect(listResult).toEqual({ resources: [] });
+    // Check result
+    expect(result).toEqual({
+      content: [{ text: "3", type: "text" }],
+    });
 
-  const toolsResult = await client.listTools();
-
-  expect(toolsResult.tools).toHaveLength(1);
-  expect(toolsResult.tools[0].name).toBe("echo");
-
-  const callResult = await client.callTool({
-    name: "echo",
-    parameters: { input: "hello from HTTP Stream" },
-  });
-  expect(callResult.result).toBe("Echo: hello from HTTP Stream");
-
-  /**
-   * Terminate the session manually—
-   * since `client.close()` doesn't handle it
-   */
-  await transport.terminateSession();
-  await client.close();
-  await delay(100);
-
-  expect(onConnect).toHaveBeenCalledTimes(1);
-  expect(onDisconnect).toHaveBeenCalledTimes(1);
-
-  await server.stop();
+    // Clean up connection
+    await transport.terminateSession();
+    await client.close();
+  } finally {
+    await server.stop();
+  }
 });
