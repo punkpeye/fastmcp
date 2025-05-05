@@ -14,9 +14,6 @@ importers:
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
-      eventsource:
-        specifier: ^3.0.6
-        version: 3.0.6
       execa:
         specifier: ^9.5.2
         version: 9.5.2
@@ -27,7 +24,7 @@ importers:
         specifier: ^7.1.0
         version: 7.1.0
       mcp-proxy:
-        specifier: ^2.13.0
+        specifier: ^2.13.1
         version: 2.13.1
       strict-event-emitter-types:
         specifier: ^2.0.0

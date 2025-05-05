@@ -26,170 +26,13 @@ import { fileTypeFromBuffer } from "file-type";
 import { readFile } from "fs/promises";
 import Fuse from "fuse.js";
 import http from "http";
-import { startSSEServer } from "mcp-proxy";
+import { startHTTPStreamServer, startSSEServer } from "mcp-proxy";
 import { StrictEventEmitter } from "strict-event-emitter-types";
 import { setTimeout as delay } from "timers/promises";
 import { fetch } from "undici";
 import parseURITemplate from "uri-templates";
 import { toJsonSchema } from "xsschema";
 import { z } from "zod";
-
-type ServerLike = {
-  close: Server["close"];
-  connect: Server["connect"];
-};
-
-// Adapted from the mcp-proxy/src/startHTTPStreamServer.ts implementation
-export const startHTTPStreamServer = async <T extends ServerLike>({
-  createServer,
-  endpoint,
-  onClose,
-  onConnect,
-  onUnhandledRequest,
-  port,
-}: {
-  createServer: (request: http.IncomingMessage) => Promise<T>;
-  endpoint: string;
-  onClose?: (server: T) => void;
-  onConnect?: (server: T) => void;
-  onUnhandledRequest?: (
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ) => Promise<void>;
-  port: number;
-}): Promise<SSEServer> => {
-  const activeSessions = new Map<
-    string,
-    {
-      closeHandler?: () => void;
-      server: T;
-    }
-  >();
-
-  const httpServer = http.createServer(async (req, res) => {
-    if (req.headers.origin) {
-      try {
-        const origin = new URL(req.headers.origin);
-        res.setHeader("Access-Control-Allow-Origin", origin.origin);
-        res.setHeader("Access-Control-Allow-Credentials", "true");
-        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", "*");
-      } catch (error) {
-        console.error("Error parsing origin:", error);
-      }
-    }
-
-    // Handle preflight requests
-    if (req.method === "OPTIONS") {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-
-    if (req.method === "GET" && req.url === `/ping`) {
-      res.writeHead(200).end("pong");
-      return;
-    }
-
-    if (req.url === endpoint) {
-      try {
-        const id = `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const server = await createServer(req);
-
-        res.setHeader("Content-Type", "application/json");
-        res.setHeader("Transfer-Encoding", "chunked");
-        res.setHeader("Connection", "keep-alive");
-        res.writeHead(200);
-
-        // Store the session
-        activeSessions.set(id, { server });
-
-        // Notify about the connection
-        if (onConnect) {
-          onConnect(server);
-        }
-
-        res.write('{"status":"connected"}');
-
-        req.on("close", () => {
-          activeSessions.delete(id);
-          if (onClose) {
-            onClose(server);
-          }
-        });
-
-        // Keep the connection alive with a heartbeat ping—
-        const heartbeat = setInterval(() => {
-          if (res.writableEnded) {
-            clearInterval(heartbeat);
-            return;
-          }
-          res.write('{"heartbeat":true}');
-        }, 5000); // Every 5s
-
-        res.on("close", () => {
-          clearInterval(heartbeat);
-          activeSessions.delete(id);
-          if (onClose) {
-            onClose(server);
-          }
-        });
-
-        // Keep connection open (until client disconnects)
-        return;
-      } catch (error) {
-        console.error("Error creating server:", error);
-        res
-          .writeHead(500)
-          .end(JSON.stringify({ error: "Internal Server Error" }));
-        return;
-      }
-    }
-
-    if (onUnhandledRequest) {
-      await onUnhandledRequest(req, res);
-    } else {
-      res.writeHead(404).end("NOT FOUND");
-    }
-  });
-
-  await new Promise<void>((resolve) => {
-    // Listen on all interfaces (0.0.0.0)
-    httpServer.listen(port, "0.0.0.0", () => {
-      // To make it accessible
-      console.log(
-        `[FastMCP info] HTTP Stream server is running on http://0.0.0.0:${port}${endpoint}`,
-      );
-      resolve();
-    });
-  });
-
-  return {
-    close: async () => {
-      for (const { closeHandler, server } of activeSessions.values()) {
-        if (closeHandler) {
-          closeHandler();
-        }
-
-        if (onClose) {
-          onClose(server);
-        }
-      }
-
-      activeSessions.clear();
-
-      return new Promise((resolve, reject) => {
-        httpServer.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve();
-        });
-      });
-    },
-  };
-};
 
 export type SSEServer = {
   close: () => Promise<void>;
@@ -1490,7 +1333,6 @@ export class FastMCP<
 
           return new FastMCPSession<T>({
             auth,
-            instructions: this.#options.instructions,
             name: this.#options.name,
             prompts: this.#prompts,
             resources: this.#resources,
@@ -1530,7 +1372,6 @@ export class FastMCP<
     if (this.#sseServer) {
       await this.#sseServer.close();
     }
-
     if (this.#httpStreamServer) {
       await this.#httpStreamServer.close();
     }
