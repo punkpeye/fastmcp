@@ -430,6 +430,24 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
   authenticate?: Authenticate<T>;
   instructions?: string;
   name: string;
+  ping?: {
+    /**
+     * Whether ping should be enabled by default.
+     * - true for SSE or HTTP Stream
+     * - false for stdio
+     */
+    enabled?: boolean;
+    /**
+     * Interval
+     * @default 5000 (5s)
+     */
+    intervalMs?: number;
+    /**
+     * Logging level for ping-related messages.
+     * @default 'debug'
+     */
+    logLevel?: LoggingLevel;
+  };
   version: `${number}.${number}.${number}`;
 };
 
@@ -521,6 +539,7 @@ export class FastMCPSession<
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
   #loggingLevel: LoggingLevel = "info";
+  #pingConfig?: ServerOptions<T>["ping"];
   #pingInterval: null | ReturnType<typeof setInterval> = null;
 
   #prompts: Prompt[] = [];
@@ -537,6 +556,7 @@ export class FastMCPSession<
     auth,
     instructions,
     name,
+    ping,
     prompts,
     resources,
     resourcesTemplates,
@@ -546,6 +566,7 @@ export class FastMCPSession<
     auth?: T;
     instructions?: string;
     name: string;
+    ping?: ServerOptions<T>["ping"];
     prompts: Prompt[];
     resources: Resource[];
     resourcesTemplates: InputResourceTemplate[];
@@ -555,6 +576,7 @@ export class FastMCPSession<
     super();
 
     this.#auth = auth;
+    this.#pingConfig = ping;
 
     if (tools.length) {
       this.#capabilities.tools = {};
@@ -658,16 +680,31 @@ export class FastMCPSession<
     }
 
     if (this.#clientCapabilities) {
-      this.#pingInterval = setInterval(async () => {
-        try {
-          await this.#server.ping();
-        } catch {
-          // The reason we are not emitting an error here is because some clients
-          // seem to not respond to the ping request, and we don't want to crash the server,
-          // e.g., https://github.com/punkpeye/fastmcp/issues/38.
-          console.warn("[FastMCP warning] server is not responding to ping");
-        }
-      }, 1000);
+      const pingConfig = this.#getPingConfig(transport);
+
+      if (pingConfig.enabled) {
+        this.#pingInterval = setInterval(async () => {
+          try {
+            await this.#server.ping();
+          } catch {
+            // The reason we are not emitting an error here is because some clients
+            // seem to not respond to the ping request, and we don't want to crash the server,
+            // e.g., https://github.com/punkpeye/fastmcp/issues/38.
+            const logLevel = pingConfig.logLevel;
+            if (logLevel === "debug") {
+              console.debug("[FastMCP debug] server ping failed");
+            } else if (logLevel === "warning") {
+              console.warn(
+                "[FastMCP warning] server is not responding to ping",
+              );
+            } else if (logLevel === "error") {
+              console.error("[FastMCP error] server is not responding to ping");
+            } else {
+              console.info("[FastMCP info] server ping failed");
+            }
+          }
+        }, pingConfig.intervalMs);
+      }
     }
   }
 
@@ -675,6 +712,30 @@ export class FastMCPSession<
     message: z.infer<typeof CreateMessageRequestSchema>["params"],
   ): Promise<SamplingResponse> {
     return this.#server.createMessage(message);
+  }
+
+  #getPingConfig(transport: Transport): {
+    enabled: boolean;
+    intervalMs: number;
+    logLevel: LoggingLevel;
+  } {
+    const pingConfig = this.#pingConfig || {};
+
+    let defaultEnabled = false;
+
+    if ("type" in transport) {
+      // Enable by default for SSE and HTTP streaming
+      if (transport.type === "sse" || transport.type === "httpStream") {
+        defaultEnabled = true;
+      }
+    }
+
+    return {
+      enabled:
+        pingConfig.enabled !== undefined ? pingConfig.enabled : defaultEnabled,
+      intervalMs: pingConfig.intervalMs || 5000,
+      logLevel: pingConfig.logLevel || "debug",
+    };
   }
 
   private addPrompt(inputPrompt: InputPrompt) {
@@ -1270,6 +1331,7 @@ export class FastMCP<
       const session = new FastMCPSession<T>({
         instructions: this.#options.instructions,
         name: this.#options.name,
+        ping: this.#options.ping,
         prompts: this.#prompts,
         resources: this.#resources,
         resourcesTemplates: this.#resourcesTemplates,
@@ -1296,6 +1358,7 @@ export class FastMCP<
           return new FastMCPSession<T>({
             auth,
             name: this.#options.name,
+            ping: this.#options.ping,
             prompts: this.#prompts,
             resources: this.#resources,
             resourcesTemplates: this.#resourcesTemplates,
@@ -1334,6 +1397,7 @@ export class FastMCP<
           return new FastMCPSession<T>({
             auth,
             name: this.#options.name,
+            ping: this.#options.ping,
             prompts: this.#prompts,
             resources: this.#resources,
             resourcesTemplates: this.#resourcesTemplates,

@@ -1,10 +1,19 @@
 import { type } from "arktype";
 import * as v from "valibot";
 import { z } from "zod";
+
 import { FastMCP } from "../FastMCP.js";
 
 const server = new FastMCP({
   name: "Addition",
+  ping: {
+    // enabled: undefined,
+    // Automatically enabled/disabled based on transport type
+    // Using a longer interval to reduce log noise
+    intervalMs: 10000, // default is 5000ms
+    // Reduce log verbosity
+    logLevel: "debug", // default
+  },
   version: "1.0.0",
 });
 
@@ -156,9 +165,19 @@ if (transportType === "httpStream") {
   
   await client.connect(transport);
   `);
-} else {
-  // Default to stdio transport
+} else if (process.argv.includes("--explicit-ping-config")) {
   server.start({
     transportType: "stdio",
   });
+
+  console.log(
+    "Started stdio transport with explicit ping configuration from server options",
+  );
+} else {
+  // Disable by default for:
+  server.start({
+    transportType: "stdio",
+  });
+
+  console.log("Started stdio transport with ping disabled by default");
 }
