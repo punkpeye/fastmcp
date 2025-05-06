@@ -790,7 +790,7 @@ import { AuthError } from "fastmcp";
 const server = new FastMCP({
   name: "My Server",
   version: "1.0.0",
-  authenticate: ({ request }) => {
+  authenticate: (request) => {
     const apiKey = request.headers["x-api-key"];
 
     if (apiKey !== "123") {
