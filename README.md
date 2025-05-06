@@ -22,7 +22,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Typed server events](#typed-server-events)
 - [Prompt argument auto-completion](#prompt-argument-auto-completion)
 - [Sampling](#requestsampling)
-- Automated SSE pings
+- [Configurable ping behavior](#configurable-ping-behavior)
 - Roots
 - CLI for [testing](#test-with-mcp-cli) and [debugging](#inspect-with-mcp-inspector)
 
@@ -354,7 +354,32 @@ server.addTool({
 });
 ```
 
-#### Returning an audio
+#### Configurable Ping Behavior
+
+FastMCP includes a configurable ping mechanism to maintain connection health. The ping behavior can be customized through server options:
+
+```ts
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  ping: {
+    // Explicitly enable or disable pings (defaults vary by transport)
+    enabled: true,
+    // Configure ping interval in milliseconds (default: 5000ms)
+    intervalMs: 10000,
+    // Set log level for ping-related messages (default: 'debug')
+    logLevel: 'debug'
+  }
+});
+```
+
+By default, ping behavior is optimized for each transport type:
+- Enabled for SSE and HTTP streaming connections (which benefit from keep-alive)
+- Disabled for `stdio` connections (where pings are typically unnecessary)
+
+This configurable approach helps reduce log verbosity and optimize performance for different usage scenarios.
+
+### Returning an audio
 
 Use the `audioContent` to create a content object for an audio:
 
@@ -790,7 +815,7 @@ import { AuthError } from "fastmcp";
 const server = new FastMCP({
   name: "My Server",
   version: "1.0.0",
-  authenticate: (request) => {
+  authenticate: ({ request }) => {
     const apiKey = request.headers["x-api-key"];
 
     if (apiKey !== "123") {
