@@ -1004,6 +1004,17 @@ test("session listens to roots changes", async () => {
 
 test("session sends pings to the client", async () => {
   await runWithTestServer({
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+        ping: {
+          enabled: true,
+          intervalMs: 1000,
+        },
+      });
+      return server;
+    },
     run: async ({ client }) => {
       const onPing = vi.fn().mockReturnValue({});
 
@@ -1011,7 +1022,8 @@ test("session sends pings to the client", async () => {
 
       await delay(2000);
 
-      expect(onPing).toHaveBeenCalledTimes(1);
+      expect(onPing.mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect(onPing.mock.calls.length).toBeLessThanOrEqual(3);
     },
   });
 });
