@@ -1155,7 +1155,7 @@ export class FastMCPSession<
               description: tool.description,
               inputSchema: tool.parameters
                 ? await toJsonSchema(tool.parameters)
-                : undefined,
+                : {}, // For compatibility
               name: tool.name,
             };
           }),
