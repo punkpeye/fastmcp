@@ -23,7 +23,11 @@ await yargs(hideBin(process.argv))
           stdin: "inherit",
           stdout: "inherit",
         })`npx @wong2/mcp-cli npx tsx ${argv.file}`;
-      } catch {
+      } catch (error) {
+        console.error(
+          "[FastMCP Error] Failed to start development server:",
+          error instanceof Error ? error.message : String(error),
+        );
         process.exit(1);
       }
     },
@@ -44,7 +48,11 @@ await yargs(hideBin(process.argv))
           stderr: "inherit",
           stdout: "inherit",
         })`npx @modelcontextprotocol/inspector npx tsx ${argv.file}`;
-      } catch {
+      } catch (error) {
+        console.error(
+          "[FastMCP Error] Failed to inspect server:",
+          error instanceof Error ? error.message : String(error),
+        );
         process.exit(1);
       }
     },
