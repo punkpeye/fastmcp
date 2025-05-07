@@ -448,6 +448,17 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
      */
     logLevel?: LoggingLevel;
   };
+  /**
+   * Configuration for roots capability
+   */
+  roots?: {
+    /**
+     * Whether roots capability should be enabled
+     * Set to false to completely disable roots support
+     * @default true
+     */
+    enabled?: boolean;
+  };
   version: `${number}.${number}.${number}`;
 };
 
@@ -550,6 +561,8 @@ export class FastMCPSession<
 
   #roots: Root[] = [];
 
+  #rootsConfig?: ServerOptions<T>["roots"];
+
   #server: Server;
 
   constructor({
@@ -560,6 +573,7 @@ export class FastMCPSession<
     prompts,
     resources,
     resourcesTemplates,
+    roots,
     tools,
     version,
   }: {
@@ -570,6 +584,7 @@ export class FastMCPSession<
     prompts: Prompt[];
     resources: Resource[];
     resourcesTemplates: InputResourceTemplate[];
+    roots?: ServerOptions<T>["roots"];
     tools: Tool<T>[];
     version: string;
   }) {
@@ -577,6 +592,7 @@ export class FastMCPSession<
 
     this.#auth = auth;
     this.#pingConfig = ping;
+    this.#rootsConfig = roots;
 
     if (tools.length) {
       this.#capabilities.tools = {};
@@ -668,14 +684,23 @@ export class FastMCPSession<
       console.warn("[FastMCP warning] could not infer client capabilities");
     }
 
-    if (this.#clientCapabilities?.roots?.listChanged) {
+    if (
+      this.#clientCapabilities?.roots?.listChanged &&
+      typeof this.#server.listRoots === "function"
+    ) {
       try {
         const roots = await this.#server.listRoots();
         this.#roots = roots.roots;
       } catch (e) {
-        console.error(
-          `[FastMCP error] received error listing roots.\n\n${e instanceof Error ? e.stack : JSON.stringify(e)}`,
-        );
+        if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
+          console.debug(
+            "[FastMCP debug] listRoots method not supported by client",
+          );
+        } else {
+          console.error(
+            `[FastMCP error] received error listing roots.\n\n${e instanceof Error ? e.stack : JSON.stringify(e)}`,
+          );
+        }
       }
     }
 
@@ -1078,18 +1103,46 @@ export class FastMCPSession<
   }
 
   private setupRootsHandlers() {
-    this.#server.setNotificationHandler(
-      RootsListChangedNotificationSchema,
-      () => {
-        this.#server.listRoots().then((roots) => {
-          this.#roots = roots.roots;
+    if (this.#rootsConfig?.enabled === false) {
+      console.debug(
+        "[FastMCP debug] roots capability explicitly disabled via config",
+      );
+      return;
+    }
 
-          this.emit("rootsChanged", {
-            roots: roots.roots,
-          });
-        });
-      },
-    );
+    // Only set up roots notification handling if the server supports it
+    if (typeof this.#server.listRoots === "function") {
+      this.#server.setNotificationHandler(
+        RootsListChangedNotificationSchema,
+        () => {
+          this.#server
+            .listRoots()
+            .then((roots) => {
+              this.#roots = roots.roots;
+
+              this.emit("rootsChanged", {
+                roots: roots.roots,
+              });
+            })
+            .catch((error) => {
+              if (
+                error instanceof McpError &&
+                error.code === ErrorCode.MethodNotFound
+              ) {
+                console.debug(
+                  "[FastMCP debug] listRoots method not supported by client",
+                );
+              } else {
+                console.error("[FastMCP error] Error listing roots", error);
+              }
+            });
+        },
+      );
+    } else {
+      console.debug(
+        "[FastMCP debug] roots capability not available, not setting up notification handler",
+      );
+    }
   }
 
   private setupToolHandlers(tools: Tool<T>[]) {
@@ -1335,6 +1388,7 @@ export class FastMCP<
         prompts: this.#prompts,
         resources: this.#resources,
         resourcesTemplates: this.#resourcesTemplates,
+        roots: this.#options.roots,
         tools: this.#tools,
         version: this.#options.version,
       });
@@ -1362,6 +1416,7 @@ export class FastMCP<
             prompts: this.#prompts,
             resources: this.#resources,
             resourcesTemplates: this.#resourcesTemplates,
+            roots: this.#options.roots,
             tools: this.#tools,
             version: this.#options.version,
           });
@@ -1401,6 +1456,7 @@ export class FastMCP<
             prompts: this.#prompts,
             resources: this.#resources,
             resourcesTemplates: this.#resourcesTemplates,
+            roots: this.#options.roots,
             tools: this.#tools,
             version: this.#options.version,
           });

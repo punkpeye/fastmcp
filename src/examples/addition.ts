@@ -14,6 +14,10 @@ const server = new FastMCP({
     // Reduce log verbosity
     logLevel: "debug", // default
   },
+  roots: {
+    // You can explicitly disable roots support if needed
+    // enabled: false,
+  },
   version: "1.0.0",
 });
 
@@ -173,6 +177,25 @@ if (transportType === "httpStream") {
   console.log(
     "Started stdio transport with explicit ping configuration from server options",
   );
+} else if (process.argv.includes("--disable-roots")) {
+  // Example of disabling roots at runtime
+  const serverWithDisabledRoots = new FastMCP({
+    name: "Addition (No Roots)",
+    ping: {
+      intervalMs: 10000,
+      logLevel: "debug",
+    },
+    roots: {
+      enabled: false,
+    },
+    version: "1.0.0",
+  });
+
+  serverWithDisabledRoots.start({
+    transportType: "stdio",
+  });
+
+  console.log("Started stdio transport with roots support disabled");
 } else {
   // Disable by default for:
   server.start({
