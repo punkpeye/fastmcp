@@ -1,3 +1,6 @@
+import type { ErrorObject } from "ajv";
+import type * as AjvModule from "ajv";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -21,6 +24,7 @@ import {
   SetLevelRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
+import { Plugin } from "ajv/dist/core.js";
 import { EventEmitter } from "events";
 import { fileTypeFromBuffer } from "file-type";
 import { readFile } from "fs/promises";
@@ -187,6 +191,15 @@ type Extra = unknown;
 
 type Extras = Record<string, Extra>;
 
+type JsonSchemaObject = {
+  [key: string]: unknown;
+  $schema?: string;
+  additionalProperties?: boolean;
+  properties?: Record<string, unknown>;
+  required?: string[];
+  type: string;
+};
+
 type Literal = boolean | null | number | string | undefined;
 
 type Progress = {
@@ -233,6 +246,120 @@ export class UnexpectedStateError extends FastMCPError {
  * An error that is meant to be surfaced to the user.
  */
 export class UserError extends UnexpectedStateError {}
+
+/**
+ * Wraps a JSON Schema object with a StandardSchemaV1-compatible adapter
+ * so it can be used directly as a tool parameter schema in FastMCP.
+ *
+ * This adapter uses AJV to validate input at runtime, but only loads AJV
+ * dynamically when JSON Schema is actually used, preserving lightweight core behavior.
+ *
+ * @param schema - A plain JSON Schema object (must define an object-type schema)
+ * @returns A StandardSchemaV1-compatible validator adapter
+ */
+export function createJsonSchemaAdapter(schema: JsonSchemaObject): {
+  "~standard": {
+    validate(data: unknown): Promise<{
+      issues?: { code: string; message: string; path: string[] }[];
+      value: unknown;
+    }>;
+    vendor: string;
+    version: number;
+  };
+} {
+  return {
+    "~standard": {
+      /**
+       * Validates the input data against the JSON Schema using AJV.
+       *
+       * If AJV or ajv-formats is not installed, a structured error is returned.
+       * Errors are mapped into a StandardSchema-compatible `issues` format.
+       */
+      async validate(data: unknown): Promise<{
+        issues?: {
+          code: string;
+          message: string;
+          path: string[];
+        }[];
+        value: unknown;
+      }> {
+        try {
+          const ajvModule = await import("ajv");
+          const AjvClass = ajvModule.default as unknown as new (
+            options?: AjvModule.Options,
+          ) => AjvModule.default;
+          const ajv = new AjvClass({ allErrors: true, strict: false });
+
+          const formatsModule = await import("ajv-formats");
+          const addFormats = formatsModule.default as unknown as Plugin<
+            typeof AjvModule.default
+          >;
+
+          addFormats(ajv);
+
+          const validate = ajv.compile(schema);
+          const valid = validate(data);
+
+          if (valid) {
+            return { value: data };
+          }
+
+          return {
+            issues: (validate.errors || []).map((err: ErrorObject) => ({
+              code: err.keyword,
+              message: err.message || "Validation error",
+              path: err.instancePath.split("/").filter(Boolean),
+            })),
+            value: data,
+          };
+        } catch (err) {
+          return {
+            issues: [
+              {
+                code: "ajv-error",
+                message:
+                  err instanceof Error ? err.message : "AJV execution failed",
+                path: [],
+              },
+            ],
+            value: data,
+          };
+        }
+      },
+      vendor: "ajv",
+
+      version: 1,
+    },
+  };
+}
+
+/**
+ * Detects whether a value is a likely JSON Schema object.
+ *
+ * This function intentionally uses a narrow heuristic to reduce false positives.
+ * It assumes that schemas used with tools are object-based and should define
+ * a "type", "properties", and optionally "required".
+ *
+ * @param obj - The value to test
+ * @returns True if the value appears to be a JSON Schema object
+ */
+export function isJsonSchema(obj: unknown): obj is JsonSchemaObject {
+  if (typeof obj !== "object" || obj === null) return false;
+
+  const schema = obj as Record<string, unknown>;
+
+  if (schema.type !== "object") return false;
+
+  if (
+    !schema.properties ||
+    typeof schema.properties !== "object" ||
+    Array.isArray(schema.properties)
+  ) {
+    return false;
+  }
+
+  return !("required" in schema && !Array.isArray(schema.required));
+}
 
 const TextContentZodSchema = z
   .object({
@@ -453,12 +580,14 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
 
 type Tool<
   T extends FastMCPSessionAuth,
-  Params extends ToolParameters = ToolParameters,
+  Params extends JsonSchemaObject | ToolParameters = ToolParameters,
 > = {
   annotations?: ToolAnnotations;
   description?: string;
   execute: (
-    args: StandardSchemaV1.InferOutput<Params>,
+    args: Params extends ToolParameters
+      ? StandardSchemaV1.InferOutput<Params>
+      : unknown,
     context: Context<T>,
   ) => Promise<
     AudioContent | ContentResult | ImageContent | string | TextContent
@@ -1101,7 +1230,11 @@ export class FastMCPSession<
               annotations: tool.annotations,
               description: tool.description,
               inputSchema: tool.parameters
-                ? await toJsonSchema(tool.parameters)
+                ? isJsonSchema(tool.parameters)
+                  ? // If it's a plain JSON Schema object, return it directly
+                    tool.parameters
+                  : // Otherwise use xsschema to convert it
+                    await toJsonSchema(tool.parameters)
                 : undefined,
               name: tool.name,
             };
@@ -1304,8 +1437,21 @@ export class FastMCP<
   /**
    * Adds a tool to the server.
    */
-  public addTool<Params extends ToolParameters>(tool: Tool<T, Params>) {
-    this.#tools.push(tool as unknown as Tool<T>);
+  public addTool<Params extends JsonSchemaObject | ToolParameters>(
+    tool: Tool<T, Params>,
+  ) {
+    // If parameters is a plain JSON Schema object, wrap it with our adapter
+    if (tool.parameters && isJsonSchema(tool.parameters)) {
+      const adaptedTool = {
+        ...tool,
+        parameters: createJsonSchemaAdapter(
+          tool.parameters as JsonSchemaObject,
+        ),
+      };
+      this.#tools.push(adaptedTool as unknown as Tool<T>);
+    } else {
+      this.#tools.push(tool as unknown as Tool<T>);
+    }
   }
 
   /**

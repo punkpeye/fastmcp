@@ -97,6 +97,32 @@ server.addTool({
   parameters: AddParamsValibot,
 });
 
+// --- JSON Schema Example ---
+server.addTool({
+  annotations: {
+    openWorldHint: false,
+    readOnlyHint: true,
+    title: "Addition (JSON Schema)",
+  },
+  description: "Add two numbers (using direct JSON Schema object)",
+  execute: async (args) => {
+    // Cast args to the expected type since we know JSON Schema will validate it
+    const typedArgs = args as { a: number; b: number };
+    console.log(`[JSON Schema] Adding ${typedArgs.a} and ${typedArgs.b}`);
+    return String(typedArgs.a + typedArgs.b);
+  },
+  name: "add-jsonschema",
+  parameters: {
+    additionalProperties: false,
+    properties: {
+      a: { type: "number" },
+      b: { type: "number" },
+    },
+    required: ["a", "b"],
+    type: "object",
+  },
+});
+
 server.addResource({
   async load() {
     return {

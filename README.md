@@ -158,7 +158,9 @@ const client = new Client(
   },
 );
 
-const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:8080/stream`));
+const transport = new StreamableHTTPClientTransport(
+  new URL(`http://localhost:8080/stream`),
+);
 
 await client.connect(transport);
 ```
@@ -169,7 +171,9 @@ await client.connect(transport);
 
 [Tools](https://modelcontextprotocol.io/docs/concepts/tools) in MCP allow servers to expose executable functions that can be invoked by clients and used by LLMs to perform actions.
 
-FastMCP uses the [Standard Schema](https://standardschema.dev) specification for defining tool parameters. This allows you to use your preferred schema validation library (like Zod, ArkType, or Valibot) as long as it implements the spec.
+FastMCP uses the [Standard Schema](https://standardschema.dev) specification for defining tool parameters. This allows you to use your preferred schema validation library (like Zod, ArkType, Valibot, or AJV) as long as it implements the spec.
+
+You can also use plain JSON Schema objects directly, which will be handled by AJV behind the scenes. This is particularly useful for metadata-driven framework bootstrapping using OpenAPI Specification (OAS).
 
 **Zod Example:**
 
@@ -223,6 +227,73 @@ server.addTool({
   },
 });
 ```
+
+**JSON Schema Example:**
+
+```typescript
+server.addTool({
+  name: "fetch-jsonschema",
+  description: "Fetch the content of a url (using direct JSON Schema)",
+  parameters: {
+    type: "object",
+    properties: {
+      url: { type: "string", format: "uri" },
+    },
+    required: ["url"],
+    additionalProperties: false,
+  },
+  execute: async (args) => {
+    return await fetchWebpageContent(args.url);
+  },
+});
+```
+
+> **Note**: To use JSON Schema directly, you need to install `ajv` and `ajv-formats` as peer dependencies:
+>
+> ```bash
+> npm install ajv ajv-formats
+> ```
+>
+> This is particularly useful for bootstrapping from OpenAPI specifications:
+>
+> ```typescript
+> import { FastMCP } from "fastmcp";
+> import { OpenAPIObject } from "openapi3-ts";
+>
+> // Load your OpenAPI spec
+> const openApiSpec: OpenAPIObject = loadOpenApiSpec();
+>
+> const server = new FastMCP({
+>   name: "API Gateway",
+>   version: "1.0.0",
+> });
+>
+> // Register all operations from the OpenAPI spec automatically
+> for (const [path, pathItem] of Object.entries(openApiSpec.paths)) {
+>   for (const [method, operation] of Object.entries(pathItem)) {
+>     if (
+>       operation.operationId &&
+>       operation.requestBody?.content?.["application/json"]?.schema
+>     ) {
+>       // Extract JSON Schema from OpenAPI
+>       const schema = operation.requestBody.content["application/json"].schema;
+>
+>       server.addTool({
+>         name: operation.operationId,
+>         description:
+>           operation.description ||
+>           operation.summary ||
+>           `${method.toUpperCase()} ${path}`,
+>         parameters: schema,
+>         execute: async (args) => {
+>           // Implement API call using args
+>           return `Called ${operation.operationId} with ${JSON.stringify(args)}`;
+>         },
+>       });
+>     }
+>   }
+> }
+> ```
 
 #### Returning a string
 
@@ -368,12 +439,13 @@ const server = new FastMCP({
     // Configure ping interval in milliseconds (default: 5000ms)
     intervalMs: 10000,
     // Set log level for ping-related messages (default: 'debug')
-    logLevel: 'debug'
-  }
+    logLevel: "debug",
+  },
 });
 ```
 
 By default, ping behavior is optimized for each transport type:
+
 - Enabled for SSE and HTTP streaming connections (which benefit from keep-alive)
 - Disabled for `stdio` connections (where pings are typically unnecessary)
 

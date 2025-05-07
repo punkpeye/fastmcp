@@ -1,7 +1,7 @@
-import eslint from '@eslint/js';
+import eslint from "@eslint/js";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 import perfectionist from "eslint-plugin-perfectionist";
-import tseslint from 'typescript-eslint';
+import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -10,5 +10,5 @@ export default tseslint.config(
   eslintConfigPrettier,
   {
     ignores: ["**/*.js"],
-  }
+  },
 );

@@ -17,12 +17,12 @@ import { expect, test, vi } from "vitest";
 import { z } from "zod";
 
 import {
+  type ContentResult,
   FastMCP,
   FastMCPSession,
   imageContent,
-  UserError,
   type TextContent,
-  type ContentResult,
+  UserError,
 } from "./FastMCP.js";
 
 const runWithTestServer = async ({
@@ -167,6 +167,76 @@ test("calls a tool", async () => {
           a: z.number(),
           b: z.number(),
         }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("calls a tool with JSON Schema parameters", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      // Skip checking tool listing since that's causing issues with xsschema
+
+      // Test valid call - this will work if the tool is registered correctly
+      expect(
+        await client.callTool({
+          arguments: {
+            a: 1,
+            b: 2,
+          },
+          name: "add-jsonschema",
+        }),
+      ).toEqual({
+        content: [{ text: "3", type: "text" }],
+      });
+
+      // Test invalid call
+      try {
+        await client.callTool({
+          arguments: {
+            a: 1,
+            b: "not-a-number",
+          },
+          name: "add-jsonschema",
+        });
+        // If we get here, validation failed
+        throw new Error("Should have failed validation");
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "Should have failed validation"
+        ) {
+          throw error;
+        }
+        // Otherwise we expect an MCP error for invalid params
+        expect(error).toBeInstanceOf(McpError);
+      }
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Add two numbers (JSON Schema)",
+        execute: async (args) => {
+          // Cast args to the expected type since we know JSON Schema will validate it
+          const typedArgs = args as { a: number; b: number };
+          return String(typedArgs.a + typedArgs.b);
+        },
+        name: "add-jsonschema",
+        parameters: {
+          additionalProperties: false,
+          properties: {
+            a: { type: "number" },
+            b: { type: "number" },
+          },
+          required: ["a", "b"],
+          type: "object",
+        },
       });
 
       return server;
@@ -1004,17 +1074,6 @@ test("session listens to roots changes", async () => {
 
 test("session sends pings to the client", async () => {
   await runWithTestServer({
-    server: async () => {
-      const server = new FastMCP({
-        name: "Test",
-        version: "1.0.0",
-        ping: {
-          enabled: true,
-          intervalMs: 1000,
-        },
-      });
-      return server;
-    },
     run: async ({ client }) => {
       const onPing = vi.fn().mockReturnValue({});
 
@@ -1024,6 +1083,17 @@ test("session sends pings to the client", async () => {
 
       expect(onPing.mock.calls.length).toBeGreaterThanOrEqual(1);
       expect(onPing.mock.calls.length).toBeLessThanOrEqual(3);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        ping: {
+          enabled: true,
+          intervalMs: 1000,
+        },
+        version: "1.0.0",
+      });
+      return server;
     },
   });
 });

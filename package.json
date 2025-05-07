@@ -35,6 +35,10 @@
     "zod": "^3.24.3",
     "zod-to-json-schema": "^3.24.5"
   },
+  "peerDependencies": {
+    "ajv": "^8.12.0",
+    "ajv-formats": "^2.1.1"
+  },
   "repository": {
     "url": "https://github.com/punkpeye/fastmcp"
   },
@@ -59,6 +63,8 @@
     "@types/uri-templates": "^0.1.34",
     "@types/yargs": "^17.0.33",
     "@valibot/to-json-schema": "^1.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "arktype": "^2.1.20",
     "eslint": "^9.25.1",
     "eslint-config-prettier": "^10.1.2",
