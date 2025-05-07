@@ -23,7 +23,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Prompt argument auto-completion](#prompt-argument-auto-completion)
 - [Sampling](#requestsampling)
 - [Configurable ping behavior](#configurable-ping-behavior)
-- Roots
+- [Roots](#roots-management)
 - CLI for [testing](#test-with-mcp-cli) and [debugging](#inspect-with-mcp-inspector)
 
 ## Installation
@@ -378,6 +378,46 @@ By default, ping behavior is optimized for each transport type:
 - Disabled for `stdio` connections (where pings are typically unnecessary)
 
 This configurable approach helps reduce log verbosity and optimize performance for different usage scenarios.
+
+#### Roots Management
+
+FastMCP supports [Roots](https://modelcontextprotocol.io/docs/concepts/roots) - Feature that allows clients to provide a set of filesystem-like root locations that can be listed and dynamically updated. The Roots feature can be configured or disabled in server options:
+
+```ts
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  roots: {
+    // Set to false to explicitly disable roots support
+    enabled: false,
+    // By default, roots support is enabled (true)
+  }
+});
+```
+
+This provides the following benefits:
+- Better compatibility with different clients that may not support Roots
+- Reduced error logs when connecting to clients that don't implement roots capability
+- More explicit control over MCP server capabilities
+- Graceful degradation when roots functionality isn't available
+
+You can listen for root changes in your server:
+
+```ts
+server.on("connect", (event) => {
+  const session = event.session;
+  
+  // Access the current roots
+  console.log("Initial roots:", session.roots);
+  
+  // Listen for changes to the roots
+  session.on("rootsChanged", (event) => {
+    console.log("Roots changed:", event.roots);
+  });
+});
+```
+
+When a client doesn't support roots or when roots functionality is explicitly disabled, these operations will gracefully handle the situation without throwing errors.
 
 ### Returning an audio
 
