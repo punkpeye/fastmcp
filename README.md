@@ -81,8 +81,6 @@ npx fastmcp dev src/examples/addition.ts
 npx fastmcp inspect src/examples/addition.ts
 ```
 
-If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
-
 ### Remote Server Options
 
 FastMCP supports multiple transport options for remote communication, allowing an MCP hosted on a remote machine to be accessed over the network.
@@ -160,9 +158,7 @@ const client = new Client(
   },
 );
 
-const transport = new StreamableHTTPClientTransport(
-  new URL(`http://localhost:8080/stream`),
-);
+const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:8080/stream`));
 
 await client.connect(transport);
 ```
@@ -234,35 +230,35 @@ When creating tools that don't require parameters, you have two options:
 
 1. Omit the parameters property entirely:
 
-```typescript
-server.addTool({
-  name: "sayHello",
-  description: "Say hello",
-  // No parameters property
-  execute: async () => {
-    return "Hello, world!";
-  },
-});
-```
+   ```typescript
+   server.addTool({
+     name: "sayHello",
+     description: "Say hello",
+     // No parameters property
+     execute: async () => {
+       return "Hello, world!";
+     },
+   });
+   ```
 
-2. Explicitly define empty parameters (recommended for Cursor compatibility):
+2. Explicitly define empty parameters:
 
-```typescript
-import { z } from "zod";
+   ```typescript
+   import { z } from "zod";
 
-server.addTool({
-  name: "sayHello",
-  description: "Say hello",
-  parameters: z.object({}), // Empty object for Cursor compatibility
-  execute: async () => {
-    return "Hello, world!";
-  },
-});
-```
+   server.addTool({
+     name: "sayHello",
+     description: "Say hello",
+     parameters: z.object({}), // Empty object
+     execute: async () => {
+       return "Hello, world!";
+     },
+   });
+   ```
 
 > [!NOTE]
 >
-> When working with cursor, it's recommended to always use the second approach (explicitly defining empty parameters) to ensure compatibility.
+> Both approaches are fully compatible with all MCP clients, including Cursor. FastMCP automatically generates the proper schema in both cases.
 
 #### Returning a string
 
@@ -408,13 +404,12 @@ const server = new FastMCP({
     // Configure ping interval in milliseconds (default: 5000ms)
     intervalMs: 10000,
     // Set log level for ping-related messages (default: 'debug')
-    logLevel: "debug",
-  },
+    logLevel: 'debug'
+  }
 });
 ```
 
 By default, ping behavior is optimized for each transport type:
-
 - Enabled for SSE and HTTP streaming connections (which benefit from keep-alive)
 - Disabled for `stdio` connections (where pings are typically unnecessary)
 
@@ -432,12 +427,11 @@ const server = new FastMCP({
     // Set to false to explicitly disable roots support
     enabled: false,
     // By default, roots support is enabled (true)
-  },
+  }
 });
 ```
 
 This provides the following benefits:
-
 - Better compatibility with different clients that may not support Roots
 - Reduced error logs when connecting to clients that don't implement roots capability
 - More explicit control over MCP server capabilities
@@ -448,10 +442,10 @@ You can listen for root changes in your server:
 ```ts
 server.on("connect", (event) => {
   const session = event.session;
-
+  
   // Access the current roots
   console.log("Initial roots:", session.roots);
-
+  
   // Listen for changes to the roots
   session.on("rootsChanged", (event) => {
     console.log("Roots changed:", event.roots);
@@ -1082,10 +1076,6 @@ Follow the guide https://modelcontextprotocol.io/quickstart/user and add the fol
 > [!NOTE]
 >
 > If you've developed a server using FastMCP, please [submit a PR](https://github.com/punkpeye/fastmcp) to showcase it here!
-
-> [!NOTE]
->
-> If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
 
 - [apinetwork/piapi-mcp-server](https://github.com/apinetwork/piapi-mcp-server) - generate media using Midjourney/Flux/Kling/LumaLabs/Udio/Chrip/Trellis
 - [domdomegg/computer-use-mcp](https://github.com/domdomegg/computer-use-mcp) - controls your computer
