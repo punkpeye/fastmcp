@@ -158,7 +158,9 @@ const client = new Client(
   },
 );
 
-const transport = new StreamableHTTPClientTransport(new URL(`http://localhost:8080/stream`));
+const transport = new StreamableHTTPClientTransport(
+  new URL(`http://localhost:8080/stream`),
+);
 
 await client.connect(transport);
 ```
@@ -404,12 +406,13 @@ const server = new FastMCP({
     // Configure ping interval in milliseconds (default: 5000ms)
     intervalMs: 10000,
     // Set log level for ping-related messages (default: 'debug')
-    logLevel: 'debug'
-  }
+    logLevel: "debug",
+  },
 });
 ```
 
 By default, ping behavior is optimized for each transport type:
+
 - Enabled for SSE and HTTP streaming connections (which benefit from keep-alive)
 - Disabled for `stdio` connections (where pings are typically unnecessary)
 
@@ -427,11 +430,12 @@ const server = new FastMCP({
     // Set to false to explicitly disable roots support
     enabled: false,
     // By default, roots support is enabled (true)
-  }
+  },
 });
 ```
 
 This provides the following benefits:
+
 - Better compatibility with different clients that may not support Roots
 - Reduced error logs when connecting to clients that don't implement roots capability
 - More explicit control over MCP server capabilities
@@ -442,10 +446,10 @@ You can listen for root changes in your server:
 ```ts
 server.on("connect", (event) => {
   const session = event.session;
-  
+
   // Access the current roots
   console.log("Initial roots:", session.roots);
-  
+
   // Listen for changes to the roots
   session.on("rootsChanged", (event) => {
     console.log("Roots changed:", event.roots);
