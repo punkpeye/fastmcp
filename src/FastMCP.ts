@@ -1155,7 +1155,7 @@ export class FastMCPSession<
               description: tool.description,
               inputSchema: tool.parameters
                 ? await toJsonSchema(tool.parameters)
-                : {}, // For compatibility
+                : { type: "object", properties: {}, additionalProperties: false }, // More complete schema for Cursor compatibility
               name: tool.name,
             };
           }),
