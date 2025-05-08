@@ -228,6 +228,42 @@ server.addTool({
 });
 ```
 
+#### Tools Without Parameters
+
+When creating tools that don't require parameters, you have two options:
+
+1. Omit the parameters property entirely:
+
+```typescript
+server.addTool({
+  name: "sayHello",
+  description: "Say hello",
+  // No parameters property
+  execute: async () => {
+    return "Hello, world!";
+  },
+});
+```
+
+2. Explicitly define empty parameters (recommended for Cursor compatibility):
+
+```typescript
+import { z } from "zod";
+
+server.addTool({
+  name: "sayHello",
+  description: "Say hello",
+  parameters: z.object({}), // Empty object for Cursor compatibility
+  execute: async () => {
+    return "Hello, world!";
+  },
+});
+```
+
+> [!NOTE]
+>
+> When working with cursor, it's recommended to always use the second approach (explicitly defining empty parameters) to ensure compatibility.
+
 #### Returning a string
 
 `execute` can return a string:
