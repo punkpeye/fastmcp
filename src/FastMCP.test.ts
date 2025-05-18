@@ -1764,10 +1764,90 @@ test("provides auth to tools", async () => {
         info: expect.any(Function),
         warn: expect.any(Function),
       },
+      streamContent: expect.any(Function),
       reportProgress: expect.any(Function),
       session: { id: 1 },
     },
   );
+});
+
+test("supports streaming output from tools", async () => {
+  let streamResult: { content: Array<{ text: string; type: string }> };
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const result = await client.callTool({
+        arguments: {},
+        name: "streaming-void-tool",
+      });
+
+      expect(result).toEqual({
+        content: [],
+      });
+
+      streamResult = (await client.callTool({
+        arguments: {},
+        name: "streaming-with-result",
+      })) as { content: Array<{ text: string; type: string }> };
+
+      expect(streamResult).toEqual({
+        content: [{ text: "Final result after streaming", type: "text" }],
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        annotations: {
+          streamingHint: true,
+        },
+        description: "Tool yang streaming dan mengembalikan void",
+        execute: async (_args, context) => {
+          await context.streamContent({
+            text: "Streaming content 1",
+            type: "text",
+          });
+
+          await context.streamContent({
+            text: "Streaming content 2",
+            type: "text",
+          });
+
+          // Return void
+          return;
+        },
+        name: "streaming-void-tool",
+        parameters: z.object({}),
+      });
+
+      server.addTool({
+        annotations: {
+          streamingHint: true,
+        },
+        description: "Tool yang streaming dan mengembalikan hasil",
+        execute: async (_args, context) => {
+          await context.streamContent({
+            text: "Streaming content 1",
+            type: "text",
+          });
+
+          await context.streamContent({
+            text: "Streaming content 2",
+            type: "text",
+          });
+
+          return "Final result after streaming";
+        },
+        name: "streaming-with-result",
+        parameters: z.object({}),
+      });
+
+      return server;
+    },
+  });
 });
 
 test("blocks unauthorized requests", async () => {
