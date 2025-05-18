@@ -178,9 +178,9 @@ type Context<T extends FastMCPSessionAuth> = {
     info: (message: string, data?: SerializableValue) => void;
     warn: (message: string, data?: SerializableValue) => void;
   };
-  streamContent: (content: Content | Content[]) => Promise<void>;
   reportProgress: (progress: Progress) => Promise<void>;
   session: T | undefined;
+  streamContent: (content: Content | Content[]) => Promise<void>;
 };
 
 type Extra = unknown;

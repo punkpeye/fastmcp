@@ -1764,9 +1764,9 @@ test("provides auth to tools", async () => {
         info: expect.any(Function),
         warn: expect.any(Function),
       },
-      streamContent: expect.any(Function),
       reportProgress: expect.any(Function),
       session: { id: 1 },
+      streamContent: expect.any(Function),
     },
   );
 });
