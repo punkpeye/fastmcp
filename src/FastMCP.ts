@@ -178,6 +178,7 @@ type Context<T extends FastMCPSessionAuth> = {
     info: (message: string, data?: SerializableValue) => void;
     warn: (message: string, data?: SerializableValue) => void;
   };
+  streamContent: (content: Content | Content[]) => Promise<void>;
   reportProgress: (progress: Progress) => Promise<void>;
   session: T | undefined;
 };
@@ -483,13 +484,19 @@ type Tool<
   T extends FastMCPSessionAuth,
   Params extends ToolParameters = ToolParameters,
 > = {
-  annotations?: ToolAnnotations;
+  annotations?: {
+    /**
+     * When true, the tool leverages incremental content streaming
+     * Return void for tools that handle all their output via streaming
+     */
+    streamingHint?: boolean;
+  } & ToolAnnotations;
   description?: string;
   execute: (
     args: StandardSchemaV1.InferOutput<Params>,
     context: Context<T>,
   ) => Promise<
-    AudioContent | ContentResult | ImageContent | string | TextContent
+    AudioContent | ContentResult | ImageContent | string | TextContent | void
   >;
   name: string;
   parameters?: Params;
@@ -1266,14 +1273,29 @@ export class FastMCPSession<
         };
 
         // Create a promise for tool execution
+        // Streams partial results while a tool is still executing
+        // Enables progressive rendering and real-time feedback
+        const streamContent = async (content: Content | Content[]) => {
+          const contentArray = Array.isArray(content) ? content : [content];
+
+          await this.#server.notification({
+            method: "notifications/tool/streamContent",
+            params: {
+              content: contentArray,
+              toolName: request.params.name,
+            },
+          });
+        };
+
         const executeToolPromise = tool.execute(args, {
           log,
           reportProgress,
           session: this.#auth,
+          streamContent,
         });
 
         // Handle timeout if specified
-        const maybeStringResult = await (tool.timeoutMs
+        const maybeStringResult = (await (tool.timeoutMs
           ? Promise.race([
               executeToolPromise,
               new Promise<never>((_, reject) => {
@@ -1286,9 +1308,20 @@ export class FastMCPSession<
                 }, tool.timeoutMs);
               }),
             ])
-          : executeToolPromise);
+          : executeToolPromise)) as
+          | AudioContent
+          | ContentResult
+          | ImageContent
+          | null
+          | string
+          | TextContent
+          | undefined;
 
-        if (typeof maybeStringResult === "string") {
+        if (maybeStringResult === undefined || maybeStringResult === null) {
+          result = ContentResultZodSchema.parse({
+            content: [],
+          });
+        } else if (typeof maybeStringResult === "string") {
           result = ContentResultZodSchema.parse({
             content: [{ text: maybeStringResult, type: "text" }],
           });
