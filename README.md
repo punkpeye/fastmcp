@@ -708,7 +708,7 @@ server.addTool({
     // Option 1: All content was streamed, so return void
     return;
 
-    // Option 2: Return final content that will be apended
+    // Option 2: Return final content that will be appended
     // return "Generation complete!";
   },
 });
