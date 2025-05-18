@@ -1,8 +1,12 @@
 /**
- * This is an example of a FastMCP server that adds two numbers.
+ * Example FastMCP server demonstrating core functionality plus streaming output.
  *
- * If you are looking for a complete example of an MCP server repository,
- * see https://github.com/punkpeye/fastmcp-boilerplate
+ * Features demonstrated:
+ * - Basic tool with type-safe parameters
+ * - Streaming-enabled tool for incremental output
+ * - Advanced tool annotations
+ *
+ * For a complete project template, see https://github.com/punkpeye/fastmcp-boilerplate
  */
 import { type } from "arktype";
 import * as v from "valibot";
@@ -116,6 +120,39 @@ server.addResource({
   mimeType: "text/plain",
   name: "Application Logs",
   uri: "file:///logs/app.log",
+});
+
+server.addTool({
+  annotations: {
+    openWorldHint: false,
+    readOnlyHint: true,
+    streamingHint: true,
+  },
+  description: "Generate a poem line by line with streaming output",
+  execute: async (args, context) => {
+    const { theme } = args;
+    const lines = [
+      `Poem about ${theme} - line 1`,
+      `Poem about ${theme} - line 2`,
+      `Poem about ${theme} - line 3`,
+      `Poem about ${theme} - line 4`,
+    ];
+
+    for (const line of lines) {
+      await context.streamContent({
+        text: line,
+        type: "text",
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    return;
+  },
+  name: "stream-poem",
+  parameters: z.object({
+    theme: z.string().describe("Theme for the poem"),
+  }),
 });
 
 server.addPrompt({
