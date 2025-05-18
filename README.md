@@ -19,6 +19,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [HTTP Streaming](#http-streaming)
 - CORS (enabled by default)
 - [Progress notifications](#progress)
+- [Steaming output](#streaming-output)
 - [Typed server events](#typed-server-events)
 - [Prompt argument auto-completion](#prompt-argument-auto-completion)
 - [Sampling](#requestsampling)
@@ -664,6 +665,86 @@ server.addTool({
     });
 
     return "done";
+  },
+});
+```
+
+#### Streaming Output
+
+FastMCP supports streaming partial results from tools while they're still executing, enabling responsive UIs and real-time feedback. This is particularly useful for:
+
+- Long-running operations that generate content incrementally
+- Progressive generation of text, images, or other media
+- Operations where users benefit from seeing immediate partial results
+
+To enable streaming for a tool, add the `streamingHint` annotation and use the `streamContent` method:
+
+```js
+server.addTool({
+  name: "generateText",
+  description: "Generate text incrementally",
+  parameters: z.object({
+    prompt: z.string(),
+  }),
+  annotations: {
+    streamingHint: true, // Signals this tool uses streaming
+    readOnlyHint: true,
+  },
+  execute: async (args, { streamContent }) => {
+    // Send initial content immediately
+    await streamContent({ type: "text", text: "Starting generation...\n" });
+
+    // Simulate incremental content generation
+    const words = "The quick brown fox jumps over the lazy dog.".split(" ");
+    for (const word of words) {
+      await streamContent({ type: "text", text: word + " " });
+      await new Promise((resolve) => setTimeout(resolve, 300)); // Simulate delay
+    }
+
+    // When using streamContent, you can:
+    // 1. Return void (if all content was streamed)
+    // 2. Return a final resul (which will be appended to streamed content)
+
+    // Option 1: All content was streamed, so return void
+    return;
+
+    // Option 2: Return final content that will be apended
+    // return "Generation complete!";
+  },
+});
+```
+
+Streaming works with all content types (text, image, audio) and can be combined with progress reporting:
+
+```js
+server.addTool({
+  name: "processData",
+  description: "Process data with streaming updates",
+  parameters: z.object({
+    datasetSize: z.number(),
+  }),
+  annotations: {
+    streamingHint: true,
+  },
+  execute: async (args, { streamContent, reportProgress }) => {
+    const total = args.datasetSize;
+
+    for (let i = 0; i < total; i++) {
+      // Report numeric progress
+      await reportProgress({ progress: i, total });
+
+      // Stream intermediate results
+      if (i % 10 === 0) {
+        await streamContent({
+          type: "text",
+          text: `Processed ${i} of ${total} items...\n`,
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    return "Processing complete!";
   },
 });
 ```
