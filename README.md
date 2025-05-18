@@ -19,7 +19,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [HTTP Streaming](#http-streaming)
 - CORS (enabled by default)
 - [Progress notifications](#progress)
-- [Steaming output](#streaming-output)
+- [Streaming output](#streaming-output)
 - [Typed server events](#typed-server-events)
 - [Prompt argument auto-completion](#prompt-argument-auto-completion)
 - [Sampling](#requestsampling)
@@ -703,7 +703,7 @@ server.addTool({
 
     // When using streamContent, you can:
     // 1. Return void (if all content was streamed)
-    // 2. Return a final resul (which will be appended to streamed content)
+    // 2. Return a final result (which will be appended to streamed content)
 
     // Option 1: All content was streamed, so return void
     return;
