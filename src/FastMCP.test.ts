@@ -12,8 +12,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { createEventSource, EventSourceClient } from "eventsource-client";
 import { getRandomPort } from "get-port-please";
-import { fetch } from "undici";
 import { setTimeout as delay } from "timers/promises";
+import { fetch } from "undici";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
 
@@ -141,7 +141,7 @@ test("health endpoint returns ok", async () => {
   const port = await getRandomPort();
 
   const server = new FastMCP({
-    health: { path: "/healthz", message: "healthy" },
+    health: { message: "healthy", path: "/healthz" },
     name: "Test",
     version: "1.0.0",
   });

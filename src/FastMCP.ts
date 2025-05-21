@@ -446,26 +446,6 @@ type ResourceTemplateArgumentsToObject<T extends { name: string }[]> = {
 
 type ServerOptions<T extends FastMCPSessionAuth> = {
   authenticate?: Authenticate<T>;
-  instructions?: string;
-  name: string;
-  ping?: {
-    /**
-     * Whether ping should be enabled by default.
-     * - true for SSE or HTTP Stream
-     * - false for stdio
-     */
-    enabled?: boolean;
-    /**
-     * Interval
-     * @default 5000 (5s)
-     */
-    intervalMs?: number;
-    /**
-     * Logging level for ping-related messages.
-     * @default 'debug'
-     */
-    logLevel?: LoggingLevel;
-  };
   /**
    * Configuration for the health-check endpoint that can be exposed when the
    * server is running using the HTTP Stream transport. When enabled, the
@@ -484,6 +464,12 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
     enabled?: boolean;
 
     /**
+     * Plain-text body returned by the endpoint.
+     * @default "ok"
+     */
+    message?: string;
+
+    /**
      * HTTP path that should be handled.
      * @default "/health"
      */
@@ -494,12 +480,27 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
      * @default 200
      */
     status?: number;
+  };
+  instructions?: string;
+  name: string;
 
+  ping?: {
     /**
-     * Plain-text body returned by the endpoint.
-     * @default "ok"
+     * Whether ping should be enabled by default.
+     * - true for SSE or HTTP Stream
+     * - false for stdio
      */
-    message?: string;
+    enabled?: boolean;
+    /**
+     * Interval
+     * @default 5000 (5s)
+     */
+    intervalMs?: number;
+    /**
+     * Logging level for ping-related messages.
+     * @default 'debug'
+     */
+    logLevel?: LoggingLevel;
   };
   /**
    * Configuration for roots capability

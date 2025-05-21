@@ -417,15 +417,12 @@ const server = new FastMCP({
   health: {
     // Enable / disable (default: true)
     enabled: true,
-
-    // Path that should respond (default: '/health')
-    path: "/healthz",
-
-    // HTTP status code to return (default: 200)
-    status: 200,
-
     // Body returned by the endpoint (default: 'ok')
     message: "healthy",
+    // Path that should respond (default: '/health')
+    path: "/healthz",
+    // HTTP status code to return (default: 200)
+    status: 200,
   },
 });
 
