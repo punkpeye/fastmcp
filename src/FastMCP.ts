@@ -467,6 +467,41 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
     logLevel?: LoggingLevel;
   };
   /**
+   * Configuration for the health-check endpoint that can be exposed when the
+   * server is running using the HTTP Stream transport. When enabled, the
+   * server will respond to an HTTP GET request with the configured path (by
+   * default "/health") rendering a plain-text response (by default "ok") and
+   * the configured status code (by default 200).
+   *
+   * The endpoint is only added when the server is started with
+   * `transportType: "httpStream"` – it is ignored for the stdio transport.
+   */
+  health?: {
+    /**
+     * When set to `false` the health-check endpoint is disabled.
+     * @default true
+     */
+    enabled?: boolean;
+
+    /**
+     * HTTP path that should be handled.
+     * @default "/health"
+     */
+    path?: string;
+
+    /**
+     * HTTP response status that will be returned.
+     * @default 200
+     */
+    status?: number;
+
+    /**
+     * Plain-text body returned by the endpoint.
+     * @default "ok"
+     */
+    message?: string;
+  };
+  /**
    * Configuration for roots capability
    */
   roots?: {
@@ -1481,6 +1516,36 @@ export class FastMCP<
           this.emit("connect", {
             session,
           });
+        },
+        onUnhandledRequest: async (req, res) => {
+          const healthConfig = this.#options.health ?? {};
+
+          const enabled =
+            healthConfig.enabled === undefined ? true : healthConfig.enabled;
+
+          if (enabled) {
+            const path = healthConfig.path ?? "/health";
+
+            try {
+              if (
+                req.method === "GET" &&
+                new URL(req.url || "", "http://localhost").pathname === path
+              ) {
+                res
+                  .writeHead(healthConfig.status ?? 200, {
+                    "Content-Type": "text/plain",
+                  })
+                  .end(healthConfig.message ?? "ok");
+
+                return;
+              }
+            } catch (error) {
+              console.error("[FastMCP error] health endpoint error", error);
+            }
+          }
+
+          // If the request was not handled above, return 404
+          res.writeHead(404).end();
         },
         port: options.httpStream.port,
       });

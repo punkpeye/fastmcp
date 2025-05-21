@@ -12,6 +12,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { createEventSource, EventSourceClient } from "eventsource-client";
 import { getRandomPort } from "get-port-please";
+import { fetch } from "undici";
 import { setTimeout as delay } from "timers/promises";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
@@ -134,6 +135,29 @@ test("adds tools", async () => {
       return server;
     },
   });
+});
+
+test("health endpoint returns ok", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    health: { path: "/healthz", message: "healthy" },
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: { port },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/healthz`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("healthy");
+  } finally {
+    await server.stop();
+  }
 });
 
 test("calls a tool", async () => {
