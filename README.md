@@ -23,6 +23,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Prompt argument auto-completion](#prompt-argument-auto-completion)
 - [Sampling](#requestsampling)
 - [Configurable ping behavior](#configurable-ping-behavior)
+- [Health-check endpoint](#health-check-endpoint)
 - [Roots](#roots-management)
 - CLI for [testing](#test-with-mcp-cli) and [debugging](#inspect-with-mcp-inspector)
 
@@ -400,6 +401,47 @@ By default, ping behavior is optimized for each transport type:
 - Disabled for `stdio` connections (where pings are typically unnecessary)
 
 This configurable approach helps reduce log verbosity and optimize performance for different usage scenarios.
+
+### Health-check Endpoint
+
+When you run FastMCP with the `httpStream` transport you can optionally expose a
+simple HTTP endpoint that returns a plain-text response useful for load-balancer
+or container orchestration liveness checks.
+
+Enable (or customise) the endpoint via the `health` key in the server options:
+
+```ts
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  health: {
+    // Enable / disable (default: true)
+    enabled: true,
+    // Body returned by the endpoint (default: 'ok')
+    message: "healthy",
+    // Path that should respond (default: '/health')
+    path: "/healthz",
+    // HTTP status code to return (default: 200)
+    status: 200,
+  },
+});
+
+await server.start({
+  transportType: "httpStream",
+  httpStream: { port: 8080 },
+});
+```
+
+Now a request to `http://localhost:8080/healthz` will return:
+
+```
+HTTP/1.1 200 OK
+content-type: text/plain
+
+healthy
+```
+
+The endpoint is ignored when the server is started with the `stdio` transport.
 
 #### Roots Management
 
