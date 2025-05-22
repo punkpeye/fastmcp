@@ -138,7 +138,6 @@ test("adds tools", async () => {
   });
 });
 
-
 test("adds tools with Zod v4 schema", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
