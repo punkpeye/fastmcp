@@ -31,7 +31,7 @@
     "strict-event-emitter-types": "^2.0.0",
     "undici": "^7.8.0",
     "uri-templates": "^0.2.0",
-    "xsschema": "0.2.2",
+    "xsschema": "0.3.0-beta.1",
     "yargs": "^17.7.2",
     "zod": "^3.25.12",
     "zod-to-json-schema": "^3.24.5"
