@@ -1,45 +1,55 @@
-# FastMCP
+FastMCP
+A TypeScript framework for building MCP servers capable of handling client sessions.
 
-A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable of handling client sessions.
+[!NOTE]
 
-> [!NOTE]
->
-> For a Python implementation, see [FastMCP](https://github.com/jlowin/fastmcp).
+For a Python implementation, see FastMCP.
 
-## Features
+Features
+Simple Tool, Resource, Prompt definition
 
-- Simple Tool, Resource, Prompt definition
-- [Authentication](#authentication)
-- [Sessions](#sessions)
-- [Image content](#returning-an-image)
-- [Audio content](#returning-an-audio)
-- [Logging](#logging)
-- [Error handling](#errors)
-- [HTTP Streaming](#http-streaming) (with SSE compatibility)
-- CORS (enabled by default)
-- [Progress notifications](#progress)
-- [Streaming output](#streaming-output)
-- [Typed server events](#typed-server-events)
-- [Prompt argument auto-completion](#prompt-argument-auto-completion)
-- [Sampling](#requestsampling)
-- [Configurable ping behavior](#configurable-ping-behavior)
-- [Health-check endpoint](#health-check-endpoint)
-- [Roots](#roots-management)
-- CLI for [testing](#test-with-mcp-cli) and [debugging](#inspect-with-mcp-inspector)
+Authentication
 
-## Installation
+Sessions
 
-```bash
+Image content
+
+Audio content
+
+Logging
+
+Error handling
+
+HTTP Streaming (with SSE compatibility)
+
+CORS (enabled by default)
+
+Progress notifications
+
+Streaming output
+
+Typed server events
+
+Prompt argument auto-completion
+
+Sampling
+
+Configurable ping behavior
+
+Health-check endpoint
+
+Roots
+
+CLI for testing and debugging
+
+Installation
 npm install fastmcp
-```
 
-## Quickstart
+Quickstart
+[!NOTE]
 
-> [!NOTE]
->
-> There are many real-world examples of using FastMCP in the wild. See the [Showcase](#showcase) for examples.
+There are many real-world examples of using FastMCP in the wild. See the Showcase for examples.
 
-```ts
 import { FastMCP } from "fastmcp";
 import { z } from "zod"; // Or any validation library that supports Standard Schema
 
@@ -55,7 +65,14 @@ server.addTool({
     a: z.number(),
     b: z.number(),
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
+    // context.auth contains the authentication data (if any)
+    // context.sessionId contains the framework-generated session ID
+    console.log(`Executing 'add' for session: ${context.sessionId}`);
+    if (context.auth) {
+      // Assuming AuthData is an object and has an 'id' field, for example:
+      // console.log(`Authenticated user ID: ${ (context.auth as {id: any}).id }`);
+    }
     return String(args.a + args.b);
   },
 });
@@ -63,14 +80,12 @@ server.addTool({
 server.start({
   transportType: "stdio",
 });
-```
 
-_That's it!_ You have a working MCP server.
+That's it! You have a working MCP server.
 
 You can test the server in terminal with:
 
-```bash
-git clone https://github.com/punkpeye/fastmcp.git
+git clone [https://github.com/punkpeye/fastmcp.git](https://github.com/punkpeye/fastmcp.git)
 cd fastmcp
 
 pnpm install
@@ -80,36 +95,31 @@ pnpm build
 npx fastmcp dev src/examples/addition.ts
 # Test the addition server example using MCP Inspector:
 npx fastmcp inspect src/examples/addition.ts
-```
 
-If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
+If you are looking for a boilerplate repository to build your own MCP server, check out fastmcp-boilerplate.
 
-### Remote Server Options
-
+Remote Server Options
 FastMCP supports multiple transport options for remote communication, allowing an MCP hosted on a remote machine to be accessed over the network.
 
-#### HTTP Streaming
-
-[HTTP streaming](https://www.cloudflare.com/learning/video/what-is-http-live-streaming/) provides a more efficient alternative to SSE in environments that support it, with potentially better performance for larger payloads.
+HTTP Streaming
+HTTP streaming provides a more efficient alternative to SSE in environments that support it, with potentially better performance for larger payloads.
 
 You can run the server with HTTP streaming support:
 
-```ts
 server.start({
   transportType: "httpStream",
   httpStream: {
     port: 8080,
   },
 });
-```
 
-This will start the server and listen for HTTP streaming connections on `http://localhost:8080/stream`.
+This will start the server and listen for HTTP streaming connections on http://localhost:8080/stream.
 
 You can connect to these servers using the appropriate client transport.
 
 For HTTP streaming connections:
 
-```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const client = new Client(
@@ -127,11 +137,10 @@ const transport = new StreamableHTTPClientTransport(
 );
 
 await client.connect(transport);
-```
 
 For SSE connections:
 
-```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
 const client = new Client(
@@ -147,19 +156,27 @@ const client = new Client(
 const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
 
 await client.connect(transport);
-```
 
-## Core Concepts
+Core Concepts
+Tools
+Tools in MCP allow servers to expose executable functions that can be invoked by clients and used by LLMs to perform actions.
 
-### Tools
+FastMCP uses the Standard Schema specification for defining tool parameters. This allows you to use your preferred schema validation library (like Zod, ArkType, or Valibot) as long as it implements the spec.
 
-[Tools](https://modelcontextprotocol.io/docs/concepts/tools) in MCP allow servers to expose executable functions that can be invoked by clients and used by LLMs to perform actions.
+The execute method of a tool receives two arguments: args (the parsed parameters for the tool) and context. The context object provides access to:
 
-FastMCP uses the [Standard Schema](https://standardschema.dev) specification for defining tool parameters. This allows you to use your preferred schema validation library (like Zod, ArkType, or Valibot) as long as it implements the spec.
+context.auth: The authentication data returned by the server's authenticate function (if defined). This is the AuthData object itself.
 
-**Zod Example:**
+context.sessionId: The FastMCP framework-generated session ID for the current client connection.
 
-```typescript
+context.log: Logging functions.
+
+context.reportProgress: A function to report tool progress.
+
+context.streamContent: A function for streaming tool output.
+
+Zod Example:
+
 import { z } from "zod";
 
 server.addTool({
@@ -168,15 +185,19 @@ server.addTool({
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args) => {
-    return await fetchWebpageContent(args.url);
+  execute: async (args, context) => {
+    console.log(`Fetching URL for session ${context.sessionId}`);
+    // Example assuming AuthData has a 'canFetchExternal' field:
+    // if (context.auth && (context.auth as {canFetchExternal: boolean}).canFetchExternal) {
+    //     return await fetchWebpageContent(args.url);
+    // }
+    // throw new UserError("Not authorized to fetch external URLs.");
+    return await fetchWebpageContent(args.url); // Simplified for example
   },
 });
-```
 
-**ArkType Example:**
+ArkType Example:
 
-```typescript
 import { type } from "arktype";
 
 server.addTool({
@@ -185,17 +206,17 @@ server.addTool({
   parameters: type({
     url: "string",
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
+    // Access context.auth and context.sessionId here
+    console.log(`Session ID: ${context.sessionId}`);
     return await fetchWebpageContent(args.url);
   },
 });
-```
 
-**Valibot Example:**
+Valibot Example:
 
 Valibot requires the peer dependency @valibot/to-json-schema.
 
-```typescript
 import * as v from "valibot";
 
 server.addTool({
@@ -204,75 +225,67 @@ server.addTool({
   parameters: v.object({
     url: v.string(),
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
+    // Access context.auth and context.sessionId here
+    console.log(`Auth data: ${JSON.stringify(context.auth)}`);
     return await fetchWebpageContent(args.url);
   },
 });
-```
 
-#### Tools Without Parameters
-
+Tools Without Parameters
 When creating tools that don't require parameters, you have two options:
 
-1. Omit the parameters property entirely:
+Omit the parameters property entirely:
 
-   ```typescript
-   server.addTool({
-     name: "sayHello",
-     description: "Say hello",
-     // No parameters property
-     execute: async () => {
-       return "Hello, world!";
-     },
-   });
-   ```
+server.addTool({
+  name: "sayHello",
+  description: "Say hello",
+  // No parameters property
+  execute: async (args, context) => { // args will be an empty object {}
+    return `Hello from session ${context.sessionId}!`;
+  },
+});
 
-2. Explicitly define empty parameters:
+Explicitly define empty parameters:
 
-   ```typescript
-   import { z } from "zod";
+import { z } from "zod";
 
-   server.addTool({
-     name: "sayHello",
-     description: "Say hello",
-     parameters: z.object({}), // Empty object
-     execute: async () => {
-       return "Hello, world!";
-     },
-   });
-   ```
+server.addTool({
+  name: "sayHello",
+  description: "Say hello",
+  parameters: z.object({}), // Empty object
+  execute: async (args, context) => {
+    return `Hello from session ${context.sessionId}!`;
+  },
+});
 
-> [!NOTE]
->
-> Both approaches are fully compatible with all MCP clients, including Cursor. FastMCP automatically generates the proper schema in both cases.
+[!NOTE]
 
-#### Returning a string
+Both approaches are fully compatible with all MCP clients, including Cursor. FastMCP automatically generates the proper schema in both cases.
 
-`execute` can return a string:
+Returning a string
+execute can return a string:
 
-```js
 server.addTool({
   name: "download",
   description: "Download a file",
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
     return "Hello, world!";
   },
 });
-```
 
 The latter is equivalent to:
 
-```js
 server.addTool({
   name: "download",
   description: "Download a file",
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
     return {
       content: [
         {
@@ -283,20 +296,17 @@ server.addTool({
     };
   },
 });
-```
 
-#### Returning a list
+Returning a list
+If you want to return a list of messages, you can return an object with a content property:
 
-If you want to return a list of messages, you can return an object with a `content` property:
-
-```js
 server.addTool({
   name: "download",
   description: "Download a file",
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
     return {
       content: [
         { type: "text", text: "First message" },
@@ -305,13 +315,10 @@ server.addTool({
     };
   },
 });
-```
 
-#### Returning an image
+Returning an image
+Use the imageContent to create a content object for an image:
 
-Use the `imageContent` to create a content object for an image:
-
-```js
 import { imageContent } from "fastmcp";
 
 server.addTool({
@@ -320,9 +327,9 @@ server.addTool({
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
     return imageContent({
-      url: "https://example.com/image.png",
+      url: "[https://example.com/image.png](https://example.com/image.png)",
     });
 
     // or...
@@ -343,26 +350,26 @@ server.addTool({
     // };
   },
 });
-```
 
-The `imageContent` function takes the following options:
+The imageContent function takes the following options:
 
-- `url`: The URL of the image.
-- `path`: The path to the image file.
-- `buffer`: The image data as a buffer.
+url: The URL of the image.
 
-Only one of `url`, `path`, or `buffer` must be specified.
+path: The path to the image file.
+
+buffer: The image data as a buffer.
+
+Only one of url, path, or buffer must be specified.
 
 The above example is equivalent to:
 
-```js
 server.addTool({
   name: "download",
   description: "Download a file",
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
     return {
       content: [
         {
@@ -374,13 +381,10 @@ server.addTool({
     };
   },
 });
-```
 
-#### Configurable Ping Behavior
-
+Configurable Ping Behavior
 FastMCP includes a configurable ping mechanism to maintain connection health. The ping behavior can be customized through server options:
 
-```ts
 const server = new FastMCP({
   name: "My Server",
   version: "1.0.0",
@@ -393,24 +397,22 @@ const server = new FastMCP({
     logLevel: "debug",
   },
 });
-```
 
 By default, ping behavior is optimized for each transport type:
 
-- Enabled for SSE and HTTP streaming connections (which benefit from keep-alive)
-- Disabled for `stdio` connections (where pings are typically unnecessary)
+Enabled for SSE and HTTP streaming connections (which benefit from keep-alive)
+
+Disabled for stdio connections (where pings are typically unnecessary)
 
 This configurable approach helps reduce log verbosity and optimize performance for different usage scenarios.
 
-### Health-check Endpoint
-
-When you run FastMCP with the `httpStream` transport you can optionally expose a
+Health-check Endpoint
+When you run FastMCP with the httpStream transport you can optionally expose a
 simple HTTP endpoint that returns a plain-text response useful for load-balancer
 or container orchestration liveness checks.
 
-Enable (or customise) the endpoint via the `health` key in the server options:
+Enable (or customise) the endpoint via the health key in the server options:
 
-```ts
 const server = new FastMCP({
   name: "My Server",
   version: "1.0.0",
@@ -430,24 +432,19 @@ await server.start({
   transportType: "httpStream",
   httpStream: { port: 8080 },
 });
-```
 
-Now a request to `http://localhost:8080/healthz` will return:
+Now a request to http://localhost:8080/healthz will return:
 
-```
 HTTP/1.1 200 OK
 content-type: text/plain
 
 healthy
-```
 
-The endpoint is ignored when the server is started with the `stdio` transport.
+The endpoint is ignored when the server is started with the stdio transport.
 
-#### Roots Management
+Roots Management
+FastMCP supports Roots - Feature that allows clients to provide a set of filesystem-like root locations that can be listed and dynamically updated. The Roots feature can be configured or disabled in server options:
 
-FastMCP supports [Roots](https://modelcontextprotocol.io/docs/concepts/roots) - Feature that allows clients to provide a set of filesystem-like root locations that can be listed and dynamically updated. The Roots feature can be configured or disabled in server options:
-
-```ts
 const server = new FastMCP({
   name: "My Server",
   version: "1.0.0",
@@ -457,18 +454,19 @@ const server = new FastMCP({
     // By default, roots support is enabled (true)
   },
 });
-```
 
 This provides the following benefits:
 
-- Better compatibility with different clients that may not support Roots
-- Reduced error logs when connecting to clients that don't implement roots capability
-- More explicit control over MCP server capabilities
-- Graceful degradation when roots functionality isn't available
+Better compatibility with different clients that may not support Roots
+
+Reduced error logs when connecting to clients that don't implement roots capability
+
+More explicit control over MCP server capabilities
+
+Graceful degradation when roots functionality isn't available
 
 You can listen for root changes in your server:
 
-```ts
 server.on("connect", (event) => {
   const session = event.session;
 
@@ -480,15 +478,12 @@ server.on("connect", (event) => {
     console.log("Roots changed:", event.roots);
   });
 });
-```
 
 When a client doesn't support roots or when roots functionality is explicitly disabled, these operations will gracefully handle the situation without throwing errors.
 
-### Returning an audio
+Returning an audio
+Use the audioContent to create a content object for an audio:
 
-Use the `audioContent` to create a content object for an audio:
-
-```js
 import { audioContent } from "fastmcp";
 
 server.addTool({
@@ -497,9 +492,9 @@ server.addTool({
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
     return audioContent({
-      url: "https://example.com/audio.mp3",
+      url: "[https://example.com/audio.mp3](https://example.com/audio.mp3)",
     });
 
     // or...
@@ -520,26 +515,26 @@ server.addTool({
     // };
   },
 });
-```
 
-The `audioContent` function takes the following options:
+The audioContent function takes the following options:
 
-- `url`: The URL of the audio.
-- `path`: The path to the audio file.
-- `buffer`: The audio data as a buffer.
+url: The URL of the audio.
 
-Only one of `url`, `path`, or `buffer` must be specified.
+path: The path to the audio file.
+
+buffer: The audio data as a buffer.
+
+Only one of url, path, or buffer must be specified.
 
 The above example is equivalent to:
 
-```js
 server.addTool({
   name: "download",
   description: "Download a file",
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
     return {
       content: [
         {
@@ -551,20 +546,17 @@ server.addTool({
     };
   },
 });
-```
 
-#### Return combination type
-
+Return combination type
 You can combine various types in this way and send them back to AI
 
-```js
 server.addTool({
   name: "download",
   description: "Download a file",
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args) => {
+  execute: async (args, context) => {
     return {
       content: [
         {
@@ -586,12 +578,12 @@ server.addTool({
   },
 
   // or...
-  // execute: async (args) => {
-  //   const imgContent = imageContent({
-  //     url: "https://example.com/image.png",
+  // execute: async (args, context) => {
+  //   const imgContent = await imageContent({ // Make sure to await if imageContent is async
+  //     url: "[https://example.com/image.png](https://example.com/image.png)",
   //   });
-  //   const audContent = audioContent({
-  //     url: "https://example.com/audio.mp3",
+  //   const audContent = await audioContent({ // Make sure to await if audioContent is async
+  //     url: "[https://example.com/audio.mp3](https://example.com/audio.mp3)",
   //   });
   //   return {
   //     content: [
@@ -605,22 +597,19 @@ server.addTool({
   //   };
   // },
 });
-```
 
-#### Logging
+Logging
+Tools can log messages to the client using the log object in the context object:
 
-Tools can log messages to the client using the `log` object in the context object:
-
-```js
 server.addTool({
   name: "download",
   description: "Download a file",
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args, { log }) => {
-    log.info("Downloading file...", {
-      url,
+  execute: async (args, { log, sessionId }) => { // Destructure log and sessionId from context
+    log.info(`Downloading file for session ${sessionId}...`, {
+      url: args.url, // Corrected to args.url
     });
 
     // ...
@@ -630,20 +619,20 @@ server.addTool({
     return "done";
   },
 });
-```
 
-The `log` object has the following methods:
+The log object has the following methods:
 
-- `debug(message: string, data?: SerializableValue)`
-- `error(message: string, data?: SerializableValue)`
-- `info(message: string, data?: SerializableValue)`
-- `warn(message: string, data?: SerializableValue)`
+debug(message: string, data?: SerializableValue)
 
-#### Errors
+error(message: string, data?: SerializableValue)
 
-The errors that are meant to be shown to the user should be thrown as `UserError` instances:
+info(message: string, data?: SerializableValue)
 
-```js
+warn(message: string, data?: SerializableValue)
+
+Errors
+The errors that are meant to be shown to the user should be thrown as UserError instances:
+
 import { UserError } from "fastmcp";
 
 server.addTool({
@@ -652,28 +641,25 @@ server.addTool({
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args) => {
-    if (args.url.startsWith("https://example.com")) {
+  execute: async (args, context) => {
+    if (args.url.startsWith("[https://example.com](https://example.com)")) {
       throw new UserError("This URL is not allowed");
     }
 
     return "done";
   },
 });
-```
 
-#### Progress
+Progress
+Tools can report progress by calling reportProgress in the context object:
 
-Tools can report progress by calling `reportProgress` in the context object:
-
-```js
 server.addTool({
   name: "download",
   description: "Download a file",
   parameters: z.object({
     url: z.string(),
   }),
-  execute: async (args, { reportProgress }) => {
+  execute: async (args, { reportProgress }) => { // Destructure reportProgress
     reportProgress({
       progress: 0,
       total: 100,
@@ -689,19 +675,18 @@ server.addTool({
     return "done";
   },
 });
-```
 
-#### Streaming Output
-
+Streaming Output
 FastMCP supports streaming partial results from tools while they're still executing, enabling responsive UIs and real-time feedback. This is particularly useful for:
 
-- Long-running operations that generate content incrementally
-- Progressive generation of text, images, or other media
-- Operations where users benefit from seeing immediate partial results
+Long-running operations that generate content incrementally
 
-To enable streaming for a tool, add the `streamingHint` annotation and use the `streamContent` method:
+Progressive generation of text, images, or other media
 
-```js
+Operations where users benefit from seeing immediate partial results
+
+To enable streaming for a tool, add the streamingHint annotation and use the streamContent method from the context:
+
 server.addTool({
   name: "generateText",
   description: "Generate text incrementally",
@@ -712,7 +697,7 @@ server.addTool({
     streamingHint: true, // Signals this tool uses streaming
     readOnlyHint: true,
   },
-  execute: async (args, { streamContent }) => {
+  execute: async (args, { streamContent }) => { // Destructure streamContent
     // Send initial content immediately
     await streamContent({ type: "text", text: "Starting generation...\n" });
 
@@ -734,11 +719,9 @@ server.addTool({
     // return "Generation complete!";
   },
 });
-```
 
 Streaming works with all content types (text, image, audio) and can be combined with progress reporting:
 
-```js
 server.addTool({
   name: "processData",
   description: "Process data with streaming updates",
@@ -748,7 +731,7 @@ server.addTool({
   annotations: {
     streamingHint: true,
   },
-  execute: async (args, { streamContent, reportProgress }) => {
+  execute: async (args, { streamContent, reportProgress }) => { // Destructure streamContent and reportProgress
     const total = args.datasetSize;
 
     for (let i = 0; i < total; i++) {
@@ -769,13 +752,10 @@ server.addTool({
     return "Processing complete!";
   },
 });
-```
 
-#### Tool Annotations
-
+Tool Annotations
 As of the MCP Specification (2025-03-26), tools can include annotations that provide richer context and control by adding metadata about a tool's behavior:
 
-```typescript
 server.addTool({
   name: "fetch-content",
   description: "Fetch content from a URL",
@@ -787,36 +767,76 @@ server.addTool({
     readOnlyHint: true, // Tool doesn't modify its environment
     openWorldHint: true, // Tool interacts with external entities
   },
-  execute: async (args) => {
+  execute: async (args, context) => {
     return await fetchWebpageContent(args.url);
   },
 });
-```
 
 The available annotations are:
 
-| Annotation        | Type    | Default | Description                                                                                                                          |
-| :---------------- | :------ | :------ | :----------------------------------------------------------------------------------------------------------------------------------- |
-| `title`           | string  | -       | A human-readable title for the tool, useful for UI display                                                                           |
-| `readOnlyHint`    | boolean | `false` | If true, indicates the tool does not modify its environment                                                                          |
-| `destructiveHint` | boolean | `true`  | If true, the tool may perform destructive updates (only meaningful when `readOnlyHint` is false)                                     |
-| `idempotentHint`  | boolean | `false` | If true, calling the tool repeatedly with the same arguments has no additional effect (only meaningful when `readOnlyHint` is false) |
-| `openWorldHint`   | boolean | `true`  | If true, the tool may interact with an "open world" of external entities                                                             |
+Annotation
+
+Type
+
+Default
+
+Description
+
+title
+
+string
+
+-
+
+A human-readable title for the tool, useful for UI display
+
+readOnlyHint
+
+boolean
+
+false
+
+If true, indicates the tool does not modify its environment
+
+destructiveHint
+
+boolean
+
+true
+
+If true, the tool may perform destructive updates (only meaningful when readOnlyHint is false)
+
+idempotentHint
+
+boolean
+
+false
+
+If true, calling the tool repeatedly with the same arguments has no additional effect (only meaningful when readOnlyHint is false)
+
+openWorldHint
+
+boolean
+
+true
+
+If true, the tool may interact with an "open world" of external entities
 
 These annotations help clients and LLMs better understand how to use the tools and what to expect when calling them.
 
-### Resources
+Resources
+Resources represent any kind of data that an MCP server wants to make available to clients. This can include:
 
-[Resources](https://modelcontextprotocol.io/docs/concepts/resources) represent any kind of data that an MCP server wants to make available to clients. This can include:
+File contents
 
-- File contents
-- Screenshots and images
-- Log files
-- And more
+Screenshots and images
+
+Log files
+
+And more
 
 Each resource is identified by a unique URI and can contain either text or binary data.
 
-```ts
 server.addResource({
   uri: "file:///logs/app.log",
   name: "Application Logs",
@@ -827,40 +847,33 @@ server.addResource({
     };
   },
 });
-```
 
-> [!NOTE]
->
-> `load` can return multiple resources. This could be used, for example, to return a list of files inside a directory when the directory is read.
->
-> ```ts
-> async load() {
->   return [
->     {
->       text: "First file content",
->     },
->     {
->       text: "Second file content",
->     },
->   ];
-> }
-> ```
+[!NOTE]
 
-You can also return binary contents in `load`:
+load can return multiple resources. This could be used, for example, to return a list of files inside a directory when the directory is read.
 
-```ts
+async load() {
+  return [
+    {
+      text: "First file content",
+    },
+    {
+      text: "Second file content",
+    },
+  ];
+}
+
+You can also return binary contents in load:
+
 async load() {
   return {
     blob: 'base64-encoded-data'
   };
 }
-```
 
-### Resource templates
-
+Resource templates
 You can also define resource templates:
 
-```ts
 server.addResourceTemplate({
   uriTemplate: "file:///logs/{name}.log",
   name: "Application Logs",
@@ -878,13 +891,10 @@ server.addResourceTemplate({
     };
   },
 });
-```
 
-#### Resource template argument auto-completion
+Resource template argument auto-completion
+Provide complete functions for resource template arguments to enable automatic completion:
 
-Provide `complete` functions for resource template arguments to enable automatic completion:
-
-```ts
 server.addResourceTemplate({
   uriTemplate: "file:///logs/{name}.log",
   name: "Application Logs",
@@ -913,13 +923,10 @@ server.addResourceTemplate({
     };
   },
 });
-```
 
-### Prompts
+Prompts
+Prompts enable servers to define reusable prompt templates and workflows that clients can easily surface to users and LLMs. They provide a powerful way to standardize and share common LLM interactions.
 
-[Prompts](https://modelcontextprotocol.io/docs/concepts/prompts) enable servers to define reusable prompt templates and workflows that clients can easily surface to users and LLMs. They provide a powerful way to standardize and share common LLM interactions.
-
-```ts
 server.addPrompt({
   name: "git-commit",
   description: "Generate a Git commit message",
@@ -934,13 +941,10 @@ server.addPrompt({
     return `Generate a concise but descriptive commit message for these changes:\n\n${args.changes}`;
   },
 });
-```
 
-#### Prompt argument auto-completion
-
+Prompt argument auto-completion
 Prompts can provide auto-completion for their arguments:
 
-```js
 server.addPrompt({
   name: "countryPoem",
   description: "Writes a poem about a country",
@@ -966,13 +970,10 @@ server.addPrompt({
     },
   ],
 });
-```
 
-#### Prompt argument auto-completion using `enum`
+Prompt argument auto-completion using enum
+If you provide an enum array for an argument, the server will automatically provide completions for the argument.
 
-If you provide an `enum` array for an argument, the server will automatically provide completions for the argument.
-
-```js
 server.addPrompt({
   name: "countryPoem",
   description: "Writes a poem about a country",
@@ -988,17 +989,21 @@ server.addPrompt({
     },
   ],
 });
-```
 
-### Authentication
+Authentication
+FastMCP allows you to authenticate clients using a custom function. The data returned by this function will be available as context.auth within your tool's execute method.
 
-FastMCP allows you to `authenticate` clients using a custom function:
+// Define a type for your authentication data
+type MyAuthData = {
+  id: number;
+  username: string;
+  permissions: string[];
+};
 
-```ts
-const server = new FastMCP({
+const server = new FastMCP<MyAuthData>({ // Specify the AuthData type here
   name: "My Server",
   version: "1.0.0",
-  authenticate: (request) => {
+  authenticate: async (request): Promise<MyAuthData> => { // Ensure your function returns MyAuthData
     const apiKey = request.headers["x-api-key"];
 
     if (apiKey !== "123") {
@@ -1008,73 +1013,75 @@ const server = new FastMCP({
       });
     }
 
-    // Whatever you return here will be accessible in the `context.session` object.
+    // Whatever you return here will be accessible in context.auth
     return {
       id: 1,
+      username: "testuser",
+      permissions: ["read", "write"],
     };
   },
 });
-```
 
 Now you can access the authenticated session data in your tools:
 
-```ts
 server.addTool({
   name: "sayHello",
-  execute: async (args, { session }) => {
-    return `Hello, ${session.id}!`;
+  execute: async (args, context) => {
+    // context.auth is now typed as MyAuthData | undefined
+    // context.sessionId is the framework-generated session ID
+    if (context.auth) {
+      return `Hello, ${context.auth.username} (ID: ${context.auth.id})! Your session ID is ${context.sessionId}.`;
+    }
+    return `Hello, anonymous user! Your session ID is ${context.sessionId}.`;
   },
 });
-```
 
-### Providing Instructions
+Providing Instructions
+You can provide instructions to the server using the instructions option:
 
-You can provide instructions to the server using the `instructions` option:
-
-```ts
 const server = new FastMCP({
   name: "My Server",
   version: "1.0.0",
   instructions:
     'Instructions describing how to use the server and its features.\n\nThis can be used by clients to improve the LLM\'s understanding of available tools, resources, etc. It can be thought of like a "hint" to the model. For example, this information MAY be added to the system prompt.',
 });
-```
 
-### Sessions
+Sessions
+The server.sessions array holds all active FastMCPSession instances. Each FastMCPSession instance represents a unique client connection.
 
-The `session` object is an instance of `FastMCPSession` and it describes active client sessions.
+server.sessions; // Array of FastMCPSession instances
 
-```ts
-server.sessions;
-```
+We allocate a new FastMCPSession instance for each client connection to enable 1:1 communication between a client and the server.
 
-We allocate a new server instance for each client connection to enable 1:1 communication between a client and the server.
+Typed server events
+You can listen to events emitted by the server using the on method:
 
-### Typed server events
-
-You can listen to events emitted by the server using the `on` method:
-
-```ts
 server.on("connect", (event) => {
-  console.log("Client connected:", event.session);
+  // event.session is a FastMCPSession instance
+  console.log("Client connected:", event.session.sessionId);
 });
 
 server.on("disconnect", (event) => {
-  console.log("Client disconnected:", event.session);
+  // event.session is a FastMCPSession instance
+  console.log("Client disconnected:", event.session.sessionId);
 });
-```
 
-## `FastMCPSession`
+FastMCPSession
+FastMCPSession represents a client session and provides methods to interact with the client.
 
-`FastMCPSession` represents a client session and provides methods to interact with the client.
+Refer to Sessions for examples of how to obtain a FastMCPSession instance.
 
-Refer to [Sessions](#sessions) for examples of how to obtain a `FastMCPSession` instance.
+sessionId (Property)
+The sessionId property on a FastMCPSession instance holds the unique, framework-generated ID for that specific client connection. This is distinct from any application-defined authentication ID that might be part of your AuthData.
 
-### `requestSampling`
+server.on("connect", (event) => {
+  const session = event.session;
+  console.log("Framework Session ID:", session.sessionId);
+});
 
-`requestSampling` creates a [sampling](https://modelcontextprotocol.io/docs/concepts/sampling) request and returns the response.
+requestSampling
+requestSampling creates a sampling request and returns the response.
 
-```ts
 await session.requestSampling({
   messages: [
     {
@@ -1089,45 +1096,30 @@ await session.requestSampling({
   includeContext: "thisServer",
   maxTokens: 100,
 });
-```
 
-### `clientCapabilities`
+clientCapabilities
+The clientCapabilities property contains the client capabilities.
 
-The `clientCapabilities` property contains the client capabilities.
-
-```ts
 session.clientCapabilities;
-```
 
-### `loggingLevel`
+loggingLevel
+The loggingLevel property describes the logging level as set by the client.
 
-The `loggingLevel` property describes the logging level as set by the client.
-
-```ts
 session.loggingLevel;
-```
 
-### `roots`
+roots
+The roots property contains the roots as set by the client.
 
-The `roots` property contains the roots as set by the client.
-
-```ts
 session.roots;
-```
 
-### `server`
+server (Property)
+The server property on a FastMCPSession instance contains the underlying MCP Server object from the SDK that is associated with this specific session.
 
-The `server` property contains an instance of MCP server that is associated with the session.
+session.server; // This is the SDK's Server instance for this session.
 
-```ts
-session.server;
-```
+Typed session events
+You can listen to events emitted by the session using the on method:
 
-### Typed session events
-
-You can listen to events emitted by the session using the `on` method:
-
-```ts
 session.on("rootsChanged", (event) => {
   console.log("Roots changed:", event.roots);
 });
@@ -1135,36 +1127,25 @@ session.on("rootsChanged", (event) => {
 session.on("error", (event) => {
   console.error("Error:", event.error);
 });
-```
 
-## Running Your Server
+Running Your Server
+Test with mcp-cli
+The fastest way to test and debug your server is with fastmcp dev:
 
-### Test with `mcp-cli`
-
-The fastest way to test and debug your server is with `fastmcp dev`:
-
-```bash
 npx fastmcp dev server.js
 npx fastmcp dev server.ts
-```
 
-This will run your server with [`mcp-cli`](https://github.com/wong2/mcp-cli) for testing and debugging your MCP server in the terminal.
+This will run your server with mcp-cli for testing and debugging your MCP server in the terminal.
 
-### Inspect with `MCP Inspector`
+Inspect with MCP Inspector
+Another way is to use the official MCP Inspector to inspect your server with a Web UI:
 
-Another way is to use the official [`MCP Inspector`](https://modelcontextprotocol.io/docs/tools/inspector) to inspect your server with a Web UI:
-
-```bash
 npx fastmcp inspect server.ts
-```
 
-## FAQ
-
-### How to use with Claude Desktop?
-
+FAQ
+How to use with Claude Desktop?
 Follow the guide https://modelcontextprotocol.io/quickstart/user and add the following configuration:
 
-```json
 {
   "mcpServers": {
     "my-mcp-server": {
@@ -1176,29 +1157,35 @@ Follow the guide https://modelcontextprotocol.io/quickstart/user and add the fol
     }
   }
 }
-```
 
-## Showcase
+Showcase
+[!NOTE]
 
-> [!NOTE]
->
-> If you've developed a server using FastMCP, please [submit a PR](https://github.com/punkpeye/fastmcp) to showcase it here!
+If you've developed a server using FastMCP, please submit a PR to showcase it here!
 
-> [!NOTE]
->
-> If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
+[!NOTE]
 
-- [apinetwork/piapi-mcp-server](https://github.com/apinetwork/piapi-mcp-server) - generate media using Midjourney/Flux/Kling/LumaLabs/Udio/Chrip/Trellis
-- [domdomegg/computer-use-mcp](https://github.com/domdomegg/computer-use-mcp) - controls your computer
-- [LiterallyBlah/Dradis-MCP](https://github.com/LiterallyBlah/Dradis-MCP) – manages projects and vulnerabilities in Dradis
-- [Meeting-Baas/meeting-mcp](https://github.com/Meeting-Baas/meeting-mcp) - create meeting bots, search transcripts, and manage recording data
-- [drumnation/unsplash-smart-mcp-server](https://github.com/drumnation/unsplash-smart-mcp-server) – enables AI agents to seamlessly search, recommend, and deliver professional stock photos from Unsplash
-- [ssmanji89/halopsa-workflows-mcp](https://github.com/ssmanji89/halopsa-workflows-mcp) - HaloPSA Workflows integration with AI assistants
-- [aiamblichus/mcp-chat-adapter](https://github.com/aiamblichus/mcp-chat-adapter) – provides a clean interface for LLMs to use chat completion
-- [cswkim/discogs-mcp-server](https://github.com/cswkim/discogs-mcp-server) - connects to the Discogs API for interacting with your music collection
+If you are looking for a boilerplate repository to build your own MCP server, check out fastmcp-boilerplate.
 
-## Acknowledgements
+apinetwork/piapi-mcp-server - generate media using Midjourney/Flux/Kling/LumaLabs/Udio/Chrip/Trellis
 
-- FastMCP is inspired by the [Python implementation](https://github.com/jlowin/fastmcp) by [Jonathan Lowin](https://github.com/jlowin).
-- Parts of codebase were adopted from [LiteMCP](https://github.com/wong2/litemcp).
-- Parts of codebase were adopted from [Model Context protocolでSSEをやってみる](https://dev.classmethod.jp/articles/mcp-sse/).
+domdomegg/computer-use-mcp - controls your computer
+
+LiterallyBlah/Dradis-MCP – manages projects and vulnerabilities in Dradis
+
+Meeting-Baas/meeting-mcp - create meeting bots, search transcripts, and manage recording data
+
+drumnation/unsplash-smart-mcp-server – enables AI agents to seamlessly search, recommend, and deliver professional stock photos from Unsplash
+
+ssmanji89/halopsa-workflows-mcp - HaloPSA Workflows integration with AI assistants
+
+aiamblichus/mcp-chat-adapter – provides a clean interface for LLMs to use chat completion
+
+cswkim/discogs-mcp-server - connects to the Discogs API for interacting with your music collection
+
+Acknowledgements
+FastMCP is inspired by the Python implementation by Jonathan Lowin.
+
+Parts of codebase were adopted from LiteMCP.
+
+Parts of codebase were adopted from Model Context protocolでSSEをやってみる.
