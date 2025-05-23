@@ -171,15 +171,36 @@ export const audioContent = async (
   }
 };
 
+/**
+ * Context object provided to tool execution functions.
+ * @template T - The type of the authentication data.
+ */
 type Context<T extends FastMCPSessionAuth> = {
+  /**
+   * Authentication data returned by the server's `authenticate` function.
+   * This is `undefined` if no `authenticate` function is provided or if authentication fails.
+   */
+  auth: T | undefined;
+  /**
+   * Logging functions to send messages to the client.
+   */
   log: {
     debug: (message: string, data?: SerializableValue) => void;
     error: (message: string, data?: SerializableValue) => void;
     info: (message: string, data?: SerializableValue) => void;
     warn: (message: string, data?: SerializableValue) => void;
   };
+  /**
+   * Function to report progress of a tool's execution to the client.
+   */
   reportProgress: (progress: Progress) => Promise<void>;
-  session: T | undefined;
+  /**
+   * The FastMCP framework-generated session ID for the current client connection.
+   */
+  sessionId: string;
+  /**
+   * Function to stream content incrementally to the client during tool execution.
+   */
   streamContent: (content: Content | Content[]) => Promise<void>;
 };
 
@@ -608,6 +629,14 @@ export class FastMCPSession<
   public get server(): Server {
     return this.#server;
   }
+  /**
+   * The framework-generated session ID for this specific client connection.
+   * This is distinct from any application-level authentication ID.
+   */
+  public get sessionId(): string {
+    return this.#server.sessionId;
+  }
+
   #auth: T | undefined;
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
@@ -1326,9 +1355,10 @@ export class FastMCPSession<
         };
 
         const executeToolPromise = tool.execute(args, {
+          auth: this.#auth,
           log,
           reportProgress,
-          session: this.#auth,
+          sessionId: this.#server.sessionId, // Pass the framework session ID
           streamContent,
         });
 
@@ -1581,3 +1611,4 @@ export type { Prompt, PromptArgument };
 export type { InputPrompt, InputPromptArgument };
 export type { LoggingLevel, ServerOptions };
 export type { FastMCPEvents, FastMCPSessionEvents };
+
