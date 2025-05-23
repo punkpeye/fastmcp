@@ -362,6 +362,7 @@ type InputResourceTemplateArgument = Readonly<{
   complete?: ArgumentValueCompleter;
   description?: string;
   name: string;
+  required?: boolean;
 }>;
 
 type LoggingLevel =
@@ -438,6 +439,7 @@ type ResourceTemplateArgument = Readonly<{
   complete?: ArgumentValueCompleter;
   description?: string;
   name: string;
+  required?: boolean;
 }>;
 
 type ResourceTemplateArgumentsToObject<T extends { name: string }[]> = {
