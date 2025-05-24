@@ -1,2 +1,19 @@
-dist
-node_modules
+# Compiled output
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# TypeScript declaration files
+*.d.ts
+
+# Logs
+*.log
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Temporary files
+*.tmp
+.cache/

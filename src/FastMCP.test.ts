@@ -1797,13 +1797,14 @@ test("provides auth to tools", async () => {
   );
 
   // Need to get the session after connection to check its sessionId
-  const session = await new Promise<FastMCPSession<{ id: number }>>((resolve) => {
-    server.on("connect", (event) => {
-      resolve(event.session as FastMCPSession<{ id: number }>);
-    });
-    client.connect(transport);
-  });
-
+  const session = await new Promise<FastMCPSession<{ id: number }>>(
+    (resolve) => {
+      server.on("connect", (event) => {
+        resolve(event.session as FastMCPSession<{ id: number }>);
+      });
+      client.connect(transport);
+    },
+  );
 
   expect(
     authenticate,
@@ -1831,7 +1832,6 @@ test("provides auth to tools", async () => {
     },
     {
       auth: { id: 1 }, // Check for context.auth
-      sessionId: session.sessionId, // Check for context.sessionId
       log: {
         debug: expect.any(Function),
         error: expect.any(Function),
@@ -1839,6 +1839,7 @@ test("provides auth to tools", async () => {
         warn: expect.any(Function),
       },
       reportProgress: expect.any(Function),
+      sessionId: session.sessionId, // Check for context.sessionId
       streamContent: expect.any(Function),
     },
   );
@@ -2043,4 +2044,3 @@ test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
     await server.stop();
   }
 });
-

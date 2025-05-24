@@ -54,31 +54,31 @@ import { FastMCP } from "fastmcp";
 import { z } from "zod"; // Or any validation library that supports Standard Schema
 
 const server = new FastMCP({
-  name: "My Server",
-  version: "1.0.0",
+name: "My Server",
+version: "1.0.0",
 });
 
 server.addTool({
-  name: "add",
-  description: "Add two numbers",
-  parameters: z.object({
-    a: z.number(),
-    b: z.number(),
-  }),
-  execute: async (args, context) => {
-    // context.auth contains the authentication data (if any)
-    // context.sessionId contains the framework-generated session ID
-    console.log(`Executing 'add' for session: ${context.sessionId}`);
-    if (context.auth) {
-      // Assuming AuthData is an object and has an 'id' field, for example:
-      // console.log(`Authenticated user ID: ${ (context.auth as {id: any}).id }`);
-    }
-    return String(args.a + args.b);
-  },
+name: "add",
+description: "Add two numbers",
+parameters: z.object({
+a: z.number(),
+b: z.number(),
+}),
+execute: async (args, context) => {
+// context.auth contains the authentication data (if any)
+// context.sessionId contains the framework-generated session ID
+console.log(`Executing 'add' for session: ${context.sessionId}`);
+if (context.auth) {
+// Assuming AuthData is an object and has an 'id' field, for example:
+// console.log(`Authenticated user ID: ${ (context.auth as {id: any}).id }`);
+}
+return String(args.a + args.b);
+},
 });
 
 server.start({
-  transportType: "stdio",
+transportType: "stdio",
 });
 
 That's it! You have a working MCP server.
@@ -92,8 +92,11 @@ pnpm install
 pnpm build
 
 # Test the addition server example using CLI:
+
 npx fastmcp dev src/examples/addition.ts
+
 # Test the addition server example using MCP Inspector:
+
 npx fastmcp inspect src/examples/addition.ts
 
 If you are looking for a boilerplate repository to build your own MCP server, check out fastmcp-boilerplate.
@@ -107,10 +110,10 @@ HTTP streaming provides a more efficient alternative to SSE in environments that
 You can run the server with HTTP streaming support:
 
 server.start({
-  transportType: "httpStream",
-  httpStream: {
-    port: 8080,
-  },
+transportType: "httpStream",
+httpStream: {
+port: 8080,
+},
 });
 
 This will start the server and listen for HTTP streaming connections on http://localhost:8080/stream.
@@ -123,17 +126,17 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const client = new Client(
-  {
-    name: "example-client",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {},
-  },
+{
+name: "example-client",
+version: "1.0.0",
+},
+{
+capabilities: {},
+},
 );
 
 const transport = new StreamableHTTPClientTransport(
-  new URL(`http://localhost:8080/stream`),
+new URL(`http://localhost:8080/stream`),
 );
 
 await client.connect(transport);
@@ -144,13 +147,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
 const client = new Client(
-  {
-    name: "example-client",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {},
-  },
+{
+name: "example-client",
+version: "1.0.0",
+},
+{
+capabilities: {},
+},
 );
 
 const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
@@ -180,20 +183,20 @@ Zod Example:
 import { z } from "zod";
 
 server.addTool({
-  name: "fetch-zod",
-  description: "Fetch the content of a url (using Zod)",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, context) => {
-    console.log(`Fetching URL for session ${context.sessionId}`);
-    // Example assuming AuthData has a 'canFetchExternal' field:
-    // if (context.auth && (context.auth as {canFetchExternal: boolean}).canFetchExternal) {
-    //     return await fetchWebpageContent(args.url);
-    // }
-    // throw new UserError("Not authorized to fetch external URLs.");
-    return await fetchWebpageContent(args.url); // Simplified for example
-  },
+name: "fetch-zod",
+description: "Fetch the content of a url (using Zod)",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, context) => {
+console.log(`Fetching URL for session ${context.sessionId}`);
+// Example assuming AuthData has a 'canFetchExternal' field:
+// if (context.auth && (context.auth as {canFetchExternal: boolean}).canFetchExternal) {
+// return await fetchWebpageContent(args.url);
+// }
+// throw new UserError("Not authorized to fetch external URLs.");
+return await fetchWebpageContent(args.url); // Simplified for example
+},
 });
 
 ArkType Example:
@@ -201,35 +204,35 @@ ArkType Example:
 import { type } from "arktype";
 
 server.addTool({
-  name: "fetch-arktype",
-  description: "Fetch the content of a url (using ArkType)",
-  parameters: type({
-    url: "string",
-  }),
-  execute: async (args, context) => {
-    // Access context.auth and context.sessionId here
-    console.log(`Session ID: ${context.sessionId}`);
-    return await fetchWebpageContent(args.url);
-  },
+name: "fetch-arktype",
+description: "Fetch the content of a url (using ArkType)",
+parameters: type({
+url: "string",
+}),
+execute: async (args, context) => {
+// Access context.auth and context.sessionId here
+console.log(`Session ID: ${context.sessionId}`);
+return await fetchWebpageContent(args.url);
+},
 });
 
 Valibot Example:
 
 Valibot requires the peer dependency @valibot/to-json-schema.
 
-import * as v from "valibot";
+import \* as v from "valibot";
 
 server.addTool({
-  name: "fetch-valibot",
-  description: "Fetch the content of a url (using Valibot)",
-  parameters: v.object({
-    url: v.string(),
-  }),
-  execute: async (args, context) => {
-    // Access context.auth and context.sessionId here
-    console.log(`Auth data: ${JSON.stringify(context.auth)}`);
-    return await fetchWebpageContent(args.url);
-  },
+name: "fetch-valibot",
+description: "Fetch the content of a url (using Valibot)",
+parameters: v.object({
+url: v.string(),
+}),
+execute: async (args, context) => {
+// Access context.auth and context.sessionId here
+console.log(`Auth data: ${JSON.stringify(context.auth)}`);
+return await fetchWebpageContent(args.url);
+},
 });
 
 Tools Without Parameters
@@ -238,12 +241,12 @@ When creating tools that don't require parameters, you have two options:
 Omit the parameters property entirely:
 
 server.addTool({
-  name: "sayHello",
-  description: "Say hello",
-  // No parameters property
-  execute: async (args, context) => { // args will be an empty object {}
-    return `Hello from session ${context.sessionId}!`;
-  },
+name: "sayHello",
+description: "Say hello",
+// No parameters property
+execute: async (args, context) => { // args will be an empty object {}
+return `Hello from session ${context.sessionId}!`;
+},
 });
 
 Explicitly define empty parameters:
@@ -251,12 +254,12 @@ Explicitly define empty parameters:
 import { z } from "zod";
 
 server.addTool({
-  name: "sayHello",
-  description: "Say hello",
-  parameters: z.object({}), // Empty object
-  execute: async (args, context) => {
-    return `Hello from session ${context.sessionId}!`;
-  },
+name: "sayHello",
+description: "Say hello",
+parameters: z.object({}), // Empty object
+execute: async (args, context) => {
+return `Hello from session ${context.sessionId}!`;
+},
 });
 
 [!NOTE]
@@ -267,53 +270,53 @@ Returning a string
 execute can return a string:
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, context) => {
-    return "Hello, world!";
-  },
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, context) => {
+return "Hello, world!";
+},
 });
 
 The latter is equivalent to:
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, context) => {
-    return {
-      content: [
-        {
-          type: "text",
-          text: "Hello, world!",
-        },
-      ],
-    };
-  },
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, context) => {
+return {
+content: [
+{
+type: "text",
+text: "Hello, world!",
+},
+],
+};
+},
 });
 
 Returning a list
 If you want to return a list of messages, you can return an object with a content property:
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, context) => {
-    return {
-      content: [
-        { type: "text", text: "First message" },
-        { type: "text", text: "Second message" },
-      ],
-    };
-  },
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, context) => {
+return {
+content: [
+{ type: "text", text: "First message" },
+{ type: "text", text: "Second message" },
+],
+};
+},
 });
 
 Returning an image
@@ -322,15 +325,15 @@ Use the imageContent to create a content object for an image:
 import { imageContent } from "fastmcp";
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, context) => {
-    return imageContent({
-      url: "[https://example.com/image.png](https://example.com/image.png)",
-    });
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, context) => {
+return imageContent({
+url: "[https://example.com/image.png](https://example.com/image.png)",
+});
 
     // or...
     // return imageContent({
@@ -348,7 +351,8 @@ server.addTool({
     //     await imageContent(...)
     //   ],
     // };
-  },
+
+},
 });
 
 The imageContent function takes the following options:
@@ -364,38 +368,38 @@ Only one of url, path, or buffer must be specified.
 The above example is equivalent to:
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, context) => {
-    return {
-      content: [
-        {
-          type: "image",
-          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-          mimeType: "image/png",
-        },
-      ],
-    };
-  },
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, context) => {
+return {
+content: [
+{
+type: "image",
+data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+mimeType: "image/png",
+},
+],
+};
+},
 });
 
 Configurable Ping Behavior
 FastMCP includes a configurable ping mechanism to maintain connection health. The ping behavior can be customized through server options:
 
 const server = new FastMCP({
-  name: "My Server",
-  version: "1.0.0",
-  ping: {
-    // Explicitly enable or disable pings (defaults vary by transport)
-    enabled: true,
-    // Configure ping interval in milliseconds (default: 5000ms)
-    intervalMs: 10000,
-    // Set log level for ping-related messages (default: 'debug')
-    logLevel: "debug",
-  },
+name: "My Server",
+version: "1.0.0",
+ping: {
+// Explicitly enable or disable pings (defaults vary by transport)
+enabled: true,
+// Configure ping interval in milliseconds (default: 5000ms)
+intervalMs: 10000,
+// Set log level for ping-related messages (default: 'debug')
+logLevel: "debug",
+},
 });
 
 By default, ping behavior is optimized for each transport type:
@@ -414,23 +418,23 @@ or container orchestration liveness checks.
 Enable (or customise) the endpoint via the health key in the server options:
 
 const server = new FastMCP({
-  name: "My Server",
-  version: "1.0.0",
-  health: {
-    // Enable / disable (default: true)
-    enabled: true,
-    // Body returned by the endpoint (default: 'ok')
-    message: "healthy",
-    // Path that should respond (default: '/health')
-    path: "/healthz",
-    // HTTP status code to return (default: 200)
-    status: 200,
-  },
+name: "My Server",
+version: "1.0.0",
+health: {
+// Enable / disable (default: true)
+enabled: true,
+// Body returned by the endpoint (default: 'ok')
+message: "healthy",
+// Path that should respond (default: '/health')
+path: "/healthz",
+// HTTP status code to return (default: 200)
+status: 200,
+},
 });
 
 await server.start({
-  transportType: "httpStream",
-  httpStream: { port: 8080 },
+transportType: "httpStream",
+httpStream: { port: 8080 },
 });
 
 Now a request to http://localhost:8080/healthz will return:
@@ -446,13 +450,13 @@ Roots Management
 FastMCP supports Roots - Feature that allows clients to provide a set of filesystem-like root locations that can be listed and dynamically updated. The Roots feature can be configured or disabled in server options:
 
 const server = new FastMCP({
-  name: "My Server",
-  version: "1.0.0",
-  roots: {
-    // Set to false to explicitly disable roots support
-    enabled: false,
-    // By default, roots support is enabled (true)
-  },
+name: "My Server",
+version: "1.0.0",
+roots: {
+// Set to false to explicitly disable roots support
+enabled: false,
+// By default, roots support is enabled (true)
+},
 });
 
 This provides the following benefits:
@@ -468,15 +472,15 @@ Graceful degradation when roots functionality isn't available
 You can listen for root changes in your server:
 
 server.on("connect", (event) => {
-  const session = event.session;
+const session = event.session;
 
-  // Access the current roots
-  console.log("Initial roots:", session.roots);
+// Access the current roots
+console.log("Initial roots:", session.roots);
 
-  // Listen for changes to the roots
-  session.on("rootsChanged", (event) => {
-    console.log("Roots changed:", event.roots);
-  });
+// Listen for changes to the roots
+session.on("rootsChanged", (event) => {
+console.log("Roots changed:", event.roots);
+});
 });
 
 When a client doesn't support roots or when roots functionality is explicitly disabled, these operations will gracefully handle the situation without throwing errors.
@@ -487,15 +491,15 @@ Use the audioContent to create a content object for an audio:
 import { audioContent } from "fastmcp";
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, context) => {
-    return audioContent({
-      url: "[https://example.com/audio.mp3](https://example.com/audio.mp3)",
-    });
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, context) => {
+return audioContent({
+url: "[https://example.com/audio.mp3](https://example.com/audio.mp3)",
+});
 
     // or...
     // return audioContent({
@@ -513,7 +517,8 @@ server.addTool({
     //     await audioContent(...)
     //   ],
     // };
-  },
+
+},
 });
 
 The audioContent function takes the following options:
@@ -529,95 +534,96 @@ Only one of url, path, or buffer must be specified.
 The above example is equivalent to:
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, context) => {
-    return {
-      content: [
-        {
-          type: "audio",
-          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-          mimeType: "audio/mpeg",
-        },
-      ],
-    };
-  },
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, context) => {
+return {
+content: [
+{
+type: "audio",
+data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+mimeType: "audio/mpeg",
+},
+],
+};
+},
 });
 
 Return combination type
 You can combine various types in this way and send them back to AI
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, context) => {
-    return {
-      content: [
-        {
-          type: "text",
-          text: "Hello, world!",
-        },
-        {
-          type: "image",
-          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-          mimeType: "image/png",
-        },
-        {
-          type: "audio",
-          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-          mimeType: "audio/mpeg",
-        },
-      ],
-    };
-  },
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, context) => {
+return {
+content: [
+{
+type: "text",
+text: "Hello, world!",
+},
+{
+type: "image",
+data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+mimeType: "image/png",
+},
+{
+type: "audio",
+data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+mimeType: "audio/mpeg",
+},
+],
+};
+},
 
-  // or...
-  // execute: async (args, context) => {
-  //   const imgContent = await imageContent({ // Make sure to await if imageContent is async
-  //     url: "[https://example.com/image.png](https://example.com/image.png)",
-  //   });
-  //   const audContent = await audioContent({ // Make sure to await if audioContent is async
-  //     url: "[https://example.com/audio.mp3](https://example.com/audio.mp3)",
-  //   });
-  //   return {
-  //     content: [
-  //       {
-  //         type: "text",
-  //         text: "Hello, world!",
-  //       },
-  //       imgContent,
-  //       audContent,
-  //     ],
-  //   };
-  // },
+// or...
+// execute: async (args, context) => {
+// const imgContent = await imageContent({ // Make sure to await if imageContent is async
+// url: "[https://example.com/image.png](https://example.com/image.png)",
+// });
+// const audContent = await audioContent({ // Make sure to await if audioContent is async
+// url: "[https://example.com/audio.mp3](https://example.com/audio.mp3)",
+// });
+// return {
+// content: [
+// {
+// type: "text",
+// text: "Hello, world!",
+// },
+// imgContent,
+// audContent,
+// ],
+// };
+// },
 });
 
 Logging
 Tools can log messages to the client using the log object in the context object:
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, { log, sessionId }) => { // Destructure log and sessionId from context
-    log.info(`Downloading file for session ${sessionId}...`, {
-      url: args.url, // Corrected to args.url
-    });
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, { log, sessionId }) => { // Destructure log and sessionId from context
+log.info(`Downloading file for session ${sessionId}...`, {
+url: args.url, // Corrected to args.url
+});
 
     // ...
 
     log.info("Downloaded file");
 
     return "done";
-  },
+
+},
 });
 
 The log object has the following methods:
@@ -636,34 +642,35 @@ The errors that are meant to be shown to the user should be thrown as UserError 
 import { UserError } from "fastmcp";
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, context) => {
-    if (args.url.startsWith("[https://example.com](https://example.com)")) {
-      throw new UserError("This URL is not allowed");
-    }
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, context) => {
+if (args.url.startsWith("[https://example.com](https://example.com)")) {
+throw new UserError("This URL is not allowed");
+}
 
     return "done";
-  },
+
+},
 });
 
 Progress
 Tools can report progress by calling reportProgress in the context object:
 
 server.addTool({
-  name: "download",
-  description: "Download a file",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  execute: async (args, { reportProgress }) => { // Destructure reportProgress
-    reportProgress({
-      progress: 0,
-      total: 100,
-    });
+name: "download",
+description: "Download a file",
+parameters: z.object({
+url: z.string(),
+}),
+execute: async (args, { reportProgress }) => { // Destructure reportProgress
+reportProgress({
+progress: 0,
+total: 100,
+});
 
     // ...
 
@@ -673,7 +680,8 @@ server.addTool({
     });
 
     return "done";
-  },
+
+},
 });
 
 Streaming Output
@@ -688,18 +696,18 @@ Operations where users benefit from seeing immediate partial results
 To enable streaming for a tool, add the streamingHint annotation and use the streamContent method from the context:
 
 server.addTool({
-  name: "generateText",
-  description: "Generate text incrementally",
-  parameters: z.object({
-    prompt: z.string(),
-  }),
-  annotations: {
-    streamingHint: true, // Signals this tool uses streaming
-    readOnlyHint: true,
-  },
-  execute: async (args, { streamContent }) => { // Destructure streamContent
-    // Send initial content immediately
-    await streamContent({ type: "text", text: "Starting generation...\n" });
+name: "generateText",
+description: "Generate text incrementally",
+parameters: z.object({
+prompt: z.string(),
+}),
+annotations: {
+streamingHint: true, // Signals this tool uses streaming
+readOnlyHint: true,
+},
+execute: async (args, { streamContent }) => { // Destructure streamContent
+// Send initial content immediately
+await streamContent({ type: "text", text: "Starting generation...\n" });
 
     // Simulate incremental content generation
     const words = "The quick brown fox jumps over the lazy dog.".split(" ");
@@ -717,22 +725,23 @@ server.addTool({
 
     // Option 2: Return final content that will be appended
     // return "Generation complete!";
-  },
+
+},
 });
 
 Streaming works with all content types (text, image, audio) and can be combined with progress reporting:
 
 server.addTool({
-  name: "processData",
-  description: "Process data with streaming updates",
-  parameters: z.object({
-    datasetSize: z.number(),
-  }),
-  annotations: {
-    streamingHint: true,
-  },
-  execute: async (args, { streamContent, reportProgress }) => { // Destructure streamContent and reportProgress
-    const total = args.datasetSize;
+name: "processData",
+description: "Process data with streaming updates",
+parameters: z.object({
+datasetSize: z.number(),
+}),
+annotations: {
+streamingHint: true,
+},
+execute: async (args, { streamContent, reportProgress }) => { // Destructure streamContent and reportProgress
+const total = args.datasetSize;
 
     for (let i = 0; i < total; i++) {
       // Report numeric progress
@@ -750,26 +759,27 @@ server.addTool({
     }
 
     return "Processing complete!";
-  },
+
+},
 });
 
 Tool Annotations
 As of the MCP Specification (2025-03-26), tools can include annotations that provide richer context and control by adding metadata about a tool's behavior:
 
 server.addTool({
-  name: "fetch-content",
-  description: "Fetch content from a URL",
-  parameters: z.object({
-    url: z.string(),
-  }),
-  annotations: {
-    title: "Web Content Fetcher", // Human-readable title for UI display
-    readOnlyHint: true, // Tool doesn't modify its environment
-    openWorldHint: true, // Tool interacts with external entities
-  },
-  execute: async (args, context) => {
-    return await fetchWebpageContent(args.url);
-  },
+name: "fetch-content",
+description: "Fetch content from a URL",
+parameters: z.object({
+url: z.string(),
+}),
+annotations: {
+title: "Web Content Fetcher", // Human-readable title for UI display
+readOnlyHint: true, // Tool doesn't modify its environment
+openWorldHint: true, // Tool interacts with external entities
+},
+execute: async (args, context) => {
+return await fetchWebpageContent(args.url);
+},
 });
 
 The available annotations are:
@@ -838,14 +848,14 @@ And more
 Each resource is identified by a unique URI and can contain either text or binary data.
 
 server.addResource({
-  uri: "file:///logs/app.log",
-  name: "Application Logs",
-  mimeType: "text/plain",
-  async load() {
-    return {
-      text: await readLogFile(),
-    };
-  },
+uri: "file:///logs/app.log",
+name: "Application Logs",
+mimeType: "text/plain",
+async load() {
+return {
+text: await readLogFile(),
+};
+},
 });
 
 [!NOTE]
@@ -853,141 +863,143 @@ server.addResource({
 load can return multiple resources. This could be used, for example, to return a list of files inside a directory when the directory is read.
 
 async load() {
-  return [
-    {
-      text: "First file content",
-    },
-    {
-      text: "Second file content",
-    },
-  ];
+return [
+{
+text: "First file content",
+},
+{
+text: "Second file content",
+},
+];
 }
 
 You can also return binary contents in load:
 
 async load() {
-  return {
-    blob: 'base64-encoded-data'
-  };
+return {
+blob: 'base64-encoded-data'
+};
 }
 
 Resource templates
 You can also define resource templates:
 
 server.addResourceTemplate({
-  uriTemplate: "file:///logs/{name}.log",
-  name: "Application Logs",
-  mimeType: "text/plain",
-  arguments: [
-    {
-      name: "name",
-      description: "Name of the log",
-      required: true,
-    },
-  ],
-  async load({ name }) {
-    return {
-      text: `Example log content for ${name}`,
-    };
-  },
+uriTemplate: "file:///logs/{name}.log",
+name: "Application Logs",
+mimeType: "text/plain",
+arguments: [
+{
+name: "name",
+description: "Name of the log",
+required: true,
+},
+],
+async load({ name }) {
+return {
+text: `Example log content for ${name}`,
+};
+},
 });
 
 Resource template argument auto-completion
 Provide complete functions for resource template arguments to enable automatic completion:
 
 server.addResourceTemplate({
-  uriTemplate: "file:///logs/{name}.log",
-  name: "Application Logs",
-  mimeType: "text/plain",
-  arguments: [
-    {
-      name: "name",
-      description: "Name of the log",
-      required: true,
-      complete: async (value) => {
-        if (value === "Example") {
-          return {
-            values: ["Example Log"],
-          };
-        }
+uriTemplate: "file:///logs/{name}.log",
+name: "Application Logs",
+mimeType: "text/plain",
+arguments: [
+{
+name: "name",
+description: "Name of the log",
+required: true,
+complete: async (value) => {
+if (value === "Example") {
+return {
+values: ["Example Log"],
+};
+}
 
         return {
           values: [],
         };
       },
     },
-  ],
-  async load({ name }) {
-    return {
-      text: `Example log content for ${name}`,
-    };
-  },
+
+],
+async load({ name }) {
+return {
+text: `Example log content for ${name}`,
+};
+},
 });
 
 Prompts
 Prompts enable servers to define reusable prompt templates and workflows that clients can easily surface to users and LLMs. They provide a powerful way to standardize and share common LLM interactions.
 
 server.addPrompt({
-  name: "git-commit",
-  description: "Generate a Git commit message",
-  arguments: [
-    {
-      name: "changes",
-      description: "Git diff or description of changes",
-      required: true,
-    },
-  ],
-  load: async (args) => {
-    return `Generate a concise but descriptive commit message for these changes:\n\n${args.changes}`;
-  },
+name: "git-commit",
+description: "Generate a Git commit message",
+arguments: [
+{
+name: "changes",
+description: "Git diff or description of changes",
+required: true,
+},
+],
+load: async (args) => {
+return `Generate a concise but descriptive commit message for these changes:\n\n${args.changes}`;
+},
 });
 
 Prompt argument auto-completion
 Prompts can provide auto-completion for their arguments:
 
 server.addPrompt({
-  name: "countryPoem",
-  description: "Writes a poem about a country",
-  load: async ({ name }) => {
-    return `Hello, ${name}!`;
-  },
-  arguments: [
-    {
-      name: "name",
-      description: "Name of the country",
-      required: true,
-      complete: async (value) => {
-        if (value === "Germ") {
-          return {
-            values: ["Germany"],
-          };
-        }
+name: "countryPoem",
+description: "Writes a poem about a country",
+load: async ({ name }) => {
+return `Hello, ${name}!`;
+},
+arguments: [
+{
+name: "name",
+description: "Name of the country",
+required: true,
+complete: async (value) => {
+if (value === "Germ") {
+return {
+values: ["Germany"],
+};
+}
 
         return {
           values: [],
         };
       },
     },
-  ],
+
+],
 });
 
 Prompt argument auto-completion using enum
 If you provide an enum array for an argument, the server will automatically provide completions for the argument.
 
 server.addPrompt({
-  name: "countryPoem",
-  description: "Writes a poem about a country",
-  load: async ({ name }) => {
-    return `Hello, ${name}!`;
-  },
-  arguments: [
-    {
-      name: "name",
-      description: "Name of the country",
-      required: true,
-      enum: ["Germany", "France", "Italy"],
-    },
-  ],
+name: "countryPoem",
+description: "Writes a poem about a country",
+load: async ({ name }) => {
+return `Hello, ${name}!`;
+},
+arguments: [
+{
+name: "name",
+description: "Name of the country",
+required: true,
+enum: ["Germany", "France", "Italy"],
+},
+],
 });
 
 Authentication
@@ -995,16 +1007,16 @@ FastMCP allows you to authenticate clients using a custom function. The data ret
 
 // Define a type for your authentication data
 type MyAuthData = {
-  id: number;
-  username: string;
-  permissions: string[];
+id: number;
+username: string;
+permissions: string[];
 };
 
 const server = new FastMCP<MyAuthData>({ // Specify the AuthData type here
-  name: "My Server",
-  version: "1.0.0",
-  authenticate: async (request): Promise<MyAuthData> => { // Ensure your function returns MyAuthData
-    const apiKey = request.headers["x-api-key"];
+name: "My Server",
+version: "1.0.0",
+authenticate: async (request): Promise<MyAuthData> => { // Ensure your function returns MyAuthData
+const apiKey = request.headers["x-api-key"];
 
     if (apiKey !== "123") {
       throw new Response(null, {
@@ -1019,31 +1031,32 @@ const server = new FastMCP<MyAuthData>({ // Specify the AuthData type here
       username: "testuser",
       permissions: ["read", "write"],
     };
-  },
+
+},
 });
 
 Now you can access the authenticated session data in your tools:
 
 server.addTool({
-  name: "sayHello",
-  execute: async (args, context) => {
-    // context.auth is now typed as MyAuthData | undefined
-    // context.sessionId is the framework-generated session ID
-    if (context.auth) {
-      return `Hello, ${context.auth.username} (ID: ${context.auth.id})! Your session ID is ${context.sessionId}.`;
-    }
-    return `Hello, anonymous user! Your session ID is ${context.sessionId}.`;
-  },
+name: "sayHello",
+execute: async (args, context) => {
+// context.auth is now typed as MyAuthData | undefined
+// context.sessionId is the framework-generated session ID
+if (context.auth) {
+return `Hello, ${context.auth.username} (ID: ${context.auth.id})! Your session ID is ${context.sessionId}.`;
+}
+return `Hello, anonymous user! Your session ID is ${context.sessionId}.`;
+},
 });
 
 Providing Instructions
 You can provide instructions to the server using the instructions option:
 
 const server = new FastMCP({
-  name: "My Server",
-  version: "1.0.0",
-  instructions:
-    'Instructions describing how to use the server and its features.\n\nThis can be used by clients to improve the LLM\'s understanding of available tools, resources, etc. It can be thought of like a "hint" to the model. For example, this information MAY be added to the system prompt.',
+name: "My Server",
+version: "1.0.0",
+instructions:
+'Instructions describing how to use the server and its features.\n\nThis can be used by clients to improve the LLM\'s understanding of available tools, resources, etc. It can be thought of like a "hint" to the model. For example, this information MAY be added to the system prompt.',
 });
 
 Sessions
@@ -1057,13 +1070,13 @@ Typed server events
 You can listen to events emitted by the server using the on method:
 
 server.on("connect", (event) => {
-  // event.session is a FastMCPSession instance
-  console.log("Client connected:", event.session.sessionId);
+// event.session is a FastMCPSession instance
+console.log("Client connected:", event.session.sessionId);
 });
 
 server.on("disconnect", (event) => {
-  // event.session is a FastMCPSession instance
-  console.log("Client disconnected:", event.session.sessionId);
+// event.session is a FastMCPSession instance
+console.log("Client disconnected:", event.session.sessionId);
 });
 
 FastMCPSession
@@ -1075,26 +1088,26 @@ sessionId (Property)
 The sessionId property on a FastMCPSession instance holds the unique, framework-generated ID for that specific client connection. This is distinct from any application-defined authentication ID that might be part of your AuthData.
 
 server.on("connect", (event) => {
-  const session = event.session;
-  console.log("Framework Session ID:", session.sessionId);
+const session = event.session;
+console.log("Framework Session ID:", session.sessionId);
 });
 
 requestSampling
 requestSampling creates a sampling request and returns the response.
 
 await session.requestSampling({
-  messages: [
-    {
-      role: "user",
-      content: {
-        type: "text",
-        text: "What files are in the current directory?",
-      },
-    },
-  ],
-  systemPrompt: "You are a helpful file system assistant.",
-  includeContext: "thisServer",
-  maxTokens: 100,
+messages: [
+{
+role: "user",
+content: {
+type: "text",
+text: "What files are in the current directory?",
+},
+},
+],
+systemPrompt: "You are a helpful file system assistant.",
+includeContext: "thisServer",
+maxTokens: 100,
 });
 
 clientCapabilities
@@ -1121,11 +1134,11 @@ Typed session events
 You can listen to events emitted by the session using the on method:
 
 session.on("rootsChanged", (event) => {
-  console.log("Roots changed:", event.roots);
+console.log("Roots changed:", event.roots);
 });
 
 session.on("error", (event) => {
-  console.error("Error:", event.error);
+console.error("Error:", event.error);
 });
 
 Running Your Server
@@ -1147,15 +1160,15 @@ How to use with Claude Desktop?
 Follow the guide https://modelcontextprotocol.io/quickstart/user and add the following configuration:
 
 {
-  "mcpServers": {
-    "my-mcp-server": {
-      "command": "npx",
-      "args": ["tsx", "/PATH/TO/YOUR_PROJECT/src/index.ts"],
-      "env": {
-        "YOUR_ENV_VAR": "value"
-      }
-    }
-  }
+"mcpServers": {
+"my-mcp-server": {
+"command": "npx",
+"args": ["tsx", "/PATH/TO/YOUR_PROJECT/src/index.ts"],
+"env": {
+"YOUR_ENV_VAR": "value"
+}
+}
+}
 }
 
 Showcase

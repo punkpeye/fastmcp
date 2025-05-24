@@ -20,6 +20,7 @@ import {
   SetLevelRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
+import crypto from "crypto"; // Import crypto for UUID generation
 import { EventEmitter } from "events";
 import { fileTypeFromBuffer } from "file-type";
 import { readFile } from "fs/promises";
@@ -32,7 +33,6 @@ import { fetch } from "undici";
 import parseURITemplate from "uri-templates";
 import { toJsonSchema } from "xsschema";
 import { z } from "zod";
-import crypto from "crypto"; // Import crypto for UUID generation
 
 export type SSEServer = {
   close: () => Promise<void>;
@@ -641,8 +641,10 @@ export class FastMCPSession<
   #auth: T | undefined;
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
+  #fastMcpSessionId: string; // Stores the unique ID for this FastMCP session instance
   #loggingLevel: LoggingLevel = "info";
   #pingConfig?: ServerOptions<T>["ping"];
+
   #pingInterval: null | ReturnType<typeof setInterval> = null;
 
   #prompts: Prompt[] = [];
@@ -654,9 +656,7 @@ export class FastMCPSession<
   #roots: Root[] = [];
 
   #rootsConfig?: ServerOptions<T>["roots"];
-
   #server: Server;
-  #fastMcpSessionId: string; // Stores the unique ID for this FastMCP session instance
 
   constructor({
     auth,
@@ -1615,4 +1615,3 @@ export type { Prompt, PromptArgument };
 export type { InputPrompt, InputPromptArgument };
 export type { LoggingLevel, ServerOptions };
 export type { FastMCPEvents, FastMCPSessionEvents };
-
