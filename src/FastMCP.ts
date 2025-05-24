@@ -32,6 +32,7 @@ import { fetch } from "undici";
 import parseURITemplate from "uri-templates";
 import { toJsonSchema } from "xsschema";
 import { z } from "zod";
+import crypto from "crypto"; // Import crypto for UUID generation
 
 export type SSEServer = {
   close: () => Promise<void>;
@@ -634,7 +635,7 @@ export class FastMCPSession<
    * This is distinct from any application-level authentication ID.
    */
   public get sessionId(): string {
-    return this.#server.sessionId;
+    return this.#fastMcpSessionId;
   }
 
   #auth: T | undefined;
@@ -655,6 +656,7 @@ export class FastMCPSession<
   #rootsConfig?: ServerOptions<T>["roots"];
 
   #server: Server;
+  #fastMcpSessionId: string; // Stores the unique ID for this FastMCP session instance
 
   constructor({
     auth,
@@ -681,6 +683,7 @@ export class FastMCPSession<
   }) {
     super();
 
+    this.#fastMcpSessionId = crypto.randomUUID(); // Generate a unique ID for this session
     this.#auth = auth;
     this.#pingConfig = ping;
     this.#rootsConfig = roots;
@@ -1358,7 +1361,7 @@ export class FastMCPSession<
           auth: this.#auth,
           log,
           reportProgress,
-          sessionId: this.#server.sessionId, // Pass the framework session ID
+          sessionId: this.sessionId, // Use the FastMCPSession's own ID
           streamContent,
         });
 
@@ -1528,6 +1531,7 @@ export class FastMCP<
 
           return new FastMCPSession<T>({
             auth,
+            instructions: this.#options.instructions,
             name: this.#options.name,
             ping: this.#options.ping,
             prompts: this.#prompts,
