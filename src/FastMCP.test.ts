@@ -37,6 +37,7 @@ const runWithTestServer = async ({
   run: ({
     client,
     server,
+    session,
   }: {
     client: Client;
     server: FastMCP;
@@ -146,7 +147,10 @@ test("adds tools with Zod v4 schema", async () => {
           {
             description: "Add two numbers (using Zod v4 schema)",
             inputSchema: {
-              $schema: "https://json-schema.org/draft-2020-12/schema",
+              // Correction: Changed from draft-2020-12 to draft/2020-12
+              // Correction: Added additionalProperties
+              $schema: "https://json-schema.org/draft/2020-12/schema",
+              additionalProperties: false,
               properties: {
                 a: { type: "number" },
                 b: { type: "number" },
@@ -1795,7 +1799,17 @@ test("provides auth to tools", async () => {
     },
   );
 
+  // Get the session that will be created
+  const sessionPromise = new Promise<FastMCPSession<{ id: number }>>(
+    (resolve) => {
+      server.on("connect", (event) => {
+        resolve(event.session as FastMCPSession<{ id: number }>);
+      });
+    },
+  );
+
   await client.connect(transport);
+  const connectedSession = await sessionPromise; // Wait for the session to be established
 
   expect(
     authenticate,
@@ -1816,12 +1830,15 @@ test("provides auth to tools", async () => {
 
   expect(execute, "execute should have been called").toHaveBeenCalledTimes(1);
 
+  // Correction: Update the expected context object structure
   expect(execute).toHaveBeenCalledWith(
     {
       a: 1,
       b: 2,
     },
     {
+      authData: { id: 1 },
+      frameworkSessionId: connectedSession.frameworkSessionId, // Use the actual frameworkSessionId
       log: {
         debug: expect.any(Function),
         error: expect.any(Function),
@@ -1829,7 +1846,6 @@ test("provides auth to tools", async () => {
         warn: expect.any(Function),
       },
       reportProgress: expect.any(Function),
-      session: { id: 1 },
       streamContent: expect.any(Function),
     },
   );
