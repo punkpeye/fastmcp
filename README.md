@@ -587,10 +587,10 @@ server.addTool({
 
   // or...
   // execute: async (args) => {
-  //   const imgContent = imageContent({
+  //   const imgContent = await imageContent({
   //     url: "https://example.com/image.png",
   //   });
-  //   const audContent = audioContent({
+  //   const audContent = await audioContent({
   //     url: "https://example.com/audio.mp3",
   //   });
   //   return {
