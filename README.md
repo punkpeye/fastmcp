@@ -119,11 +119,11 @@ const client = new Client(
   },
   {
     capabilities: {},
-  }
+  },
 );
 
 const transport = new StreamableHTTPClientTransport(
-  new URL(`http://localhost:8080/stream`)
+  new URL(`http://localhost:8080/stream`),
 );
 
 await client.connect(transport);
@@ -141,7 +141,7 @@ const client = new Client(
   },
   {
     capabilities: {},
-  }
+  },
 );
 
 const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
