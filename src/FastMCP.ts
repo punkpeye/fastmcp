@@ -1252,7 +1252,7 @@ export class FastMCPSession<
 
         if (parsed.issues) {
           const friendlyErrors = parsed.issues
-            .map((issue: any) => {
+            .map((issue) => {
               const path = issue.path?.join(".") || "root";
               return `${path}: ${issue.message}`;
             })
