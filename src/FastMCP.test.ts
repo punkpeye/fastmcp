@@ -1868,7 +1868,7 @@ test("supports streaming output from tools", async () => {
         annotations: {
           streamingHint: true,
         },
-        description: "Tool yang streaming dan mengembalikan void",
+        description: "A streaming tool that returns void",
         execute: async (_args, context) => {
           await context.streamContent({
             text: "Streaming content 1",
@@ -1891,7 +1891,7 @@ test("supports streaming output from tools", async () => {
         annotations: {
           streamingHint: true,
         },
-        description: "Tool yang streaming dan mengembalikan hasil",
+        description: "A streaming tool that returns a result.",
         execute: async (_args, context) => {
           await context.streamContent({
             text: "Streaming content 1",
