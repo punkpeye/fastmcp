@@ -1016,7 +1016,7 @@ export class FastMCPSession<
         if (arg.required && !(args && arg.name in args)) {
           throw new McpError(
             ErrorCode.InvalidRequest,
-            `Missing required argument: ${arg.name}`,
+            `Prompt '${request.params.name}' requires argument '${arg.name}': ${arg.description || 'No description provided'}`,
           );
         }
       }
@@ -1026,9 +1026,10 @@ export class FastMCPSession<
       try {
         result = await prompt.load(args as Record<string, string | undefined>);
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         throw new McpError(
           ErrorCode.InternalError,
-          `Error loading prompt: ${error}`,
+          `Failed to load prompt '${request.params.name}': ${errorMessage}`,
         );
       }
 
@@ -1096,7 +1097,7 @@ export class FastMCPSession<
 
             throw new McpError(
               ErrorCode.MethodNotFound,
-              `Unknown resource: ${request.params.uri}`,
+              `Resource not found: '${request.params.uri}'. Available resources: ${resources.map(r => r.uri).join(', ') || 'none'}`,
             );
           }
 
@@ -1109,9 +1110,10 @@ export class FastMCPSession<
           try {
             maybeArrayResult = await resource.load();
           } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
             throw new McpError(
               ErrorCode.InternalError,
-              `Error reading resource: ${error}`,
+              `Failed to load resource '${resource.name}' (${resource.uri}): ${errorMessage}`,
               {
                 uri: resource.uri,
               },
@@ -1247,9 +1249,14 @@ export class FastMCPSession<
         );
 
         if (parsed.issues) {
+          const friendlyErrors = parsed.issues.map((issue: any) => {
+            const path = issue.path?.join('.') || 'root';
+            return `${path}: ${issue.message}`;
+          }).join(', ');
+          
           throw new McpError(
             ErrorCode.InvalidParams,
-            `Invalid ${request.params.name} parameters: ${JSON.stringify(parsed.issues)}`,
+            `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}`,
           );
         }
 
@@ -1340,7 +1347,7 @@ export class FastMCPSession<
                 setTimeout(() => {
                   reject(
                     new UserError(
-                      `Tool execution timed out after ${tool.timeoutMs}ms`,
+                      `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
                     ),
                   );
                 }, tool.timeoutMs);
@@ -1378,8 +1385,9 @@ export class FastMCPSession<
           };
         }
 
+        const errorMessage = error instanceof Error ? error.message : String(error);
         return {
-          content: [{ text: `Error: ${error}`, type: "text" }],
+          content: [{ text: `Tool '${request.params.name}' execution failed: ${errorMessage}`, type: "text" }],
           isError: true,
         };
       }
