@@ -13,6 +13,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Sessions](#sessions)
 - [Image content](#returning-an-image)
 - [Audio content](#returning-an-audio)
+- [Embedded](#embedded-resources)
 - [Logging](#logging)
 - [Error handling](#errors)
 - [HTTP Streaming](#http-streaming) (with SSE compatibility)
@@ -910,6 +911,114 @@ server.addResourceTemplate({
   async load({ name }) {
     return {
       text: `Example log content for ${name}`,
+    };
+  },
+});
+```
+
+### Embedded Resources
+
+FastMCP provides a convenient `embedded()` method that simplifies including resources in tool responses. This feature reduces code duplication and makes it easier to reference resources from within tools.
+
+#### Basic Usage
+
+```js
+server.addTool({
+  name: "get_user_data",
+  description: "Retrieve user information",
+  parameters: z.object({
+    userId: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded(`user://profile/${args.userId}`),
+        },
+      ],
+    };
+  },
+});
+```
+
+#### Working with Resource Templates
+
+The `embedded()` method works seamlessly with resource templates:
+
+```js
+// Define a resource template
+server.addResourceTemplate({
+  uriTemplate: "docs://project/{section}",
+  name: "Project Documentation",
+  mimeType: "text/markdown",
+  arguments: [
+    {
+      name: "section",
+      required: true,
+    },
+  ],
+  async load(args) {
+    const docs = {
+      "getting-started": "# Getting Started\n\nWelcome to our project!",
+      "api-reference": "# API Reference\n\nAuthentication is required.",
+    };
+    return {
+      text: docs[args.section] || "Documentation not found",
+    };
+  },
+});
+
+// Use embedded resources in a tool
+server.addTool({
+  name: "get_documentation",
+  description: "Retrieve project documentation",
+  parameters: z.object({
+    section: z.enum(["getting-started", "api-reference"]),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded(`docs://project/${args.section}`),
+        },
+      ],
+    };
+  },
+});
+```
+
+#### Working with Direct Resources
+
+It also works with directly defined resources:
+
+```js
+// Define a direct resource
+server.addResource({
+  uri: "system://status",
+  name: "System Status",
+  mimeType: "text/plain",
+  async load() {
+    return {
+      text: "System operational",
+    };
+  },
+});
+
+// Use in a tool
+server.addTool({
+  name: "get_system_status",
+  description: "Get current system status",
+  parameters: z.object({}),
+  execute: async () => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded("system://status"),
+        },
+      ],
     };
   },
 });
