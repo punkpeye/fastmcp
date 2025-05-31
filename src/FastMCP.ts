@@ -281,12 +281,35 @@ const AudioContentZodSchema = z
   })
   .strict() satisfies z.ZodType<AudioContent>;
 
-type Content = AudioContent | ImageContent | TextContent;
+type ResourceContent = {
+  resource: {
+    blob?: string;
+    mimeType?: string;
+    text?: string;
+    uri: string;
+  };
+  type: "resource";
+};
+
+const ResourceContentZodSchema = z
+  .object({
+    resource: z.object({
+      blob: z.string().optional(),
+      mimeType: z.string().optional(),
+      text: z.string().optional(),
+      uri: z.string(),
+    }),
+    type: z.literal("resource"),
+  })
+  .strict() satisfies z.ZodType<ResourceContent>;
+
+type Content = AudioContent | ImageContent | ResourceContent | TextContent;
 
 const ContentZodSchema = z.discriminatedUnion("type", [
   TextContentZodSchema,
   ImageContentZodSchema,
   AudioContentZodSchema,
+  ResourceContentZodSchema,
 ]) satisfies z.ZodType<Content>;
 
 type ContentResult = {
@@ -534,7 +557,13 @@ type Tool<
     args: StandardSchemaV1.InferOutput<Params>,
     context: Context<T>,
   ) => Promise<
-    AudioContent | ContentResult | ImageContent | string | TextContent | void
+    | AudioContent
+    | ContentResult
+    | ImageContent
+    | ResourceContent
+    | string
+    | TextContent
+    | void
   >;
   name: string;
   parameters?: Params;
@@ -1362,6 +1391,7 @@ export class FastMCPSession<
           | ContentResult
           | ImageContent
           | null
+          | ResourceContent
           | string
           | TextContent
           | undefined;
@@ -1468,6 +1498,88 @@ export class FastMCP<
    */
   public addTool<Params extends ToolParameters>(tool: Tool<T, Params>) {
     this.#tools.push(tool as unknown as Tool<T>);
+  }
+
+  /**
+   * Embeds a resource by URI, making it easy to include resources in tool responses.
+   *
+   * @param uri - The URI of the resource to embed
+   * @returns Promise<ResourceContent> - The embedded resource content
+   */
+  public async embedded(uri: string): Promise<ResourceContent["resource"]> {
+    // First, try to find a direct resource match
+    const directResource = this.#resources.find(
+      (resource) => resource.uri === uri,
+    );
+
+    if (directResource) {
+      const result = await directResource.load();
+      const results = Array.isArray(result) ? result : [result];
+      const firstResult = results[0];
+
+      const resourceData: ResourceContent["resource"] = {
+        mimeType: directResource.mimeType,
+        uri,
+      };
+
+      if ("text" in firstResult) {
+        resourceData.text = firstResult.text;
+      }
+
+      if ("blob" in firstResult) {
+        resourceData.blob = firstResult.blob;
+      }
+
+      return resourceData;
+    }
+
+    // Try to match against resource templates
+    for (const template of this.#resourcesTemplates) {
+      // Check if the URI starts with the template base
+      const templateBase = template.uriTemplate.split("{")[0];
+
+      if (uri.startsWith(templateBase)) {
+        const params: Record<string, string> = {};
+        const templateParts = template.uriTemplate.split("/");
+        const uriParts = uri.split("/");
+
+        for (let i = 0; i < templateParts.length; i++) {
+          const templatePart = templateParts[i];
+
+          if (templatePart?.startsWith("{") && templatePart.endsWith("}")) {
+            const paramName = templatePart.slice(1, -1);
+            const paramValue = uriParts[i];
+
+            if (paramValue) {
+              params[paramName] = paramValue;
+            }
+          }
+        }
+
+        const result = await template.load(
+          params as ResourceTemplateArgumentsToObject<
+            typeof template.arguments
+          >,
+        );
+
+        const resourceData: ResourceContent["resource"] = {
+          mimeType: template.mimeType,
+          uri,
+        };
+
+        if ("text" in result) {
+          resourceData.text = result.text;
+        }
+
+        if ("blob" in result) {
+          resourceData.blob = result.blob;
+        }
+
+        return resourceData; // The resource we're looking for
+      }
+    }
+
+    throw new UnexpectedStateError(`Resource not found: ${uri}`, { uri });
   }
 
   /**
