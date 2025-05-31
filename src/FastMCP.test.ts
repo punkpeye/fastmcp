@@ -782,6 +782,138 @@ test("clients reads a resource that returns multiple resources", async () => {
   });
 });
 
+test("embedded resources work in tools", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            userId: "123",
+          },
+          name: "get_user_profile",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "application/json",
+              text: '{"id":"123","name":"User","email":"user@example.com"}',
+              uri: "user://profile/123",
+            },
+            type: "resource",
+          },
+        ],
+      });
+    },
+
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResourceTemplate({
+        arguments: [
+          {
+            name: "userId",
+            required: true,
+          },
+        ],
+        async load(args) {
+          return {
+            text: `{"id":"${args.userId}","name":"User","email":"user@example.com"}`,
+          };
+        },
+        mimeType: "application/json",
+        name: "User Profile",
+        uriTemplate: "user://profile/{userId}",
+      });
+
+      server.addTool({
+        description: "Get user profile data",
+        execute: async (args) => {
+          return {
+            content: [
+              {
+                resource: await server.embedded(
+                  `user://profile/${args.userId}`,
+                ),
+                type: "resource",
+              },
+            ],
+          };
+        },
+        name: "get_user_profile",
+        parameters: z.object({
+          userId: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("embedded resources work with direct resources", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {},
+          name: "get_logs",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "text/plain",
+              text: "Example log content",
+              uri: "file:///logs/app.log",
+            },
+            type: "resource",
+          },
+        ],
+      });
+    },
+
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResource({
+        async load() {
+          return {
+            text: "Example log content",
+          };
+        },
+        mimeType: "text/plain",
+        name: "Application Logs",
+        uri: "file:///logs/app.log",
+      });
+
+      server.addTool({
+        description: "Get application logs",
+        execute: async () => {
+          return {
+            content: [
+              {
+                resource: await server.embedded("file:///logs/app.log"),
+                type: "resource",
+              },
+            ],
+          };
+        },
+        name: "get_logs",
+        parameters: z.object({}),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("adds prompts", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
