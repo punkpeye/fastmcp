@@ -770,7 +770,7 @@ export class FastMCPSession<
       let attempt = 0;
 
       while (attempt++ < 10) {
-        const capabilities = await this.#server.getClientCapabilities();
+        const capabilities = this.#server.getClientCapabilities();
 
         if (capabilities) {
           this.#clientCapabilities = capabilities;
