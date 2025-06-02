@@ -78,7 +78,9 @@ const runWithTestServer = async ({
     );
 
     const session = await new Promise<FastMCPSession>((resolve) => {
-      server.on("connect", (event) => {
+      server.on("connect", async (event) => {
+        // Wait for session to be fully ready before resolving
+        await event.session.waitForReady();
         resolve(event.session);
       });
 
@@ -2138,11 +2140,16 @@ test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
       new URL(`http://localhost:${port}/stream`),
     );
 
-    // Connect client to server
-    await client.connect(transport);
+    // Connect client to server and wait for session to be ready
+    const sessionPromise = new Promise<FastMCPSession>((resolve) => {
+      server.on("connect", async (event) => {
+        await event.session.waitForReady();
+        resolve(event.session);
+      });
+    });
 
-    // Wait a bit to ensure connection is established
-    await delay(1000);
+    await client.connect(transport);
+    await sessionPromise;
 
     // Call tool
     const result = await client.callTool({

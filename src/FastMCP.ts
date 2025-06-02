@@ -44,6 +44,7 @@ type FastMCPEvents<T extends FastMCPSessionAuth> = {
 
 type FastMCPSessionEvents = {
   error: (event: { error: Error }) => void;
+  ready: () => void;
   rootsChanged: (event: { roots: Root[] }) => void;
 };
 
@@ -628,6 +629,9 @@ export class FastMCPSession<
   public get clientCapabilities(): ClientCapabilities | null {
     return this.#clientCapabilities ?? null;
   }
+  public get isReady(): boolean {
+    return this.#connectionState === "ready";
+  }
   public get loggingLevel(): LoggingLevel {
     return this.#loggingLevel;
   }
@@ -640,6 +644,7 @@ export class FastMCPSession<
   #auth: T | undefined;
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
+  #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
   #loggingLevel: LoggingLevel = "info";
   #pingConfig?: ServerOptions<T>["ping"];
   #pingInterval: null | ReturnType<typeof setInterval> = null;
@@ -739,6 +744,8 @@ export class FastMCPSession<
   }
 
   public async close() {
+    this.#connectionState = "closed";
+
     if (this.#pingInterval) {
       clearInterval(this.#pingInterval);
     }
@@ -755,72 +762,90 @@ export class FastMCPSession<
       throw new UnexpectedStateError("Server is already connected");
     }
 
-    await this.#server.connect(transport);
+    this.#connectionState = "connecting";
 
-    let attempt = 0;
+    try {
+      await this.#server.connect(transport);
 
-    while (attempt++ < 10) {
-      const capabilities = await this.#server.getClientCapabilities();
+      let attempt = 0;
 
-      if (capabilities) {
-        this.#clientCapabilities = capabilities;
+      while (attempt++ < 10) {
+        const capabilities = await this.#server.getClientCapabilities();
 
-        break;
+        if (capabilities) {
+          this.#clientCapabilities = capabilities;
+
+          break;
+        }
+
+        await delay(100);
       }
 
-      await delay(100);
-    }
+      if (!this.#clientCapabilities) {
+        console.warn("[FastMCP warning] could not infer client capabilities");
+      }
 
-    if (!this.#clientCapabilities) {
-      console.warn("[FastMCP warning] could not infer client capabilities");
-    }
-
-    if (
-      this.#clientCapabilities?.roots?.listChanged &&
-      typeof this.#server.listRoots === "function"
-    ) {
-      try {
-        const roots = await this.#server.listRoots();
-        this.#roots = roots.roots;
-      } catch (e) {
-        if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
-          console.debug(
-            "[FastMCP debug] listRoots method not supported by client",
-          );
-        } else {
-          console.error(
-            `[FastMCP error] received error listing roots.\n\n${e instanceof Error ? e.stack : JSON.stringify(e)}`,
-          );
+      if (
+        this.#clientCapabilities?.roots?.listChanged &&
+        typeof this.#server.listRoots === "function"
+      ) {
+        try {
+          const roots = await this.#server.listRoots();
+          this.#roots = roots.roots;
+        } catch (e) {
+          if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
+            console.debug(
+              "[FastMCP debug] listRoots method not supported by client",
+            );
+          } else {
+            console.error(
+              `[FastMCP error] received error listing roots.\n\n${e instanceof Error ? e.stack : JSON.stringify(e)}`,
+            );
+          }
         }
       }
-    }
 
-    if (this.#clientCapabilities) {
-      const pingConfig = this.#getPingConfig(transport);
+      if (this.#clientCapabilities) {
+        const pingConfig = this.#getPingConfig(transport);
 
-      if (pingConfig.enabled) {
-        this.#pingInterval = setInterval(async () => {
-          try {
-            await this.#server.ping();
-          } catch {
-            // The reason we are not emitting an error here is because some clients
-            // seem to not respond to the ping request, and we don't want to crash the server,
-            // e.g., https://github.com/punkpeye/fastmcp/issues/38.
-            const logLevel = pingConfig.logLevel;
-            if (logLevel === "debug") {
-              console.debug("[FastMCP debug] server ping failed");
-            } else if (logLevel === "warning") {
-              console.warn(
-                "[FastMCP warning] server is not responding to ping",
-              );
-            } else if (logLevel === "error") {
-              console.error("[FastMCP error] server is not responding to ping");
-            } else {
-              console.info("[FastMCP info] server ping failed");
+        if (pingConfig.enabled) {
+          this.#pingInterval = setInterval(async () => {
+            try {
+              await this.#server.ping();
+            } catch {
+              // The reason we are not emitting an error here is because some clients
+              // seem to not respond to the ping request, and we don't want to crash the server,
+              // e.g., https://github.com/punkpeye/fastmcp/issues/38.
+              const logLevel = pingConfig.logLevel;
+
+              if (logLevel === "debug") {
+                console.debug("[FastMCP debug] server ping failed");
+              } else if (logLevel === "warning") {
+                console.warn(
+                  "[FastMCP warning] server is not responding to ping",
+                );
+              } else if (logLevel === "error") {
+                console.error(
+                  "[FastMCP error] server is not responding to ping",
+                );
+              } else {
+                console.info("[FastMCP info] server ping failed");
+              }
             }
-          }
-        }, pingConfig.intervalMs);
+          }, pingConfig.intervalMs);
+        }
       }
+
+      // Mark connection as ready and emit event
+      this.#connectionState = "ready";
+      this.emit("ready");
+    } catch (error) {
+      this.#connectionState = "error";
+      const errorEvent = {
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+      this.emit("error", errorEvent);
+      throw error;
     }
   }
 
@@ -828,6 +853,41 @@ export class FastMCPSession<
     message: z.infer<typeof CreateMessageRequestSchema>["params"],
   ): Promise<SamplingResponse> {
     return this.#server.createMessage(message);
+  }
+
+  public waitForReady(): Promise<void> {
+    if (this.isReady) {
+      return Promise.resolve();
+    }
+
+    if (
+      this.#connectionState === "error" ||
+      this.#connectionState === "closed"
+    ) {
+      return Promise.reject(
+        new Error(`Connection is in ${this.#connectionState} state`),
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(
+          new Error(
+            "Connection timeout: Session failed to become ready within 5 seconds",
+          ),
+        );
+      }, 5000);
+
+      this.once("ready", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+
+      this.once("error", (event) => {
+        clearTimeout(timeout);
+        reject(event.error);
+      });
+    });
   }
 
   #getPingConfig(transport: Transport): {
@@ -1658,17 +1718,43 @@ export class FastMCP<
 
           if (enabled) {
             const path = healthConfig.path ?? "/health";
+            const url = new URL(req.url || "", "http://localhost");
 
             try {
-              if (
-                req.method === "GET" &&
-                new URL(req.url || "", "http://localhost").pathname === path
-              ) {
+              if (req.method === "GET" && url.pathname === path) {
                 res
                   .writeHead(healthConfig.status ?? 200, {
                     "Content-Type": "text/plain",
                   })
                   .end(healthConfig.message ?? "ok");
+
+                return;
+              }
+
+              // Enhanced readiness check endpoint
+              if (req.method === "GET" && url.pathname === "/ready") {
+                const readySessions = this.#sessions.filter(
+                  (s) => s.isReady,
+                ).length;
+                const totalSessions = this.#sessions.length;
+                const allReady =
+                  readySessions === totalSessions && totalSessions > 0;
+
+                const response = {
+                  ready: readySessions,
+                  status: allReady
+                    ? "ready"
+                    : totalSessions === 0
+                      ? "no_sessions"
+                      : "initializing",
+                  total: totalSessions,
+                };
+
+                res
+                  .writeHead(allReady ? 200 : 503, {
+                    "Content-Type": "application/json",
+                  })
+                  .end(JSON.stringify(response));
 
                 return;
               }
