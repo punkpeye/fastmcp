@@ -1369,6 +1369,8 @@ export class FastMCPSession<
               progressToken,
             },
           });
+
+          await new Promise((resolve) => setImmediate(resolve));
         };
 
         const log = {
@@ -1423,6 +1425,8 @@ export class FastMCPSession<
               toolName: request.params.name,
             },
           });
+
+          await new Promise((resolve) => setImmediate(resolve));
         };
 
         const executeToolPromise = tool.execute(args, {
