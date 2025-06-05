@@ -155,6 +155,35 @@ server.addTool({
   }),
 });
 
+server.addTool({
+  annotations: {
+    openWorldHint: false,
+    readOnlyHint: false,
+  },
+  description: "Test progress reporting without buffering delays",
+  execute: async (args, { reportProgress }) => {
+    console.log("Testing progress reporting fix for HTTP Stream buffering...");
+
+    await reportProgress({ progress: 0, total: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    await reportProgress({ progress: 25, total: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    await reportProgress({ progress: 75, total: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // This progress should be received immediately
+    await reportProgress({ progress: 100, total: 100 });
+
+    return `Buffering test completed for ${args.testCase}`;
+  },
+  name: "test-buffering-fix",
+  parameters: z.object({
+    testCase: z.string().describe("Test case description"),
+  }),
+});
+
 server.addPrompt({
   arguments: [
     {
