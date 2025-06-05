@@ -13,6 +13,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Sessions](#sessions)
 - [Image content](#returning-an-image)
 - [Audio content](#returning-an-audio)
+- [Embedded](#embedded-resources)
 - [Logging](#logging)
 - [Error handling](#errors)
 - [HTTP Streaming](#http-streaming) (with SSE compatibility)
@@ -26,6 +27,31 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Health-check endpoint](#health-check-endpoint)
 - [Roots](#roots-management)
 - CLI for [testing](#test-with-mcp-cli) and [debugging](#inspect-with-mcp-inspector)
+
+## When to use FastMCP over the official SDK?
+
+FastMCP is built on top of the official SDK.
+
+The official SDK provides foundational blocks for building MCPs, but leaves many implementation details to you:
+
+- [Initiating and configuring](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L664-L744) all the server components
+- [Handling of connections](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L760-L850)
+- [Handling of tools](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1303-L1498)
+- [Handling of responses](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L989-L1060)
+- [Handling of resources](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1151-L1242)
+- Adding [prompts](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L760-L850), [resources](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L960-L962), [resource templates](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L964-L987)
+- Embedding [resources](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L1569-L1643), [image](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L51-L111) and [audio](https://github.com/punkpeye/fastmcp/blob/06c2af7a3d7e3d8c638deac1964ce269ce8e518b/src/FastMCP.ts#L113-L173) content blocks
+
+FastMCP eliminates this complexity by providing an opinionated framework that:
+
+- Handles all the boilerplate automatically
+- Provides simple, intuitive APIs for common tasks
+- Includes built-in best practices and error handling
+- Lets you focus on your MCP's core functionality
+
+**When to choose FastMCP:** You want to build MCP servers quickly without dealing with low-level implementation details.
+
+**When to use the official SDK:** You need maximum control or have specific architectural requirements. In this case, we encourage referencing FastMCP's implementation to avoid common pitfalls.
 
 ## Installation
 
@@ -915,6 +941,114 @@ server.addResourceTemplate({
 });
 ```
 
+### Embedded Resources
+
+FastMCP provides a convenient `embedded()` method that simplifies including resources in tool responses. This feature reduces code duplication and makes it easier to reference resources from within tools.
+
+#### Basic Usage
+
+```js
+server.addTool({
+  name: "get_user_data",
+  description: "Retrieve user information",
+  parameters: z.object({
+    userId: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded(`user://profile/${args.userId}`),
+        },
+      ],
+    };
+  },
+});
+```
+
+#### Working with Resource Templates
+
+The `embedded()` method works seamlessly with resource templates:
+
+```js
+// Define a resource template
+server.addResourceTemplate({
+  uriTemplate: "docs://project/{section}",
+  name: "Project Documentation",
+  mimeType: "text/markdown",
+  arguments: [
+    {
+      name: "section",
+      required: true,
+    },
+  ],
+  async load(args) {
+    const docs = {
+      "getting-started": "# Getting Started\n\nWelcome to our project!",
+      "api-reference": "# API Reference\n\nAuthentication is required.",
+    };
+    return {
+      text: docs[args.section] || "Documentation not found",
+    };
+  },
+});
+
+// Use embedded resources in a tool
+server.addTool({
+  name: "get_documentation",
+  description: "Retrieve project documentation",
+  parameters: z.object({
+    section: z.enum(["getting-started", "api-reference"]),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded(`docs://project/${args.section}`),
+        },
+      ],
+    };
+  },
+});
+```
+
+#### Working with Direct Resources
+
+It also works with directly defined resources:
+
+```js
+// Define a direct resource
+server.addResource({
+  uri: "system://status",
+  name: "System Status",
+  mimeType: "text/plain",
+  async load() {
+    return {
+      text: "System operational",
+    };
+  },
+});
+
+// Use in a tool
+server.addTool({
+  name: "get_system_status",
+  description: "Get current system status",
+  parameters: z.object({}),
+  execute: async () => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded("system://status"),
+        },
+      ],
+    };
+  },
+});
+```
+
 ### Prompts
 
 [Prompts](https://modelcontextprotocol.io/docs/concepts/prompts) enable servers to define reusable prompt templates and workflows that clients can easily surface to users and LLMs. They provide a powerful way to standardize and share common LLM interactions.
@@ -1195,7 +1329,9 @@ Follow the guide https://modelcontextprotocol.io/quickstart/user and add the fol
 - [drumnation/unsplash-smart-mcp-server](https://github.com/drumnation/unsplash-smart-mcp-server) – enables AI agents to seamlessly search, recommend, and deliver professional stock photos from Unsplash
 - [ssmanji89/halopsa-workflows-mcp](https://github.com/ssmanji89/halopsa-workflows-mcp) - HaloPSA Workflows integration with AI assistants
 - [aiamblichus/mcp-chat-adapter](https://github.com/aiamblichus/mcp-chat-adapter) – provides a clean interface for LLMs to use chat completion
+- [eyaltoledano/claude-task-master](https://github.com/eyaltoledano/claude-task-master) – advanced AI project/task manager powered by FastMCP
 - [cswkim/discogs-mcp-server](https://github.com/cswkim/discogs-mcp-server) - connects to the Discogs API for interacting with your music collection
+- [Panzer-Jack/feuse-mcp](https://github.com/Panzer-Jack/feuse-mcp) - Frontend Useful MCP Tools - Essential utilities for web developers to automate API integration and code generation
 
 ## Acknowledgements
 

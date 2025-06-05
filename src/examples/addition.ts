@@ -155,6 +155,35 @@ server.addTool({
   }),
 });
 
+server.addTool({
+  annotations: {
+    openWorldHint: false,
+    readOnlyHint: false,
+  },
+  description: "Test progress reporting without buffering delays",
+  execute: async (args, { reportProgress }) => {
+    console.log("Testing progress reporting fix for HTTP Stream buffering...");
+
+    await reportProgress({ progress: 0, total: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    await reportProgress({ progress: 25, total: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    await reportProgress({ progress: 75, total: 100 });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // This progress should be received immediately
+    await reportProgress({ progress: 100, total: 100 });
+
+    return `Buffering test completed for ${args.testCase}`;
+  },
+  name: "test-buffering-fix",
+  parameters: z.object({
+    testCase: z.string().describe("Test case description"),
+  }),
+});
+
 server.addPrompt({
   arguments: [
     {
@@ -168,6 +197,62 @@ server.addPrompt({
     return `Generate a concise but descriptive commit message for these changes:\n\n${args.changes}`;
   },
   name: "git-commit",
+});
+
+server.addResourceTemplate({
+  arguments: [
+    {
+      description: "Documentation section to retrieve",
+      name: "section",
+      required: true,
+    },
+  ],
+  description: "Get project documentation",
+  load: async (args) => {
+    const docs = {
+      "api-reference":
+        "# API Reference\n\n## Authentication\nAll API requests require a valid API key in the Authorization header.\n\n## Endpoints\n- GET /users - List all users\n- POST /users - Create new user",
+      deployment:
+        "# Deployment Guide\n\nTo deploy this application:\n\n1. Build the project: `npm run build`\n2. Set environment variables\n3. Deploy to your hosting platform",
+      "getting-started":
+        "# Getting Started\n\nWelcome to our project! Follow these steps to set up your development environment:\n\n1. Clone the repository\n2. Install dependencies with `npm install`\n3. Run `npm start` to begin",
+    };
+
+    return {
+      text:
+        docs[args.section as keyof typeof docs] ||
+        "Documentation section not found",
+    };
+  },
+  mimeType: "text/markdown",
+  name: "Project Documentation",
+  uriTemplate: "docs://project/{section}",
+});
+
+server.addTool({
+  annotations: {
+    openWorldHint: false,
+    readOnlyHint: true,
+    title: "Get Documentation (Embedded)",
+  },
+  description:
+    "Retrieve project documentation using embedded resources - demonstrates the new embedded() feature",
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          resource: await server.embedded(`docs://project/${args.section}`),
+          type: "resource",
+        },
+      ],
+    };
+  },
+  name: "get-documentation",
+  parameters: z.object({
+    section: z
+      .enum(["getting-started", "api-reference", "deployment"])
+      .describe("Documentation section to retrieve"),
+  }),
 });
 
 // Select transport type based on command line arguments

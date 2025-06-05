@@ -44,6 +44,7 @@ type FastMCPEvents<T extends FastMCPSessionAuth> = {
 
 type FastMCPSessionEvents = {
   error: (event: { error: Error }) => void;
+  ready: () => void;
   rootsChanged: (event: { roots: Root[] }) => void;
 };
 
@@ -281,12 +282,35 @@ const AudioContentZodSchema = z
   })
   .strict() satisfies z.ZodType<AudioContent>;
 
-type Content = AudioContent | ImageContent | TextContent;
+type ResourceContent = {
+  resource: {
+    blob?: string;
+    mimeType?: string;
+    text?: string;
+    uri: string;
+  };
+  type: "resource";
+};
+
+const ResourceContentZodSchema = z
+  .object({
+    resource: z.object({
+      blob: z.string().optional(),
+      mimeType: z.string().optional(),
+      text: z.string().optional(),
+      uri: z.string(),
+    }),
+    type: z.literal("resource"),
+  })
+  .strict() satisfies z.ZodType<ResourceContent>;
+
+type Content = AudioContent | ImageContent | ResourceContent | TextContent;
 
 const ContentZodSchema = z.discriminatedUnion("type", [
   TextContentZodSchema,
   ImageContentZodSchema,
   AudioContentZodSchema,
+  ResourceContentZodSchema,
 ]) satisfies z.ZodType<Content>;
 
 type ContentResult = {
@@ -534,7 +558,13 @@ type Tool<
     args: StandardSchemaV1.InferOutput<Params>,
     context: Context<T>,
   ) => Promise<
-    AudioContent | ContentResult | ImageContent | string | TextContent | void
+    | AudioContent
+    | ContentResult
+    | ImageContent
+    | ResourceContent
+    | string
+    | TextContent
+    | void
   >;
   name: string;
   parameters?: Params;
@@ -599,6 +629,9 @@ export class FastMCPSession<
   public get clientCapabilities(): ClientCapabilities | null {
     return this.#clientCapabilities ?? null;
   }
+  public get isReady(): boolean {
+    return this.#connectionState === "ready";
+  }
   public get loggingLevel(): LoggingLevel {
     return this.#loggingLevel;
   }
@@ -611,6 +644,7 @@ export class FastMCPSession<
   #auth: T | undefined;
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
+  #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
   #loggingLevel: LoggingLevel = "info";
   #pingConfig?: ServerOptions<T>["ping"];
   #pingInterval: null | ReturnType<typeof setInterval> = null;
@@ -710,6 +744,8 @@ export class FastMCPSession<
   }
 
   public async close() {
+    this.#connectionState = "closed";
+
     if (this.#pingInterval) {
       clearInterval(this.#pingInterval);
     }
@@ -726,72 +762,90 @@ export class FastMCPSession<
       throw new UnexpectedStateError("Server is already connected");
     }
 
-    await this.#server.connect(transport);
+    this.#connectionState = "connecting";
 
-    let attempt = 0;
+    try {
+      await this.#server.connect(transport);
 
-    while (attempt++ < 10) {
-      const capabilities = await this.#server.getClientCapabilities();
+      let attempt = 0;
 
-      if (capabilities) {
-        this.#clientCapabilities = capabilities;
+      while (attempt++ < 10) {
+        const capabilities = this.#server.getClientCapabilities();
 
-        break;
+        if (capabilities) {
+          this.#clientCapabilities = capabilities;
+
+          break;
+        }
+
+        await delay(100);
       }
 
-      await delay(100);
-    }
+      if (!this.#clientCapabilities) {
+        console.warn("[FastMCP warning] could not infer client capabilities");
+      }
 
-    if (!this.#clientCapabilities) {
-      console.warn("[FastMCP warning] could not infer client capabilities");
-    }
-
-    if (
-      this.#clientCapabilities?.roots?.listChanged &&
-      typeof this.#server.listRoots === "function"
-    ) {
-      try {
-        const roots = await this.#server.listRoots();
-        this.#roots = roots.roots;
-      } catch (e) {
-        if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
-          console.debug(
-            "[FastMCP debug] listRoots method not supported by client",
-          );
-        } else {
-          console.error(
-            `[FastMCP error] received error listing roots.\n\n${e instanceof Error ? e.stack : JSON.stringify(e)}`,
-          );
+      if (
+        this.#clientCapabilities?.roots?.listChanged &&
+        typeof this.#server.listRoots === "function"
+      ) {
+        try {
+          const roots = await this.#server.listRoots();
+          this.#roots = roots.roots;
+        } catch (e) {
+          if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
+            console.debug(
+              "[FastMCP debug] listRoots method not supported by client",
+            );
+          } else {
+            console.error(
+              `[FastMCP error] received error listing roots.\n\n${e instanceof Error ? e.stack : JSON.stringify(e)}`,
+            );
+          }
         }
       }
-    }
 
-    if (this.#clientCapabilities) {
-      const pingConfig = this.#getPingConfig(transport);
+      if (this.#clientCapabilities) {
+        const pingConfig = this.#getPingConfig(transport);
 
-      if (pingConfig.enabled) {
-        this.#pingInterval = setInterval(async () => {
-          try {
-            await this.#server.ping();
-          } catch {
-            // The reason we are not emitting an error here is because some clients
-            // seem to not respond to the ping request, and we don't want to crash the server,
-            // e.g., https://github.com/punkpeye/fastmcp/issues/38.
-            const logLevel = pingConfig.logLevel;
-            if (logLevel === "debug") {
-              console.debug("[FastMCP debug] server ping failed");
-            } else if (logLevel === "warning") {
-              console.warn(
-                "[FastMCP warning] server is not responding to ping",
-              );
-            } else if (logLevel === "error") {
-              console.error("[FastMCP error] server is not responding to ping");
-            } else {
-              console.info("[FastMCP info] server ping failed");
+        if (pingConfig.enabled) {
+          this.#pingInterval = setInterval(async () => {
+            try {
+              await this.#server.ping();
+            } catch {
+              // The reason we are not emitting an error here is because some clients
+              // seem to not respond to the ping request, and we don't want to crash the server,
+              // e.g., https://github.com/punkpeye/fastmcp/issues/38.
+              const logLevel = pingConfig.logLevel;
+
+              if (logLevel === "debug") {
+                console.debug("[FastMCP debug] server ping failed");
+              } else if (logLevel === "warning") {
+                console.warn(
+                  "[FastMCP warning] server is not responding to ping",
+                );
+              } else if (logLevel === "error") {
+                console.error(
+                  "[FastMCP error] server is not responding to ping",
+                );
+              } else {
+                console.info("[FastMCP info] server ping failed");
+              }
             }
-          }
-        }, pingConfig.intervalMs);
+          }, pingConfig.intervalMs);
+        }
       }
+
+      // Mark connection as ready and emit event
+      this.#connectionState = "ready";
+      this.emit("ready");
+    } catch (error) {
+      this.#connectionState = "error";
+      const errorEvent = {
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+      this.emit("error", errorEvent);
+      throw error;
     }
   }
 
@@ -799,6 +853,41 @@ export class FastMCPSession<
     message: z.infer<typeof CreateMessageRequestSchema>["params"],
   ): Promise<SamplingResponse> {
     return this.#server.createMessage(message);
+  }
+
+  public waitForReady(): Promise<void> {
+    if (this.isReady) {
+      return Promise.resolve();
+    }
+
+    if (
+      this.#connectionState === "error" ||
+      this.#connectionState === "closed"
+    ) {
+      return Promise.reject(
+        new Error(`Connection is in ${this.#connectionState} state`),
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(
+          new Error(
+            "Connection timeout: Session failed to become ready within 5 seconds",
+          ),
+        );
+      }, 5000);
+
+      this.once("ready", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+
+      this.once("error", (event) => {
+        clearTimeout(timeout);
+        reject(event.error);
+      });
+    });
   }
 
   #getPingConfig(transport: Transport): {
@@ -1016,7 +1105,7 @@ export class FastMCPSession<
         if (arg.required && !(args && arg.name in args)) {
           throw new McpError(
             ErrorCode.InvalidRequest,
-            `Missing required argument: ${arg.name}`,
+            `Prompt '${request.params.name}' requires argument '${arg.name}': ${arg.description || "No description provided"}`,
           );
         }
       }
@@ -1026,9 +1115,11 @@ export class FastMCPSession<
       try {
         result = await prompt.load(args as Record<string, string | undefined>);
       } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         throw new McpError(
           ErrorCode.InternalError,
-          `Error loading prompt: ${error}`,
+          `Failed to load prompt '${request.params.name}': ${errorMessage}`,
         );
       }
 
@@ -1096,7 +1187,7 @@ export class FastMCPSession<
 
             throw new McpError(
               ErrorCode.MethodNotFound,
-              `Unknown resource: ${request.params.uri}`,
+              `Resource not found: '${request.params.uri}'. Available resources: ${resources.map((r) => r.uri).join(", ") || "none"}`,
             );
           }
 
@@ -1109,9 +1200,11 @@ export class FastMCPSession<
           try {
             maybeArrayResult = await resource.load();
           } catch (error) {
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
             throw new McpError(
               ErrorCode.InternalError,
-              `Error reading resource: ${error}`,
+              `Failed to load resource '${resource.name}' (${resource.uri}): ${errorMessage}`,
               {
                 uri: resource.uri,
               },
@@ -1247,9 +1340,16 @@ export class FastMCPSession<
         );
 
         if (parsed.issues) {
+          const friendlyErrors = parsed.issues
+            .map((issue) => {
+              const path = issue.path?.join(".") || "root";
+              return `${path}: ${issue.message}`;
+            })
+            .join(", ");
+
           throw new McpError(
             ErrorCode.InvalidParams,
-            `Invalid ${request.params.name} parameters: ${JSON.stringify(parsed.issues)}`,
+            `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}`,
           );
         }
 
@@ -1269,6 +1369,8 @@ export class FastMCPSession<
               progressToken,
             },
           });
+
+          await new Promise((resolve) => setImmediate(resolve));
         };
 
         const log = {
@@ -1323,6 +1425,8 @@ export class FastMCPSession<
               toolName: request.params.name,
             },
           });
+
+          await new Promise((resolve) => setImmediate(resolve));
         };
 
         const executeToolPromise = tool.execute(args, {
@@ -1340,7 +1444,7 @@ export class FastMCPSession<
                 setTimeout(() => {
                   reject(
                     new UserError(
-                      `Tool execution timed out after ${tool.timeoutMs}ms`,
+                      `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
                     ),
                   );
                 }, tool.timeoutMs);
@@ -1351,6 +1455,7 @@ export class FastMCPSession<
           | ContentResult
           | ImageContent
           | null
+          | ResourceContent
           | string
           | TextContent
           | undefined;
@@ -1378,8 +1483,15 @@ export class FastMCPSession<
           };
         }
 
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         return {
-          content: [{ text: `Error: ${error}`, type: "text" }],
+          content: [
+            {
+              text: `Tool '${request.params.name}' execution failed: ${errorMessage}`,
+              type: "text",
+            },
+          ],
           isError: true,
         };
       }
@@ -1450,6 +1562,88 @@ export class FastMCP<
    */
   public addTool<Params extends ToolParameters>(tool: Tool<T, Params>) {
     this.#tools.push(tool as unknown as Tool<T>);
+  }
+
+  /**
+   * Embeds a resource by URI, making it easy to include resources in tool responses.
+   *
+   * @param uri - The URI of the resource to embed
+   * @returns Promise<ResourceContent> - The embedded resource content
+   */
+  public async embedded(uri: string): Promise<ResourceContent["resource"]> {
+    // First, try to find a direct resource match
+    const directResource = this.#resources.find(
+      (resource) => resource.uri === uri,
+    );
+
+    if (directResource) {
+      const result = await directResource.load();
+      const results = Array.isArray(result) ? result : [result];
+      const firstResult = results[0];
+
+      const resourceData: ResourceContent["resource"] = {
+        mimeType: directResource.mimeType,
+        uri,
+      };
+
+      if ("text" in firstResult) {
+        resourceData.text = firstResult.text;
+      }
+
+      if ("blob" in firstResult) {
+        resourceData.blob = firstResult.blob;
+      }
+
+      return resourceData;
+    }
+
+    // Try to match against resource templates
+    for (const template of this.#resourcesTemplates) {
+      // Check if the URI starts with the template base
+      const templateBase = template.uriTemplate.split("{")[0];
+
+      if (uri.startsWith(templateBase)) {
+        const params: Record<string, string> = {};
+        const templateParts = template.uriTemplate.split("/");
+        const uriParts = uri.split("/");
+
+        for (let i = 0; i < templateParts.length; i++) {
+          const templatePart = templateParts[i];
+
+          if (templatePart?.startsWith("{") && templatePart.endsWith("}")) {
+            const paramName = templatePart.slice(1, -1);
+            const paramValue = uriParts[i];
+
+            if (paramValue) {
+              params[paramName] = paramValue;
+            }
+          }
+        }
+
+        const result = await template.load(
+          params as ResourceTemplateArgumentsToObject<
+            typeof template.arguments
+          >,
+        );
+
+        const resourceData: ResourceContent["resource"] = {
+          mimeType: template.mimeType,
+          uri,
+        };
+
+        if ("text" in result) {
+          resourceData.text = result.text;
+        }
+
+        if ("blob" in result) {
+          resourceData.blob = result.blob;
+        }
+
+        return resourceData; // The resource we're looking for
+      }
+    }
+
+    throw new UnexpectedStateError(`Resource not found: ${uri}`, { uri });
   }
 
   /**
@@ -1528,17 +1722,43 @@ export class FastMCP<
 
           if (enabled) {
             const path = healthConfig.path ?? "/health";
+            const url = new URL(req.url || "", "http://localhost");
 
             try {
-              if (
-                req.method === "GET" &&
-                new URL(req.url || "", "http://localhost").pathname === path
-              ) {
+              if (req.method === "GET" && url.pathname === path) {
                 res
                   .writeHead(healthConfig.status ?? 200, {
                     "Content-Type": "text/plain",
                   })
                   .end(healthConfig.message ?? "ok");
+
+                return;
+              }
+
+              // Enhanced readiness check endpoint
+              if (req.method === "GET" && url.pathname === "/ready") {
+                const readySessions = this.#sessions.filter(
+                  (s) => s.isReady,
+                ).length;
+                const totalSessions = this.#sessions.length;
+                const allReady =
+                  readySessions === totalSessions && totalSessions > 0;
+
+                const response = {
+                  ready: readySessions,
+                  status: allReady
+                    ? "ready"
+                    : totalSessions === 0
+                      ? "no_sessions"
+                      : "initializing",
+                  total: totalSessions,
+                };
+
+                res
+                  .writeHead(allReady ? 200 : 503, {
+                    "Content-Type": "application/json",
+                  })
+                  .end(JSON.stringify(response));
 
                 return;
               }

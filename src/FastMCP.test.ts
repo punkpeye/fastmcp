@@ -78,7 +78,9 @@ const runWithTestServer = async ({
     );
 
     const session = await new Promise<FastMCPSession>((resolve) => {
-      server.on("connect", (event) => {
+      server.on("connect", async (event) => {
+        // Wait for session to be fully ready before resolving
+        await event.session.waitForReady();
         resolve(event.session);
       });
 
@@ -512,6 +514,76 @@ test("tracks tool progress", async () => {
   });
 });
 
+test("reports multiple progress updates without buffering", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const progressCalls: Array<{ progress: number; total: number }> = [];
+      const onProgress = vi.fn((data) => {
+        progressCalls.push(data);
+      });
+
+      await client.callTool(
+        {
+          arguments: {
+            steps: 3,
+          },
+          name: "progress-test",
+        },
+        undefined,
+        {
+          onprogress: onProgress,
+        },
+      );
+
+      expect(onProgress).toHaveBeenCalledTimes(4);
+      expect(progressCalls).toEqual([
+        { progress: 0, total: 100 },
+        { progress: 50, total: 100 },
+        { progress: 90, total: 100 },
+        { progress: 100, total: 100 }, // This was previously lost due to buffering
+      ]);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Test tool for progress buffering fix",
+        execute: async (args, { reportProgress }) => {
+          const { steps } = args;
+
+          // Initial
+          await reportProgress({ progress: 0, total: 100 });
+
+          for (let i = 1; i <= steps; i++) {
+            await delay(50); // Small delay to simulate work
+
+            if (i === 1) {
+              await reportProgress({ progress: 50, total: 100 });
+            } else if (i === 2) {
+              await reportProgress({ progress: 90, total: 100 });
+            }
+          }
+
+          // This was the critical test case that failed before the fix
+          // because there's no await after it, causing it to be buffered
+          await reportProgress({ progress: 100, total: 100 });
+
+          return "Progress test completed";
+        },
+        name: "progress-test",
+        parameters: z.object({
+          steps: z.number(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("sets logging levels", async () => {
   await runWithTestServer({
     run: async ({ client, session }) => {
@@ -775,6 +847,138 @@ test("clients reads a resource that returns multiple resources", async () => {
         mimeType: "text/plain",
         name: "Application Logs",
         uri: "file:///logs/app.log",
+      });
+
+      return server;
+    },
+  });
+});
+
+test("embedded resources work in tools", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            userId: "123",
+          },
+          name: "get_user_profile",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "application/json",
+              text: '{"id":"123","name":"User","email":"user@example.com"}',
+              uri: "user://profile/123",
+            },
+            type: "resource",
+          },
+        ],
+      });
+    },
+
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResourceTemplate({
+        arguments: [
+          {
+            name: "userId",
+            required: true,
+          },
+        ],
+        async load(args) {
+          return {
+            text: `{"id":"${args.userId}","name":"User","email":"user@example.com"}`,
+          };
+        },
+        mimeType: "application/json",
+        name: "User Profile",
+        uriTemplate: "user://profile/{userId}",
+      });
+
+      server.addTool({
+        description: "Get user profile data",
+        execute: async (args) => {
+          return {
+            content: [
+              {
+                resource: await server.embedded(
+                  `user://profile/${args.userId}`,
+                ),
+                type: "resource",
+              },
+            ],
+          };
+        },
+        name: "get_user_profile",
+        parameters: z.object({
+          userId: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("embedded resources work with direct resources", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {},
+          name: "get_logs",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "text/plain",
+              text: "Example log content",
+              uri: "file:///logs/app.log",
+            },
+            type: "resource",
+          },
+        ],
+      });
+    },
+
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResource({
+        async load() {
+          return {
+            text: "Example log content",
+          };
+        },
+        mimeType: "text/plain",
+        name: "Application Logs",
+        uri: "file:///logs/app.log",
+      });
+
+      server.addTool({
+        description: "Get application logs",
+        execute: async () => {
+          return {
+            content: [
+              {
+                resource: await server.embedded("file:///logs/app.log"),
+                type: "resource",
+              },
+            ],
+          };
+        },
+        name: "get_logs",
+        parameters: z.object({}),
       });
 
       return server;
@@ -1484,7 +1688,7 @@ test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema"
 
         // @ts-expect-error - we know that error is an McpError
         expect(error.message).toBe(
-          'MCP error -32602: MCP error -32602: Invalid add parameters: [{"code":"invalid_type","expected":"number","received":"string","path":["b"],"message":"Expected number, received string"}]',
+          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Expected number, received string",
         );
       }
     },
@@ -1530,7 +1734,7 @@ test("server remains usable after InvalidParams error", async () => {
 
         // @ts-expect-error - we know that error is an McpError
         expect(error.message).toBe(
-          'MCP error -32602: MCP error -32602: Invalid add parameters: [{"code":"invalid_type","expected":"number","received":"string","path":["b"],"message":"Expected number, received string"}]',
+          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Expected number, received string",
         );
       }
 
@@ -1868,7 +2072,7 @@ test("supports streaming output from tools", async () => {
         annotations: {
           streamingHint: true,
         },
-        description: "Tool yang streaming dan mengembalikan void",
+        description: "A streaming tool that returns void",
         execute: async (_args, context) => {
           await context.streamContent({
             text: "Streaming content 1",
@@ -1891,7 +2095,7 @@ test("supports streaming output from tools", async () => {
         annotations: {
           streamingHint: true,
         },
-        description: "Tool yang streaming dan mengembalikan hasil",
+        description: "A streaming tool that returns a result.",
         execute: async (_args, context) => {
           await context.streamContent({
             text: "Streaming content 1",
@@ -2006,11 +2210,16 @@ test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
       new URL(`http://localhost:${port}/stream`),
     );
 
-    // Connect client to server
-    await client.connect(transport);
+    // Connect client to server and wait for session to be ready
+    const sessionPromise = new Promise<FastMCPSession>((resolve) => {
+      server.on("connect", async (event) => {
+        await event.session.waitForReady();
+        resolve(event.session);
+      });
+    });
 
-    // Wait a bit to ensure connection is established
-    await delay(1000);
+    await client.connect(transport);
+    await sessionPromise;
 
     // Call tool
     const result = await client.callTool({
