@@ -514,6 +514,76 @@ test("tracks tool progress", async () => {
   });
 });
 
+test("reports multiple progress updates without buffering (fixes issue #90)", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const progressCalls: Array<{ progress: number; total: number }> = [];
+      const onProgress = vi.fn((data) => {
+        progressCalls.push(data);
+      });
+
+      await client.callTool(
+        {
+          arguments: {
+            steps: 3,
+          },
+          name: "progress-test",
+        },
+        undefined,
+        {
+          onprogress: onProgress,
+        },
+      );
+
+      expect(onProgress).toHaveBeenCalledTimes(4);
+      expect(progressCalls).toEqual([
+        { progress: 0, total: 100 },
+        { progress: 50, total: 100 },
+        { progress: 90, total: 100 },
+        { progress: 100, total: 100 }, // This was previously lost due to buffering
+      ]);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Test tool for progress buffering fix",
+        execute: async (args, { reportProgress }) => {
+          const { steps } = args;
+
+          // Initial
+          await reportProgress({ progress: 0, total: 100 });
+
+          for (let i = 1; i <= steps; i++) {
+            await delay(50); // Small delay to simulate work
+
+            if (i === 1) {
+              await reportProgress({ progress: 50, total: 100 });
+            } else if (i === 2) {
+              await reportProgress({ progress: 90, total: 100 });
+            }
+          }
+
+          // This was the critical test case that failed before the fix
+          // because there's no await after it, causing it to be buffered
+          await reportProgress({ progress: 100, total: 100 });
+
+          return "Progress test completed";
+        },
+        name: "progress-test",
+        parameters: z.object({
+          steps: z.number(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("sets logging levels", async () => {
   await runWithTestServer({
     run: async ({ client, session }) => {
