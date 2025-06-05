@@ -514,7 +514,7 @@ test("tracks tool progress", async () => {
   });
 });
 
-test("reports multiple progress updates without buffering (fixes issue #90)", async () => {
+test("reports multiple progress updates without buffering", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
       const progressCalls: Array<{ progress: number; total: number }> = [];
