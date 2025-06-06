@@ -646,7 +646,9 @@ export class FastMCPSession<
   #clientCapabilities?: ClientCapabilities;
   #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
   #loggingLevel: LoggingLevel = "info";
+  #needsEventLoopFlush: boolean = false;
   #pingConfig?: ServerOptions<T>["ping"];
+
   #pingInterval: null | ReturnType<typeof setInterval> = null;
 
   #prompts: Prompt[] = [];
@@ -671,6 +673,7 @@ export class FastMCPSession<
     resourcesTemplates,
     roots,
     tools,
+    transportType,
     version,
   }: {
     auth?: T;
@@ -682,6 +685,7 @@ export class FastMCPSession<
     resourcesTemplates: InputResourceTemplate[];
     roots?: ServerOptions<T>["roots"];
     tools: Tool<T>[];
+    transportType?: "httpStream" | "stdio";
     version: string;
   }) {
     super();
@@ -689,6 +693,7 @@ export class FastMCPSession<
     this.#auth = auth;
     this.#pingConfig = ping;
     this.#rootsConfig = roots;
+    this.#needsEventLoopFlush = transportType === "httpStream";
 
     if (tools.length) {
       this.#capabilities.tools = {};
@@ -1370,7 +1375,9 @@ export class FastMCPSession<
             },
           });
 
-          await new Promise((resolve) => setImmediate(resolve));
+          if (this.#needsEventLoopFlush) {
+            await new Promise((resolve) => setImmediate(resolve));
+          }
         };
 
         const log = {
@@ -1426,7 +1433,9 @@ export class FastMCPSession<
             },
           });
 
-          await new Promise((resolve) => setImmediate(resolve));
+          if (this.#needsEventLoopFlush) {
+            await new Promise((resolve) => setImmediate(resolve));
+          }
         };
 
         const executeToolPromise = tool.execute(args, {
@@ -1671,6 +1680,7 @@ export class FastMCP<
         resourcesTemplates: this.#resourcesTemplates,
         roots: this.#options.roots,
         tools: this.#tools,
+        transportType: "stdio",
         version: this.#options.version,
       });
 
@@ -1699,6 +1709,7 @@ export class FastMCP<
             resourcesTemplates: this.#resourcesTemplates,
             roots: this.#options.roots,
             tools: this.#tools,
+            transportType: "httpStream",
             version: this.#options.version,
           });
         },
