@@ -700,14 +700,14 @@ server.addTool({
     url: z.string(),
   }),
   execute: async (args, { reportProgress }) => {
-    reportProgress({
+    await reportProgress({
       progress: 0,
       total: 100,
     });
 
     // ...
 
-    reportProgress({
+    await reportProgress({
       progress: 100,
       total: 100,
     });
