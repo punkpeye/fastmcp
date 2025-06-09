@@ -1164,7 +1164,7 @@ server.addTool({
 
 #### Passing Headers Through Context
 
-If you are exposing your MCP server via http, you may wish to allow clients to supply sensitive keys via headers, which can then be pass along to things like APIs that tools engage with, allowing each client to supply their own particular API keys. This can be done by capturing the http headers in the `authenticate` section, and storing them in session, to be referenced by the tools later on.
+If you are exposing your MCP server via HTTP, you may wish to allow clients to supply sensitive keys via headers, which can then be passed along to APIs that your tools interact with, allowing each client to supply their own API keys. This can be done by capturing the HTTP headers in the `authenticate` section and storing them in the session to be referenced by the tools later.
 
 ```ts
 import { FastMCP } from 'fastmcp';
@@ -1236,7 +1236,6 @@ const client = new Client(
   {
     name: "example-client",
     version: "1.0.0",
-    
   }
 );
 
