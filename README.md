@@ -1257,8 +1257,8 @@ const client = new Client(
 
 What would show up in the console after the client runs is something like this:
 
-```json
-{
+```
+Tool result: {
   content: [
     {
       type: 'text',
