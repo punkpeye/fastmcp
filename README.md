@@ -10,6 +10,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 
 - Simple Tool, Resource, Prompt definition
 - [Authentication](#authentication)
+- [Passing headers through context](#passing-headers-through-context)
 - [Sessions](#sessions)
 - [Image content](#returning-an-image)
 - [Audio content](#returning-an-audio)
@@ -1159,6 +1160,125 @@ server.addTool({
     return `Hello, ${session.id}!`;
   },
 });
+```
+
+#### Passing Headers Through Context
+
+If you are exposing your MCP server via http, you may wish to allow clients to supply sensitive keys via headers, which can then be pass along to things like APIs that tools engage with, allowing each client to supply their own particular API keys. This can be done by capturing the http headers in the `authenticate` section, and storing them in session, to be referenced by the tools later on.
+
+```ts
+import { FastMCP } from 'fastmcp';
+import { IncomingHttpHeaders } from 'http';
+
+// Define the session data type
+interface SessionData {
+  headers: IncomingHttpHeaders;
+  [key: string]: unknown; // Add index signature to satisfy Record<string, unknown>
+}
+
+// Create a server instance
+const server = new FastMCP({
+    name: "My Server",
+    version: "1.0.0",
+    authenticate: async (request: any): Promise<SessionData> => {
+        // Authentication logic
+        return {
+            headers: request.headers
+        };
+    }
+});
+
+// Tool to display HTTP headers
+server.addTool({
+  name: 'headerTool',
+  description: 'Reads HTTP headers from the request',
+  execute: async (args: any, context: any) => {
+    const session = context.session as SessionData;
+    const headers = session?.headers ?? {};
+
+    const getHeaderString = (header: string | string[] | undefined) =>
+        Array.isArray(header) ? header.join(', ') : header ?? 'N/A';
+
+    const userAgent = getHeaderString(headers['user-agent']);
+    const authorization = getHeaderString(headers['authorization']);
+    return `User-Agent: ${userAgent}\nAuthorization: ${authorization}\nAll Headers: ${JSON.stringify(headers, null, 2)}`;
+  },
+});
+
+// Start the server
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    endpoint: '/mcp',
+    port: 8080,
+  },
+});
+```
+
+A client that would connect to this may look something like this:
+
+```ts
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+
+const transport = new StreamableHTTPClientTransport(
+  new URL(`http://localhost:8080/mcp`),
+  {
+    requestInit: {
+      headers: {
+        'Authorization': 'Test 123'
+      }
+    }
+  }
+);
+
+const client = new Client(
+  {
+    name: "example-client",
+    version: "1.0.0",
+    
+  }
+);
+
+(async () => {
+  await client.connect(transport);
+
+  // Call a tool
+  const result = await client.callTool({
+    name: "headerTool",
+    arguments: {
+      arg1: "value"
+    }
+  });
+
+  console.log("Tool result:", result);
+})().catch(console.error);
+```
+
+What would show up in the console after the client runs is something like this:
+
+```json
+{
+  content: [
+    {
+      type: 'text',
+      text: 'User-Agent: node\n' +
+        'Authorization: Test 123\n' +
+        'All Headers: {\n' +
+        '  "host": "localhost:8080",\n' +
+        '  "connection": "keep-alive",\n' +
+        '  "authorization": "Test 123",\n' +
+        '  "content-type": "application/json",\n' +
+        '  "accept": "application/json, text/event-stream",\n' +
+        '  "accept-language": "*",\n' +
+        '  "sec-fetch-mode": "cors",\n' +
+        '  "user-agent": "node",\n' +
+        '  "accept-encoding": "gzip, deflate",\n' +
+        '  "content-length": "163"\n' +
+        '}'
+    }
+  ]
+}
 ```
 
 ### Providing Instructions
