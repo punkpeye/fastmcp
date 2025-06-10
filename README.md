@@ -1,5 +1,7 @@
 # FastMCP
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/punkpeye/fastmcp)
+
 A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable of handling client sessions.
 
 > [!NOTE]
