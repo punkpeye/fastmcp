@@ -1437,7 +1437,10 @@ Follow the guide https://modelcontextprotocol.io/quickstart/user and add the fol
 
 > [!NOTE]
 >
-> If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
+> If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate). </br>  </br>
+If you are looking for a more opinionated and structured option check out [fast-mcp-server-template](https://github.com/yoav0gal/mcp-server-template).
+
+
 
 - [apinetwork/piapi-mcp-server](https://github.com/apinetwork/piapi-mcp-server) - generate media using Midjourney/Flux/Kling/LumaLabs/Udio/Chrip/Trellis
 - [domdomegg/computer-use-mcp](https://github.com/domdomegg/computer-use-mcp) - controls your computer
