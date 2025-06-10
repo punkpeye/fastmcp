@@ -1689,7 +1689,7 @@ test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema"
 
         // @ts-expect-error - we know that error is an McpError
         expect(error.message).toBe(
-          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Expected number, received string",
+          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Expected number, received string. Please check the parameter types and values according to the tool's schema.",
         );
       }
     },
@@ -1735,7 +1735,7 @@ test("server remains usable after InvalidParams error", async () => {
 
         // @ts-expect-error - we know that error is an McpError
         expect(error.message).toBe(
-          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Expected number, received string",
+          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Expected number, received string. Please check the parameter types and values according to the tool's schema.",
         );
       }
 
