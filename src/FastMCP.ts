@@ -1718,7 +1718,7 @@ export class FastMCP<
             session,
           });
         },
-        onConnect: async (session) => {
+        onConnect: (session) => {
           this.#sessions.push(session);
 
           this.emit("connect", {
