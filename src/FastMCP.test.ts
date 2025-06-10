@@ -1060,8 +1060,8 @@ test("uses events to notify server of client connect/disconnect", async () => {
     version: "1.0.0",
   });
 
-  const onConnect = vi.fn();
-  const onDisconnect = vi.fn();
+  const onConnect = vi.fn().mockResolvedValue(undefined);
+  const onDisconnect = vi.fn().mockResolvedValue(undefined);
 
   server.on("connect", onConnect);
   server.on("disconnect", onDisconnect);
