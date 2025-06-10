@@ -773,21 +773,24 @@ export class FastMCPSession<
       await this.#server.connect(transport);
 
       let attempt = 0;
+      const maxAttempts = 10;
+      const retryDelay = 100;
 
-      while (attempt++ < 10) {
+      while (attempt++ < maxAttempts) {
         const capabilities = this.#server.getClientCapabilities();
 
         if (capabilities) {
           this.#clientCapabilities = capabilities;
-
           break;
         }
 
-        await delay(100);
+        await delay(retryDelay);
       }
 
       if (!this.#clientCapabilities) {
-        console.warn("[FastMCP warning] could not infer client capabilities");
+        console.warn(
+          `[FastMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`,
+        );
       }
 
       if (
@@ -796,7 +799,7 @@ export class FastMCPSession<
       ) {
         try {
           const roots = await this.#server.listRoots();
-          this.#roots = roots.roots;
+          this.#roots = roots?.roots || [];
         } catch (e) {
           if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
             console.debug(
@@ -922,6 +925,7 @@ export class FastMCPSession<
   private addPrompt(inputPrompt: InputPrompt) {
     const completers: Record<string, ArgumentValueCompleter> = {};
     const enums: Record<string, string[]> = {};
+    const fuseInstances: Record<string, Fuse<string>> = {};
 
     for (const argument of inputPrompt.arguments ?? []) {
       if (argument.complete) {
@@ -930,6 +934,10 @@ export class FastMCPSession<
 
       if (argument.enum) {
         enums[argument.name] = argument.enum;
+        fuseInstances[argument.name] = new Fuse(argument.enum, {
+          includeScore: true,
+          threshold: 0.3, // More flexible matching!
+        });
       }
     }
 
@@ -940,12 +948,8 @@ export class FastMCPSession<
           return await completers[name](value);
         }
 
-        if (enums[name]) {
-          const fuse = new Fuse(enums[name], {
-            keys: ["value"],
-          });
-
-          const result = fuse.search(value);
+        if (fuseInstances[name]) {
+          const result = fuseInstances[name].search(value);
 
           return {
             total: result.length,
@@ -1354,7 +1358,7 @@ export class FastMCPSession<
 
           throw new McpError(
             ErrorCode.InvalidParams,
-            `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}`,
+            `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`,
           );
         }
 
@@ -1367,16 +1371,25 @@ export class FastMCPSession<
 
       try {
         const reportProgress = async (progress: Progress) => {
-          await this.#server.notification({
-            method: "notifications/progress",
-            params: {
-              ...progress,
-              progressToken,
-            },
-          });
+          try {
+            await this.#server.notification({
+              method: "notifications/progress",
+              params: {
+                ...progress,
+                progressToken,
+              },
+            });
 
-          if (this.#needsEventLoopFlush) {
-            await new Promise((resolve) => setImmediate(resolve));
+            if (this.#needsEventLoopFlush) {
+              await new Promise((resolve) => setImmediate(resolve));
+            }
+          } catch (progressError) {
+            console.warn(
+              `[FastMCP warning] Failed to report progress for tool '${request.params.name}':`,
+              progressError instanceof Error
+                ? progressError.message
+                : String(progressError),
+            );
           }
         };
 
@@ -1425,16 +1438,25 @@ export class FastMCPSession<
         const streamContent = async (content: Content | Content[]) => {
           const contentArray = Array.isArray(content) ? content : [content];
 
-          await this.#server.notification({
-            method: "notifications/tool/streamContent",
-            params: {
-              content: contentArray,
-              toolName: request.params.name,
-            },
-          });
+          try {
+            await this.#server.notification({
+              method: "notifications/tool/streamContent",
+              params: {
+                content: contentArray,
+                toolName: request.params.name,
+              },
+            });
 
-          if (this.#needsEventLoopFlush) {
-            await new Promise((resolve) => setImmediate(resolve));
+            if (this.#needsEventLoopFlush) {
+              await new Promise((resolve) => setImmediate(resolve));
+            }
+          } catch (streamError) {
+            console.warn(
+              `[FastMCP warning] Failed to stream content for tool '${request.params.name}':`,
+              streamError instanceof Error
+                ? streamError.message
+                : String(streamError),
+            );
           }
         };
 
@@ -1450,13 +1472,16 @@ export class FastMCPSession<
           ? Promise.race([
               executeToolPromise,
               new Promise<never>((_, reject) => {
-                setTimeout(() => {
+                const timeoutId = setTimeout(() => {
                   reject(
                     new UserError(
                       `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
                     ),
                   );
                 }, tool.timeoutMs);
+
+                // If promise resolves first
+                executeToolPromise.finally(() => clearTimeout(timeoutId));
               }),
             ])
           : executeToolPromise)) as
