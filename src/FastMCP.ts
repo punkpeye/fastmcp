@@ -1713,7 +1713,7 @@ export class FastMCP<
             version: this.#options.version,
           });
         },
-        onClose: (session) => {
+        onClose: async (session) => {
           this.emit("disconnect", {
             session,
           });
