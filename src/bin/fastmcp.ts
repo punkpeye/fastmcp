@@ -155,9 +155,16 @@ await yargs(hideBin(process.argv))
             stderr: "pipe",
             stdout: "pipe",
           })`node -e "
-            const { FastMCP } = require('fastmcp');
-            require('${filePath}');
-            console.log('[FastMCP] ✓ Server structure validation passed');
+            (async () => {
+              try {
+                const { FastMCP } = await import('fastmcp');
+                await import('file://${filePath}');
+                console.log('[FastMCP] ✓ Server structure validation passed');
+              } catch (error) {
+                console.error('[FastMCP] ✗ Server structure validation failed:', error.message);
+                process.exit(1);
+              }
+            })();
           "`;
         } catch {
           console.error("[FastMCP] ✗ Server structure validation failed");
