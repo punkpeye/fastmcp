@@ -1556,6 +1556,84 @@ test("lists resource templates", async () => {
   });
 });
 
+test("HTTP Stream: custom endpoint works with /another-mcp", { timeout: 20000 }, async () => {
+  const port = await getRandomPort();
+
+  // Create server with custom endpoint
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Add two numbers",
+    execute: async (args) => {
+      return String(args.a + args.b);
+    },
+    name: "add",
+    parameters: z.object({
+      a: z.number(),
+      b: z.number(),
+    }),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      endpoint: "/another-mcp",
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Create client
+    const client = new Client(
+      {
+        name: "example-client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/another-mcp`),
+    );
+
+    // Connect client to server and wait for session to be ready
+    const sessionPromise = new Promise<FastMCPSession>((resolve) => {
+      server.on("connect", async (event) => {
+        await event.session.waitForReady();
+        resolve(event.session);
+      });
+    });
+
+    await client.connect(transport);
+    await sessionPromise;
+
+    // Call tool
+    const result = await client.callTool({
+      arguments: {
+        a: 5,
+        b: 7,
+      },
+      name: "add",
+    });
+
+    // Check result
+    expect(result).toEqual({
+      content: [{ text: "12", type: "text" }],
+    });
+
+    // Clean up connection
+    await transport.terminateSession();
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
 test("clients reads a resource accessed via a resource template", async () => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const loadSpy = vi.fn((_args) => {
