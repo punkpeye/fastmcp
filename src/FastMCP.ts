@@ -8,6 +8,7 @@ import {
   CreateMessageRequestSchema,
   ErrorCode,
   GetPromptRequestSchema,
+  GetPromptResult,
   ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ListResourceTemplatesRequestSchema,
@@ -67,7 +68,9 @@ export const imageContent = async (
         rawData = Buffer.from(await response.arrayBuffer());
       } catch (error) {
         throw new Error(
-          `Failed to fetch image from URL (${input.url}): ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to fetch image from URL (${input.url}): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         );
       }
     } else if ("path" in input) {
@@ -75,7 +78,9 @@ export const imageContent = async (
         rawData = await readFile(input.path);
       } catch (error) {
         throw new Error(
-          `Failed to read image from path (${input.path}): ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to read image from path (${input.path}): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         );
       }
     } else if ("buffer" in input) {
@@ -90,7 +95,9 @@ export const imageContent = async (
 
     if (!mimeType || !mimeType.mime.startsWith("image/")) {
       console.warn(
-        `Warning: Content may not be a valid image. Detected MIME: ${mimeType?.mime || "unknown"}`,
+        `Warning: Content may not be a valid image. Detected MIME: ${
+          mimeType?.mime || "unknown"
+        }`,
       );
     }
 
@@ -129,7 +136,9 @@ export const audioContent = async (
         rawData = Buffer.from(await response.arrayBuffer());
       } catch (error) {
         throw new Error(
-          `Failed to fetch audio from URL (${input.url}): ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to fetch audio from URL (${input.url}): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         );
       }
     } else if ("path" in input) {
@@ -137,7 +146,9 @@ export const audioContent = async (
         rawData = await readFile(input.path);
       } catch (error) {
         throw new Error(
-          `Failed to read audio from path (${input.path}): ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to read audio from path (${input.path}): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         );
       }
     } else if ("buffer" in input) {
@@ -152,7 +163,9 @@ export const audioContent = async (
 
     if (!mimeType || !mimeType.mime.startsWith("audio/")) {
       console.warn(
-        `Warning: Content may not be a valid audio file. Detected MIME: ${mimeType?.mime || "unknown"}`,
+        `Warning: Content may not be a valid audio file. Detected MIME: ${
+          mimeType?.mime || "unknown"
+        }`,
       );
     }
 
@@ -357,7 +370,7 @@ type InputPrompt<
 > = {
   arguments?: InputPromptArgument[];
   description?: string;
-  load: (args: Args) => Promise<string>;
+  load: (args: Args) => Promise<PromptResult>;
   name: string;
 };
 
@@ -406,7 +419,7 @@ type Prompt<
   arguments?: PromptArgument[];
   complete?: (name: string, value: string) => Promise<Completion>;
   description?: string;
-  load: (args: Args) => Promise<string>;
+  load: (args: Args) => Promise<PromptResult>;
   name: string;
 };
 
@@ -423,10 +436,11 @@ type PromptArgumentsToObject<T extends { name: string; required?: boolean }[]> =
     [K in T[number]["name"]]: Extract<
       T[number],
       { name: K }
-    >["required"] extends true
-      ? string
+    >["required"] extends true ? string
       : string | undefined;
   };
+
+type PromptResult = Pick<GetPromptResult, "messages"> | string;
 
 type Resource = {
   complete?: (name: string, value: string) => Promise<Completion>;
@@ -439,11 +453,11 @@ type Resource = {
 
 type ResourceResult =
   | {
-      blob: string;
-    }
+    blob: string;
+  }
   | {
-      text: string;
-    };
+    text: string;
+  };
 
 type ResourceTemplate<
   Arguments extends ResourceTemplateArgument[] = ResourceTemplateArgument[],
@@ -807,7 +821,9 @@ export class FastMCPSession<
             );
           } else {
             console.error(
-              `[FastMCP error] received error listing roots.\n\n${e instanceof Error ? e.stack : JSON.stringify(e)}`,
+              `[FastMCP error] received error listing roots.\n\n${
+                e instanceof Error ? e.stack : JSON.stringify(e)
+              }`,
             );
           }
         }
@@ -915,8 +931,9 @@ export class FastMCPSession<
     }
 
     return {
-      enabled:
-        pingConfig.enabled !== undefined ? pingConfig.enabled : defaultEnabled,
+      enabled: pingConfig.enabled !== undefined
+        ? pingConfig.enabled
+        : defaultEnabled,
       intervalMs: pingConfig.intervalMs || 5000,
       logLevel: pingConfig.logLevel || "debug",
     };
@@ -1114,7 +1131,9 @@ export class FastMCPSession<
         if (arg.required && !(args && arg.name in args)) {
           throw new McpError(
             ErrorCode.InvalidRequest,
-            `Prompt '${request.params.name}' requires argument '${arg.name}': ${arg.description || "No description provided"}`,
+            `Prompt '${request.params.name}' requires argument '${arg.name}': ${
+              arg.description || "No description provided"
+            }`,
           );
         }
       }
@@ -1124,23 +1143,31 @@ export class FastMCPSession<
       try {
         result = await prompt.load(args as Record<string, string | undefined>);
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
         throw new McpError(
           ErrorCode.InternalError,
           `Failed to load prompt '${request.params.name}': ${errorMessage}`,
         );
       }
 
-      return {
-        description: prompt.description,
-        messages: [
-          {
-            content: { text: result, type: "text" },
-            role: "user",
-          },
-        ],
-      };
+      if (typeof result === "string") {
+        return {
+          description: prompt.description,
+          messages: [
+            {
+              content: { text: result, type: "text" },
+              role: "user",
+            },
+          ],
+        };
+      } else {
+        return {
+          description: prompt.description,
+          messages: result.messages,
+        };
+      }
     });
   }
 
@@ -1196,7 +1223,9 @@ export class FastMCPSession<
 
             throw new McpError(
               ErrorCode.MethodNotFound,
-              `Resource not found: '${request.params.uri}'. Available resources: ${resources.map((r) => r.uri).join(", ") || "none"}`,
+              `Resource not found: '${request.params.uri}'. Available resources: ${
+                resources.map((r) => r.uri).join(", ") || "none"
+              }`,
             );
           }
 
@@ -1209,8 +1238,9 @@ export class FastMCPSession<
           try {
             maybeArrayResult = await resource.load();
           } catch (error) {
-            const errorMessage =
-              error instanceof Error ? error.message : String(error);
+            const errorMessage = error instanceof Error
+              ? error.message
+              : String(error);
             throw new McpError(
               ErrorCode.InternalError,
               `Failed to load resource '${resource.name}' (${resource.uri}): ${errorMessage}`,
@@ -1320,10 +1350,10 @@ export class FastMCPSession<
               inputSchema: tool.parameters
                 ? await toJsonSchema(tool.parameters)
                 : {
-                    additionalProperties: false,
-                    properties: {},
-                    type: "object",
-                  }, // More complete schema for Cursor compatibility
+                  additionalProperties: false,
+                  properties: {},
+                  type: "object",
+                }, // More complete schema for Cursor compatibility
               name: tool.name,
             };
           }),
@@ -1470,29 +1500,29 @@ export class FastMCPSession<
         // Handle timeout if specified
         const maybeStringResult = (await (tool.timeoutMs
           ? Promise.race([
-              executeToolPromise,
-              new Promise<never>((_, reject) => {
-                const timeoutId = setTimeout(() => {
-                  reject(
-                    new UserError(
-                      `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
-                    ),
-                  );
-                }, tool.timeoutMs);
+            executeToolPromise,
+            new Promise<never>((_, reject) => {
+              const timeoutId = setTimeout(() => {
+                reject(
+                  new UserError(
+                    `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
+                  ),
+                );
+              }, tool.timeoutMs);
 
-                // If promise resolves first
-                executeToolPromise.finally(() => clearTimeout(timeoutId));
-              }),
-            ])
+              // If promise resolves first
+              executeToolPromise.finally(() => clearTimeout(timeoutId));
+            }),
+          ])
           : executeToolPromise)) as
-          | AudioContent
-          | ContentResult
-          | ImageContent
-          | null
-          | ResourceContent
-          | string
-          | TextContent
-          | undefined;
+            | AudioContent
+            | ContentResult
+            | ImageContent
+            | null
+            | ResourceContent
+            | string
+            | TextContent
+            | undefined;
 
         if (maybeStringResult === undefined || maybeStringResult === null) {
           result = ContentResultZodSchema.parse({
@@ -1517,12 +1547,14 @@ export class FastMCPSession<
           };
         }
 
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
         return {
           content: [
             {
-              text: `Tool '${request.params.name}' execution failed: ${errorMessage}`,
+              text:
+                `Tool '${request.params.name}' execution failed: ${errorMessage}`,
               type: "text",
             },
           ],
@@ -1686,12 +1718,12 @@ export class FastMCP<
   public async start(
     options:
       | {
-          httpStream: { port: number };
-          transportType: "httpStream";
-        }
+        httpStream: { port: number };
+        transportType: "httpStream";
+      }
       | { transportType: "stdio" } = {
-      transportType: "stdio",
-    },
+        transportType: "stdio",
+      },
   ) {
     if (options.transportType === "stdio") {
       const transport = new StdioServerTransport();
@@ -1753,8 +1785,9 @@ export class FastMCP<
         onUnhandledRequest: async (req, res) => {
           const healthConfig = this.#options.health ?? {};
 
-          const enabled =
-            healthConfig.enabled === undefined ? true : healthConfig.enabled;
+          const enabled = healthConfig.enabled === undefined
+            ? true
+            : healthConfig.enabled;
 
           if (enabled) {
             const path = healthConfig.path ?? "/health";
@@ -1777,16 +1810,16 @@ export class FastMCP<
                   (s) => s.isReady,
                 ).length;
                 const totalSessions = this.#sessions.length;
-                const allReady =
-                  readySessions === totalSessions && totalSessions > 0;
+                const allReady = readySessions === totalSessions &&
+                  totalSessions > 0;
 
                 const response = {
                   ready: readySessions,
                   status: allReady
                     ? "ready"
                     : totalSessions === 0
-                      ? "no_sessions"
-                      : "initializing",
+                    ? "no_sessions"
+                    : "initializing",
                   total: totalSessions,
                 };
 
@@ -1827,13 +1860,26 @@ export class FastMCP<
   }
 }
 
-export type { Context };
-export type { Tool, ToolParameters };
-export type { Content, ContentResult, ImageContent, TextContent };
-export type { Progress, SerializableValue };
-export type { Resource, ResourceResult };
-export type { ResourceTemplate, ResourceTemplateArgument };
-export type { Prompt, PromptArgument };
-export type { InputPrompt, InputPromptArgument };
-export type { LoggingLevel, ServerOptions };
-export type { FastMCPEvents, FastMCPSessionEvents };
+export type {
+  Content,
+  ContentResult,
+  Context,
+  FastMCPEvents,
+  FastMCPSessionEvents,
+  ImageContent,
+  InputPrompt,
+  InputPromptArgument,
+  LoggingLevel,
+  Progress,
+  Prompt,
+  PromptArgument,
+  Resource,
+  ResourceResult,
+  ResourceTemplate,
+  ResourceTemplateArgument,
+  SerializableValue,
+  ServerOptions,
+  TextContent,
+  Tool,
+  ToolParameters,
+};
