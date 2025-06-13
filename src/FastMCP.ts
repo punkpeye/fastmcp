@@ -436,7 +436,8 @@ type PromptArgumentsToObject<T extends { name: string; required?: boolean }[]> =
     [K in T[number]["name"]]: Extract<
       T[number],
       { name: K }
-    >["required"] extends true ? string
+    >["required"] extends true
+      ? string
       : string | undefined;
   };
 
@@ -453,11 +454,11 @@ type Resource = {
 
 type ResourceResult =
   | {
-    blob: string;
-  }
+      blob: string;
+    }
   | {
-    text: string;
-  };
+      text: string;
+    };
 
 type ResourceTemplate<
   Arguments extends ResourceTemplateArgument[] = ResourceTemplateArgument[],
@@ -931,9 +932,8 @@ export class FastMCPSession<
     }
 
     return {
-      enabled: pingConfig.enabled !== undefined
-        ? pingConfig.enabled
-        : defaultEnabled,
+      enabled:
+        pingConfig.enabled !== undefined ? pingConfig.enabled : defaultEnabled,
       intervalMs: pingConfig.intervalMs || 5000,
       logLevel: pingConfig.logLevel || "debug",
     };
@@ -1143,9 +1143,8 @@ export class FastMCPSession<
       try {
         result = await prompt.load(args as Record<string, string | undefined>);
       } catch (error) {
-        const errorMessage = error instanceof Error
-          ? error.message
-          : String(error);
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         throw new McpError(
           ErrorCode.InternalError,
           `Failed to load prompt '${request.params.name}': ${errorMessage}`,
@@ -1238,9 +1237,8 @@ export class FastMCPSession<
           try {
             maybeArrayResult = await resource.load();
           } catch (error) {
-            const errorMessage = error instanceof Error
-              ? error.message
-              : String(error);
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
             throw new McpError(
               ErrorCode.InternalError,
               `Failed to load resource '${resource.name}' (${resource.uri}): ${errorMessage}`,
@@ -1350,10 +1348,10 @@ export class FastMCPSession<
               inputSchema: tool.parameters
                 ? await toJsonSchema(tool.parameters)
                 : {
-                  additionalProperties: false,
-                  properties: {},
-                  type: "object",
-                }, // More complete schema for Cursor compatibility
+                    additionalProperties: false,
+                    properties: {},
+                    type: "object",
+                  }, // More complete schema for Cursor compatibility
               name: tool.name,
             };
           }),
@@ -1500,29 +1498,29 @@ export class FastMCPSession<
         // Handle timeout if specified
         const maybeStringResult = (await (tool.timeoutMs
           ? Promise.race([
-            executeToolPromise,
-            new Promise<never>((_, reject) => {
-              const timeoutId = setTimeout(() => {
-                reject(
-                  new UserError(
-                    `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
-                  ),
-                );
-              }, tool.timeoutMs);
+              executeToolPromise,
+              new Promise<never>((_, reject) => {
+                const timeoutId = setTimeout(() => {
+                  reject(
+                    new UserError(
+                      `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
+                    ),
+                  );
+                }, tool.timeoutMs);
 
-              // If promise resolves first
-              executeToolPromise.finally(() => clearTimeout(timeoutId));
-            }),
-          ])
+                // If promise resolves first
+                executeToolPromise.finally(() => clearTimeout(timeoutId));
+              }),
+            ])
           : executeToolPromise)) as
-            | AudioContent
-            | ContentResult
-            | ImageContent
-            | null
-            | ResourceContent
-            | string
-            | TextContent
-            | undefined;
+          | AudioContent
+          | ContentResult
+          | ImageContent
+          | null
+          | ResourceContent
+          | string
+          | TextContent
+          | undefined;
 
         if (maybeStringResult === undefined || maybeStringResult === null) {
           result = ContentResultZodSchema.parse({
@@ -1547,14 +1545,12 @@ export class FastMCPSession<
           };
         }
 
-        const errorMessage = error instanceof Error
-          ? error.message
-          : String(error);
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         return {
           content: [
             {
-              text:
-                `Tool '${request.params.name}' execution failed: ${errorMessage}`,
+              text: `Tool '${request.params.name}' execution failed: ${errorMessage}`,
               type: "text",
             },
           ],
@@ -1718,12 +1714,12 @@ export class FastMCP<
   public async start(
     options:
       | {
-        httpStream: { port: number };
-        transportType: "httpStream";
-      }
+          httpStream: { port: number };
+          transportType: "httpStream";
+        }
       | { transportType: "stdio" } = {
-        transportType: "stdio",
-      },
+      transportType: "stdio",
+    },
   ) {
     if (options.transportType === "stdio") {
       const transport = new StdioServerTransport();
@@ -1785,9 +1781,8 @@ export class FastMCP<
         onUnhandledRequest: async (req, res) => {
           const healthConfig = this.#options.health ?? {};
 
-          const enabled = healthConfig.enabled === undefined
-            ? true
-            : healthConfig.enabled;
+          const enabled =
+            healthConfig.enabled === undefined ? true : healthConfig.enabled;
 
           if (enabled) {
             const path = healthConfig.path ?? "/health";
@@ -1810,16 +1805,16 @@ export class FastMCP<
                   (s) => s.isReady,
                 ).length;
                 const totalSessions = this.#sessions.length;
-                const allReady = readySessions === totalSessions &&
-                  totalSessions > 0;
+                const allReady =
+                  readySessions === totalSessions && totalSessions > 0;
 
                 const response = {
                   ready: readySessions,
                   status: allReady
                     ? "ready"
                     : totalSessions === 0
-                    ? "no_sessions"
-                    : "initializing",
+                      ? "no_sessions"
+                      : "initializing",
                   total: totalSessions,
                 };
 
