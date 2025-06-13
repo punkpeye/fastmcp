@@ -1686,7 +1686,7 @@ export class FastMCP<
   public async start(
     options:
       | {
-          httpStream: { port: number; endpoint?: `/${string}` };
+          httpStream: { endpoint?: `/${string}`; port: number };
           transportType: "httpStream";
         }
       | { transportType: "stdio" } = {
@@ -1718,7 +1718,6 @@ export class FastMCP<
       });
     } else if (options.transportType === "httpStream") {
       this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
-        streamEndpoint: options.httpStream.endpoint ?? "/mcp",
         createServer: async (request) => {
           let auth: T | undefined;
 
@@ -1808,6 +1807,7 @@ export class FastMCP<
           res.writeHead(404).end();
         },
         port: options.httpStream.port,
+        streamEndpoint: options.httpStream.endpoint ?? "/mcp",
       });
 
       console.info(
