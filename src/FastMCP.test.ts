@@ -526,7 +526,7 @@ test("reports multiple progress updates without buffering", async () => {
       await client.callTool(
         {
           arguments: {
-            steps: 3,
+            steps: 4,
           },
           name: "progress-test",
         },
