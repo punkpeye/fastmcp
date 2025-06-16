@@ -22,7 +22,6 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
 import { EventEmitter } from "events";
-import { fileTypeFromBuffer } from "file-type";
 import { readFile } from "fs/promises";
 import Fuse from "fuse.js";
 import http from "http";
@@ -91,6 +90,7 @@ export const imageContent = async (
       );
     }
 
+    const { fileTypeFromBuffer } = await import("file-type");
     const mimeType = await fileTypeFromBuffer(rawData);
 
     if (!mimeType || !mimeType.mime.startsWith("image/")) {
@@ -159,6 +159,7 @@ export const audioContent = async (
       );
     }
 
+    const { fileTypeFromBuffer } = await import("file-type");
     const mimeType = await fileTypeFromBuffer(rawData);
 
     if (!mimeType || !mimeType.mime.startsWith("audio/")) {
