@@ -490,7 +490,6 @@ type ResourceTemplateArgumentsToObject<T extends { name: string }[]> = {
   [K in T[number]["name"]]: string;
 };
 
-
 type ServerOptions<T extends FastMCPSessionAuth> = {
   authenticate?: Authenticate<T>;
   /**
