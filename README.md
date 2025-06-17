@@ -1343,6 +1343,54 @@ await session.requestSampling({
 });
 ```
 
+#### Options
+
+`requestSampling` accepts an optional second parameter for request options:
+
+```ts
+await session.requestSampling(
+  {
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text: "What files are in the current directory?",
+        },
+      },
+    ],
+    systemPrompt: "You are a helpful file system assistant.",
+    includeContext: "thisServer",
+    maxTokens: 100,
+  },
+  {
+    // Progress callback - called when progress notifications are received
+    onprogress: (progress) => {
+      console.log(`Progress: ${progress.progress}/${progress.total}`);
+    },
+    
+    // Abort signal for cancelling the request
+    signal: abortController.signal,
+    
+    // Request timeout in milliseconds (default: DEFAULT_REQUEST_TIMEOUT_MSEC)
+    timeout: 30000,
+    
+    // Whether progress notifications reset the timeout (default: false)
+    resetTimeoutOnProgress: true,
+    
+    // Maximum total timeout regardless of progress (no default)
+    maxTotalTimeout: 60000,
+  }
+);
+```
+
+**Options:**
+- `onprogress?: (progress: Progress) => void` - Callback for progress notifications from the remote end
+- `signal?: AbortSignal` - Abort signal to cancel the request
+- `timeout?: number` - Request timeout in milliseconds  
+- `resetTimeoutOnProgress?: boolean` - Whether progress notifications reset the timeout
+- `maxTotalTimeout?: number` - Maximum total timeout regardless of progress notifications
+
 ### `clientCapabilities`
 
 The `clientCapabilities` property contains the client capabilities.
