@@ -11,7 +11,9 @@ import {
   GetPromptResult,
   ListPromptsRequestSchema,
   ListResourcesRequestSchema,
+  ListResourcesResult,
   ListResourceTemplatesRequestSchema,
+  ListResourceTemplatesResult,
   ListToolsRequestSchema,
   McpError,
   ReadResourceRequestSchema,
@@ -390,7 +392,7 @@ type InputResourceTemplate<
   description?: string;
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
-  ) => Promise<ResourceResult>;
+  ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
   uriTemplate: string;
@@ -456,8 +458,10 @@ type Resource = {
 type ResourceResult =
   | {
       blob: string;
+      mimeType?: string;
     }
   | {
+      mimeType?: string;
       text: string;
     };
 
@@ -469,7 +473,7 @@ type ResourceTemplate<
   description?: string;
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
-  ) => Promise<ResourceResult>;
+  ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
   uriTemplate: string;
@@ -485,6 +489,7 @@ type ResourceTemplateArgument = Readonly<{
 type ResourceTemplateArgumentsToObject<T extends { name: string }[]> = {
   [K in T[number]["name"]]: string;
 };
+
 
 type ServerOptions<T extends FastMCPSessionAuth> = {
   authenticate?: Authenticate<T>;
@@ -1174,14 +1179,8 @@ export class FastMCPSession<
   private setupResourceHandlers(resources: Resource[]) {
     this.#server.setRequestHandler(ListResourcesRequestSchema, async () => {
       return {
-        resources: resources.map((resource) => {
-          return {
-            mimeType: resource.mimeType,
-            name: resource.name,
-            uri: resource.uri,
-          };
-        }),
-      };
+        resources,
+      } satisfies ListResourcesResult;
     });
 
     this.#server.setRequestHandler(
@@ -1208,6 +1207,16 @@ export class FastMCPSession<
               const uri = uriTemplate.fill(match);
 
               const result = await resourceTemplate.load(match);
+              if (Array.isArray(result)) {
+                return {
+                  contents: result.map((r) => ({
+                    mimeType: resourceTemplate.mimeType,
+                    name: resourceTemplate.name,
+                    uri: uri,
+                    ...r,
+                  })),
+                };
+              }
 
               return {
                 contents: [
@@ -1284,13 +1293,8 @@ export class FastMCPSession<
       ListResourceTemplatesRequestSchema,
       async () => {
         return {
-          resourceTemplates: resourceTemplates.map((resourceTemplate) => {
-            return {
-              name: resourceTemplate.name,
-              uriTemplate: resourceTemplate.uriTemplate,
-            };
-          }),
-        };
+          resourceTemplates,
+        } satisfies ListResourceTemplatesResult;
       },
     );
   }
