@@ -1193,12 +1193,12 @@ export class FastMCPSession<
       ReadResourceRequestSchema,
       async (request) => {
         if ("uri" in request.params) {
-          const resourceDef = resources.find(
+          const resource = resources.find(
             (resource) =>
               "uri" in resource && resource.uri === request.params.uri,
           );
 
-          if (!resourceDef) {
+          if (!resource) {
             for (const resourceTemplate of this.#resourceTemplates) {
               const uriTemplate = parseURITemplate(
                 resourceTemplate.uriTemplate,
@@ -1234,22 +1234,22 @@ export class FastMCPSession<
             );
           }
 
-          if (!("uri" in resourceDef)) {
+          if (!("uri" in resource)) {
             throw new UnexpectedStateError("Resource does not support reading");
           }
 
           let maybeArrayResult: Awaited<ReturnType<Resource["load"]>>;
 
           try {
-            maybeArrayResult = await resourceDef.load();
+            maybeArrayResult = await resource.load();
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : String(error);
             throw new McpError(
               ErrorCode.InternalError,
-              `Failed to load resource '${resourceDef.name}' (${resourceDef.uri}): ${errorMessage}`,
+              `Failed to load resource '${resource.name}' (${resource.uri}): ${errorMessage}`,
               {
-                uri: resourceDef.uri,
+                uri: resource.uri,
               },
             );
           }
@@ -1261,9 +1261,9 @@ export class FastMCPSession<
           return {
             contents: resourceResults.map((result) => ({
               ...result,
-              mimeType: result.mimeType ?? resourceDef.mimeType,
-              name: resourceDef.name,
-              uri: result.uri ?? resourceDef.uri,
+              mimeType: result.mimeType ?? resource.mimeType,
+              name: resource.name,
+              uri: result.uri ?? resource.uri,
             })),
           };
         }
