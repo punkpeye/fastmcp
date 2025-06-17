@@ -459,10 +459,12 @@ type ResourceResult =
   | {
       blob: string;
       mimeType?: string;
+      uri?: string;
     }
   | {
       mimeType?: string;
       text: string;
+      uri?: string;
     };
 
 type ResourceTemplate<
@@ -1178,7 +1180,12 @@ export class FastMCPSession<
   private setupResourceHandlers(resources: Resource[]) {
     this.#server.setRequestHandler(ListResourcesRequestSchema, async () => {
       return {
-        resources,
+        resources: resources.map((resource) => ({
+          description: resource.description,
+          mimeType: resource.mimeType,
+          name: resource.name,
+          uri: resource.uri,
+        })),
       } satisfies ListResourcesResult;
     });
 
@@ -1186,12 +1193,12 @@ export class FastMCPSession<
       ReadResourceRequestSchema,
       async (request) => {
         if ("uri" in request.params) {
-          const resource = resources.find(
+          const resourceDef = resources.find(
             (resource) =>
               "uri" in resource && resource.uri === request.params.uri,
           );
 
-          if (!resource) {
+          if (!resourceDef) {
             for (const resourceTemplate of this.#resourceTemplates) {
               const uriTemplate = parseURITemplate(
                 resourceTemplate.uriTemplate,
@@ -1206,26 +1213,16 @@ export class FastMCPSession<
               const uri = uriTemplate.fill(match);
 
               const result = await resourceTemplate.load(match);
-              if (Array.isArray(result)) {
-                return {
-                  contents: result.map((r) => ({
-                    mimeType: resourceTemplate.mimeType,
-                    name: resourceTemplate.name,
-                    uri: uri,
-                    ...r,
-                  })),
-                };
-              }
 
+              const resources = Array.isArray(result) ? result : [result];
               return {
-                contents: [
-                  {
-                    mimeType: resourceTemplate.mimeType,
-                    name: resourceTemplate.name,
-                    uri: uri,
-                    ...result,
-                  },
-                ],
+                contents: resources.map((resource) => ({
+                  ...resource,
+                  description: resourceTemplate.description,
+                  mimeType: resource.mimeType ?? resourceTemplate.mimeType,
+                  name: resourceTemplate.name,
+                  uri: resource.uri ?? uri,
+                })),
               };
             }
 
@@ -1237,47 +1234,38 @@ export class FastMCPSession<
             );
           }
 
-          if (!("uri" in resource)) {
+          if (!("uri" in resourceDef)) {
             throw new UnexpectedStateError("Resource does not support reading");
           }
 
           let maybeArrayResult: Awaited<ReturnType<Resource["load"]>>;
 
           try {
-            maybeArrayResult = await resource.load();
+            maybeArrayResult = await resourceDef.load();
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : String(error);
             throw new McpError(
               ErrorCode.InternalError,
-              `Failed to load resource '${resource.name}' (${resource.uri}): ${errorMessage}`,
+              `Failed to load resource '${resourceDef.name}' (${resourceDef.uri}): ${errorMessage}`,
               {
-                uri: resource.uri,
+                uri: resourceDef.uri,
               },
             );
           }
 
-          if (Array.isArray(maybeArrayResult)) {
-            return {
-              contents: maybeArrayResult.map((result) => ({
-                mimeType: resource.mimeType,
-                name: resource.name,
-                uri: resource.uri,
-                ...result,
-              })),
-            };
-          } else {
-            return {
-              contents: [
-                {
-                  mimeType: resource.mimeType,
-                  name: resource.name,
-                  uri: resource.uri,
-                  ...maybeArrayResult,
-                },
-              ],
-            };
-          }
+          const resourceResults = Array.isArray(maybeArrayResult)
+            ? maybeArrayResult
+            : [maybeArrayResult];
+
+          return {
+            contents: resourceResults.map((result) => ({
+              ...result,
+              mimeType: result.mimeType ?? resourceDef.mimeType,
+              name: resourceDef.name,
+              uri: result.uri ?? resourceDef.uri,
+            })),
+          };
         }
 
         throw new UnexpectedStateError("Unknown resource request", {
@@ -1292,7 +1280,12 @@ export class FastMCPSession<
       ListResourceTemplatesRequestSchema,
       async () => {
         return {
-          resourceTemplates,
+          resourceTemplates: resourceTemplates.map((resourceTemplate) => ({
+            description: resourceTemplate.description,
+            mimeType: resourceTemplate.mimeType,
+            name: resourceTemplate.name,
+            uriTemplate: resourceTemplate.uriTemplate,
+          })),
         } satisfies ListResourceTemplatesResult;
       },
     );

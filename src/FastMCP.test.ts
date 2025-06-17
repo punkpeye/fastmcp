@@ -1518,9 +1518,12 @@ test("completes template resource arguments", async () => {
 test("lists resource templates", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
+      const result = await client.listResourceTemplates();
+      console.log(result);
       expect(await client.listResourceTemplates()).toEqual({
         resourceTemplates: [
           {
+            mimeType: "text/plain",
             name: "Application Logs",
             uriTemplate: "file:///logs/{name}.log",
           },
