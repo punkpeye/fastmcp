@@ -1,5 +1,6 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   CallToolRequestSchema,
@@ -877,8 +878,9 @@ export class FastMCPSession<
 
   public async requestSampling(
     message: z.infer<typeof CreateMessageRequestSchema>["params"],
+    options?: RequestOptions,
   ): Promise<SamplingResponse> {
-    return this.#server.createMessage(message);
+    return this.#server.createMessage(message, options);
   }
 
   public waitForReady(): Promise<void> {
