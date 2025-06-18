@@ -1,5 +1,6 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   CallToolRequestSchema,
@@ -486,6 +487,13 @@ type ResourceTemplateArgumentsToObject<T extends { name: string }[]> = {
   [K in T[number]["name"]]: string;
 };
 
+type SamplingResponse = {
+  content: AudioContent | ImageContent | TextContent;
+  model: string;
+  role: "assistant" | "user";
+  stopReason?: "endTurn" | "maxTokens" | "stopSequence" | string;
+};
+
 type ServerOptions<T extends FastMCPSessionAuth> = {
   authenticate?: Authenticate<T>;
   /**
@@ -870,35 +878,8 @@ export class FastMCPSession<
 
   public async requestSampling(
     message: z.infer<typeof CreateMessageRequestSchema>["params"],
-    options?: {
-      /**
-       * If set, requests progress notifications from the remote end (if supported). When progress notifications are received, this callback will be invoked.
-       */
-      onprogress?: (progress: Progress) => void;
-      /**
-       * Can be used to cancel an in-flight request. This will cause an AbortError to be raised from request().
-       */
-      signal?: AbortSignal;
-      /**
-       * A timeout (in milliseconds) for this request. If exceeded, an McpError with code `RequestTimeout` will be raised from request().
-       *
-       * If not specified, `DEFAULT_REQUEST_TIMEOUT_MSEC` will be used as the timeout.
-       */
-      timeout?: number;
-      /**
-       * If true, receiving a progress notification will reset the request timeout.
-       * This is useful for long-running operations that send periodic progress updates.
-       * Default: false
-       */
-      resetTimeoutOnProgress?: boolean;
-      /**
-       * Maximum total time (in milliseconds) to wait for a response.
-       * If exceeded, an McpError with code `RequestTimeout` will be raised, regardless of progress notifications.
-       * If not specified, there is no maximum total timeout.
-       */
-      maxTotalTimeout?: number;
-    },
-  ) {
+    options?: RequestOptions,
+  ): Promise<SamplingResponse> {
     return this.#server.createMessage(message, options);
   }
 
