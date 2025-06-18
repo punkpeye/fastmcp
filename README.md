@@ -1368,26 +1368,27 @@ await session.requestSampling(
     onprogress: (progress) => {
       console.log(`Progress: ${progress.progress}/${progress.total}`);
     },
-    
+
     // Abort signal for cancelling the request
     signal: abortController.signal,
-    
+
     // Request timeout in milliseconds (default: DEFAULT_REQUEST_TIMEOUT_MSEC)
     timeout: 30000,
-    
+
     // Whether progress notifications reset the timeout (default: false)
     resetTimeoutOnProgress: true,
-    
+
     // Maximum total timeout regardless of progress (no default)
     maxTotalTimeout: 60000,
-  }
+  },
 );
 ```
 
 **Options:**
+
 - `onprogress?: (progress: Progress) => void` - Callback for progress notifications from the remote end
 - `signal?: AbortSignal` - Abort signal to cancel the request
-- `timeout?: number` - Request timeout in milliseconds  
+- `timeout?: number` - Request timeout in milliseconds
 - `resetTimeoutOnProgress?: boolean` - Whether progress notifications reset the timeout
 - `maxTotalTimeout?: number` - Maximum total timeout regardless of progress notifications
 
