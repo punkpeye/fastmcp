@@ -1717,7 +1717,7 @@ export class FastMCP<
     }>,
   ) {
     const config = this.#parseRuntimeConfig(options);
-    
+
     if (config.transportType === "stdio") {
       const transport = new StdioServerTransport();
       const session = new FastMCPSession<T>({
@@ -1742,7 +1742,7 @@ export class FastMCP<
       });
     } else if (config.transportType === "httpStream") {
       const httpConfig = config.httpStream;
-      
+
       this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
         createServer: async (request) => {
           let auth: T | undefined;
@@ -1772,7 +1772,7 @@ export class FastMCP<
         onConnect: async (session) => {
           this.#sessions.push(session);
 
-          console.info(`[FastMCP info] HTTP Stream session establishhed`);
+          console.info(`[FastMCP info] HTTP Stream session established`);
 
           this.emit("connect", {
             session,
@@ -1794,7 +1794,7 @@ export class FastMCP<
                   .writeHead(healthConfig.status ?? 200, {
                     "Content-Type": "text/plain",
                   })
-                  .end(healthConfig.message ?? "ok");
+                  .end(healthConfig.message ?? "✓ Ok");
 
                 return;
               }
@@ -1834,7 +1834,7 @@ export class FastMCP<
           // If the request was not handled above, return 404
           res.writeHead(404).end();
         },
-        
+
         port: httpConfig.port,
         streamEndpoint: httpConfig.endpoint,
       });
@@ -1873,7 +1873,7 @@ export class FastMCP<
     const args = process.argv.slice(2);
     const getArg = (name: string) => {
       const index = args.findIndex((arg) => arg === `--${name}`);
-      
+
       return index !== -1 && index + 1 < args.length
         ? args[index + 1]
         : undefined;
