@@ -596,10 +596,7 @@ type Tool<
     | TextContent
     | void
   >;
-  /**
-   * Optional function to determine if this tool can be accessed by the given authentication context
-   * If not provided, the tool is accessible to all authenticated users
-   */
+
   canAccess?: (auth: T) => boolean;
   name: string;
   parameters?: Params;
