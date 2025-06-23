@@ -290,7 +290,42 @@ server.addTool({
 
 #### Returning a string
 
-By default, tools in FastMCP return their entire output as a single string. This is useful for simple tools that produce a small amount of text.
+`execute` can return a string:
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return "Hello, world!";
+  },
+});
+```
+
+The latter is equivalent to:
+
+```js
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    return {
+      content: [
+        {
+          type: "text",
+          text: "Hello, world!",
+        },
+      ],
+    };
+  },
+});
+```
 
 #### Returning a list
 
