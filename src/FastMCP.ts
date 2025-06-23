@@ -596,6 +596,11 @@ type Tool<
     | TextContent
     | void
   >;
+  /**
+   * Optional function to determine if this tool is allowed for the given authentication context
+   * If not provided, the tool is allowed for all authenticated users
+   */
+  isAllowedForAuth?: (auth: T) => boolean;
   name: string;
   parameters?: Params;
   timeoutMs?: number;
@@ -1750,7 +1755,7 @@ export class FastMCP<
           if (this.#authenticate) {
             auth = await this.#authenticate(request);
           }
-
+          const allowedTools = auth ? this.#tools.filter((tool) => tool.isAllowedForAuth ? tool.isAllowedForAuth(auth) : true) : this.#tools;
           return new FastMCPSession<T>({
             auth,
             name: this.#options.name,
@@ -1759,7 +1764,7 @@ export class FastMCP<
             resources: this.#resources,
             resourcesTemplates: this.#resourcesTemplates,
             roots: this.#options.roots,
-            tools: this.#tools,
+            tools: allowedTools,
             transportType: "httpStream",
             version: this.#options.version,
           });
