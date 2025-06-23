@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@modelcontextprotocol/sdk':
-        specifier: ^1.12.1
-        version: 1.12.1
+        specifier: ^1.13.0
+        version: 1.13.1
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
@@ -415,8 +415,8 @@ packages:
     resolution: {integrity: sha512-dv0ATp+qtrbm8tku1Kdtqqf/h9mYt0xrBGuCMNJF5YKFzPUBG5nPaZOVSw5RyycsgvcWsPZe2YRdu0BCbFistw==}
     hasBin: true
 
-  '@modelcontextprotocol/sdk@1.12.1':
-    resolution: {integrity: sha512-KG1CZhZfWg+u8pxeM/mByJDScJSrjjxLc8fwQqbsS8xCjBmQfMNEBTotYdNanKekepnfRI85GtgQlctLFpcYPw==}
+  '@modelcontextprotocol/sdk@1.13.1':
+    resolution: {integrity: sha512-8q6+9aF0yA39/qWT/uaIj6zTpC+Qu07DnN/lb9mjoquCJsAh6l3HyYqc9O3t2j7GilseOQOQimLg7W3By6jqvg==}
     engines: {node: '>=18'}
 
   '@nodelib/fs.scandir@2.1.5':
@@ -3760,7 +3760,7 @@ snapshots:
 
   '@modelcontextprotocol/inspector-cli@0.14.0':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.12.1
+      '@modelcontextprotocol/sdk': 1.13.1
       commander: 13.1.0
       spawn-rx: 5.1.2
     transitivePeerDependencies:
@@ -3768,7 +3768,7 @@ snapshots:
 
   '@modelcontextprotocol/inspector-client@0.14.0':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.12.1
+      '@modelcontextprotocol/sdk': 1.13.1
       '@radix-ui/react-checkbox': 1.3.2(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@radix-ui/react-dialog': 1.1.14(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@radix-ui/react-icons': 1.3.2(react@18.3.1)
@@ -3801,7 +3801,7 @@ snapshots:
 
   '@modelcontextprotocol/inspector-server@0.14.0':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.12.1
+      '@modelcontextprotocol/sdk': 1.13.1
       cors: 2.8.5
       express: 5.1.0
       ws: 8.18.2
@@ -3816,7 +3816,7 @@ snapshots:
       '@modelcontextprotocol/inspector-cli': 0.14.0
       '@modelcontextprotocol/inspector-client': 0.14.0
       '@modelcontextprotocol/inspector-server': 0.14.0
-      '@modelcontextprotocol/sdk': 1.12.1
+      '@modelcontextprotocol/sdk': 1.13.1
       concurrently: 9.1.2
       open: 10.1.2
       shell-quote: 1.8.3
@@ -3835,7 +3835,7 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@modelcontextprotocol/sdk@1.12.1':
+  '@modelcontextprotocol/sdk@1.13.1':
     dependencies:
       ajv: 6.12.6
       content-type: 1.0.5
@@ -4563,7 +4563,7 @@ snapshots:
   '@wong2/mcp-cli@1.10.0':
     dependencies:
       '@json-schema-tools/traverse': 1.10.4
-      '@modelcontextprotocol/sdk': 1.12.1
+      '@modelcontextprotocol/sdk': 1.13.1
       conf: 13.1.0
       eventsource: 3.0.6
       express: 5.1.0
@@ -5715,7 +5715,7 @@ snapshots:
 
   mcp-proxy@5.0.0:
     dependencies:
-      '@modelcontextprotocol/sdk': 1.12.1
+      '@modelcontextprotocol/sdk': 1.13.1
       eventsource: 4.0.0
       yargs: 17.7.2
     transitivePeerDependencies:

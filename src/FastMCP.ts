@@ -18,6 +18,7 @@ import {
   ListToolsRequestSchema,
   McpError,
   ReadResourceRequestSchema,
+  ResourceLink,
   Root,
   RootsListChangedNotificationSchema,
   ServerCapabilities,
@@ -321,13 +322,28 @@ const ResourceContentZodSchema = z
   })
   .strict() satisfies z.ZodType<ResourceContent>;
 
-type Content = AudioContent | ImageContent | ResourceContent | TextContent;
+const ResourceLinkZodSchema = z.object({
+  description: z.string().optional(),
+  mimeType: z.string().optional(),
+  name: z.string(),
+  title: z.string().optional(),
+  type: z.literal("resource_link"),
+  uri: z.string(),
+}) satisfies z.ZodType<ResourceLink>;
+
+type Content =
+  | AudioContent
+  | ImageContent
+  | ResourceContent
+  | ResourceLink
+  | TextContent;
 
 const ContentZodSchema = z.discriminatedUnion("type", [
   TextContentZodSchema,
   ImageContentZodSchema,
   AudioContentZodSchema,
   ResourceContentZodSchema,
+  ResourceLinkZodSchema,
 ]) satisfies z.ZodType<Content>;
 
 type ContentResult = {
@@ -592,6 +608,7 @@ type Tool<
     | ContentResult
     | ImageContent
     | ResourceContent
+    | ResourceLink
     | string
     | TextContent
     | void
@@ -1517,6 +1534,7 @@ export class FastMCPSession<
           | ImageContent
           | null
           | ResourceContent
+          | ResourceLink
           | string
           | TextContent
           | undefined;
@@ -1925,6 +1943,7 @@ export type {
   Prompt,
   PromptArgument,
   Resource,
+  ResourceLink,
   ResourceResult,
   ResourceTemplate,
   ResourceTemplateArgument,
