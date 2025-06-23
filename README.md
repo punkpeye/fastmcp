@@ -279,40 +279,14 @@ When creating tools that don't require parameters, you have two options:
 
 You can control which tools are available to authenticated users by adding an optional `canAccess` function to a tool's definition. This function receives the authentication context and should return `true` if the user is allowed to access the tool.
 
-If `canAccess` is not provided, the tool is accessible to all authenticated users by default. If no authentication is configured on the server, all tools are available to all clients.
-
-**Example:**
-
 ```typescript
-const server = new FastMCP<{ role: "admin" | "user" }>({
-  authenticate: async (request) => {
-    const role = request.headers["x-role"] as string;
-    return { role: role === "admin" ? "admin" : "user" };
-  },
-  name: "My Server",
-  version: "1.0.0",
-});
-
 server.addTool({
-  name: "admin-dashboard",
+  name: "admin-tool",
   description: "An admin-only tool",
-  // Only users with the 'admin' role can see and execute this tool
   canAccess: (auth) => auth?.role === "admin",
-  execute: async () => {
-    return "Welcome to the admin dashboard!";
-  },
-});
-
-server.addTool({
-  name: "public-info",
-  description: "A tool available to everyone",
-  execute: async () => {
-    return "This is public information.";
-  },
+  execute: async () => "Welcome, admin!",
 });
 ```
-
-In this example, only clients authenticating with the `admin` role will be able to list or call the `admin-dashboard` tool. The `public-info` tool will be available to all authenticated users.
 
 #### Returning a string
 
