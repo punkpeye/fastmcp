@@ -2242,6 +2242,141 @@ test("blocks unauthorized requests", async () => {
   }).rejects.toThrow("SSE error: Non-200 status code (401)");
 });
 
+test("filters tools based on canAccess property", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP<{ role: string }>({
+    authenticate: async (request) => {
+      const role = request.headers["x-role"] as string;
+      return { role: role || "user" };
+    },
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    canAccess: (auth) => auth?.role === "admin",
+    description: "Admin only",
+    execute: async () => "admin",
+    name: "admin-tool",
+  });
+
+  server.addTool({
+    description: "Available to all",
+    execute: async () => "public",
+    name: "public-tool",
+  });
+
+  await server.start({ httpStream: { port }, transportType: "httpStream" });
+
+  try {
+    // Admin gets both tools
+    const adminClient = new Client(
+      { name: "admin", version: "1.0.0" },
+      { capabilities: {} },
+    );
+    const adminTransport = new SSEClientTransport(
+      new URL(`http://localhost:${port}/sse`),
+      {
+        eventSourceInit: {
+          fetch: (url, init) =>
+            fetch(url, {
+              ...init,
+              headers: { ...init?.headers, "x-role": "admin" },
+            }),
+        },
+      },
+    );
+    await adminClient.connect(adminTransport);
+
+    const adminTools = await adminClient.listTools();
+    expect(adminTools.tools.map((t) => t.name).sort()).toEqual([
+      "admin-tool",
+      "public-tool",
+    ]);
+
+    // User gets only public tool
+    const userClient = new Client(
+      { name: "user", version: "1.0.0" },
+      { capabilities: {} },
+    );
+    const userTransport = new SSEClientTransport(
+      new URL(`http://localhost:${port}/sse`),
+      {
+        eventSourceInit: {
+          fetch: (url, init) =>
+            fetch(url, {
+              ...init,
+              headers: { ...init?.headers, "x-role": "user" },
+            }),
+        },
+      },
+    );
+    await userClient.connect(userTransport);
+
+    const userTools = await userClient.listTools();
+    expect(userTools.tools.map((t) => t.name)).toEqual(["public-tool"]);
+
+    await adminClient.close();
+    await userClient.close();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("tools without canAccess are accessible to all", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const tools = await client.listTools();
+      expect(tools.tools).toHaveLength(1);
+      expect(tools.tools[0].name).toBe("test-tool");
+
+      const result = await client.callTool({
+        arguments: {},
+        name: "test-tool",
+      });
+      expect(result.content[0]).toEqual({ text: "success", type: "text" });
+    },
+    server: async () => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      server.addTool({
+        description: "Test tool",
+        execute: async () => "success",
+        name: "test-tool",
+      });
+      return server;
+    },
+  });
+});
+
+test("canAccess works without authentication", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const tools = await client.listTools();
+      expect(tools.tools.map((t) => t.name).sort()).toEqual([
+        "admin-tool",
+        "public-tool",
+      ]);
+    },
+    server: async () => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+
+      server.addTool({
+        canAccess: (auth) => auth?.role === "admin",
+        execute: async () => "admin",
+        name: "admin-tool",
+      });
+
+      server.addTool({
+        execute: async () => "public",
+        name: "public-tool",
+      });
+
+      return server;
+    },
+  });
+});
+
 // We now use a direct approach for testing HTTP Stream functionality
 // rather than a helper function
 
