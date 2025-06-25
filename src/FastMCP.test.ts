@@ -2207,7 +2207,6 @@ test("allows connection even if initial auth fails", async () => {
 
   const server = new FastMCP<{ id: number }>({
     authenticate: async () => {
-      // Cette erreur est maintenant interceptée par notre patch dans FastMCP.ts
       throw new Response(null, {
         status: 401,
         statusText: "Unauthorized",
@@ -2238,11 +2237,8 @@ test("allows connection even if initial auth fails", async () => {
     new URL(`http://localhost:${port}/sse`),
   );
 
-  // La nouvelle assertion : nous nous attendons à ce que la connexion RÉUSSISSE.
-  // La promesse doit se résoudre (resolves) sans erreur.
   await expect(client.connect(transport)).resolves.toBeUndefined();
 
-  // On nettoie la connexion et le serveur
   await client.close();
   await server.stop();
 });
