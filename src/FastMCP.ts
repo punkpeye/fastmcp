@@ -540,6 +540,75 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
   instructions?: string;
   name: string;
 
+  /**
+   * Configuration for OAuth well-known discovery endpoints that can be exposed
+   * when the server is running using HTTP-based transports (SSE or HTTP Stream).
+   * When enabled, the server will respond to requests for OAuth discovery endpoints
+   * with the configured metadata.
+   *
+   * The endpoints are only added when the server is started with
+   * `transportType: "httpStream"` – they are ignored for the stdio transport.
+   * Both SSE and HTTP Stream transports support OAuth endpoints.
+   */
+  oauth?: {
+    /**
+     * OAuth Authorization Server metadata for /.well-known/oauth-authorization-server
+     *
+     * This endpoint follows RFC 8414 (OAuth 2.0 Authorization Server Metadata)
+     * and provides metadata about the OAuth 2.0 authorization server.
+     *
+     * Required by MCP Specification 2025-03-26
+     */
+    authorizationServer?: {
+      authorizationEndpoint: string;
+      codeChallengeMethodsSupported?: string[];
+      // DPoP support
+      dpopSigningAlgValuesSupported?: string[];
+      grantTypesSupported?: string[];
+
+      introspectionEndpoint?: string;
+      // Required
+      issuer: string;
+      // Common optional
+      jwksUri?: string;
+      opPolicyUri?: string;
+      opTosUri?: string;
+      registrationEndpoint?: string;
+      responseModesSupported?: string[];
+      responseTypesSupported: string[];
+      revocationEndpoint?: string;
+      scopesSupported?: string[];
+      serviceDocumentation?: string;
+      tokenEndpoint: string;
+      tokenEndpointAuthMethodsSupported?: string[];
+      tokenEndpointAuthSigningAlgValuesSupported?: string[];
+
+      uiLocalesSupported?: string[];
+    };
+
+    /**
+     * Whether OAuth discovery endpoints should be enabled.
+     */
+    enabled: boolean;
+
+    /**
+     * OAuth Protected Resource metadata for /.well-known/oauth-protected-resource
+     *
+     * This endpoint follows RFC 9470 (OAuth 2.0 Protected Resource Metadata)
+     * and provides metadata about the OAuth 2.0 protected resource.
+     *
+     * Required by MCP Specification 2025-06-18
+     */
+    protectedResource?: {
+      authorizationServers: string[];
+      bearerMethodsSupported?: string[];
+      jwksUri?: string;
+      resource: string;
+      resourceDocumentation?: string;
+      resourcePolicyUri?: string;
+    };
+  };
+
   ping?: {
     /**
      * Whether ping should be enabled by default.
@@ -1562,6 +1631,29 @@ export class FastMCPSession<
   }
 }
 
+/**
+ * Converts camelCase to snake_case for OAuth endpoint responses
+ */
+function camelToSnakeCase(str: string): string {
+  return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+}
+
+/**
+ * Converts an object with camelCase keys to snake_case keys
+ */
+function convertObjectToSnakeCase(
+  obj: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    const snakeKey = camelToSnakeCase(key);
+    result[snakeKey] = value;
+  }
+
+  return result;
+}
+
 const FastMCPEventEmitterBase: {
   new (): StrictEventEmitter<EventEmitter, FastMCPEvents<FastMCPSessionAuth>>;
 } = EventEmitter;
@@ -1828,6 +1920,42 @@ export class FastMCP<
               }
             } catch (error) {
               console.error("[FastMCP error] health endpoint error", error);
+            }
+          }
+
+          // Handle OAuth well-known endpoints
+          const oauthConfig = this.#options.oauth;
+          if (oauthConfig?.enabled && req.method === "GET") {
+            const url = new URL(req.url || "", "http://localhost");
+
+            if (
+              url.pathname === "/.well-known/oauth-authorization-server" &&
+              oauthConfig.authorizationServer
+            ) {
+              const metadata = convertObjectToSnakeCase(
+                oauthConfig.authorizationServer,
+              );
+              res
+                .writeHead(200, {
+                  "Content-Type": "application/json",
+                })
+                .end(JSON.stringify(metadata));
+              return;
+            }
+
+            if (
+              url.pathname === "/.well-known/oauth-protected-resource" &&
+              oauthConfig.protectedResource
+            ) {
+              const metadata = convertObjectToSnakeCase(
+                oauthConfig.protectedResource,
+              );
+              res
+                .writeHead(200, {
+                  "Content-Type": "application/json",
+                })
+                .end(JSON.stringify(metadata));
+              return;
             }
           }
 
