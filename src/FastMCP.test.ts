@@ -2133,7 +2133,7 @@ test("provides auth to resources", async () => {
     };
   });
 
-  const server = new FastMCP<{ role: string; userId: number; }>({
+  const server = new FastMCP<{ role: string; userId: number }>({
     authenticate,
     name: "Test",
     version: "1.0.0",
@@ -2220,7 +2220,7 @@ test("provides auth to resource templates", async () => {
     };
   });
 
-  const server = new FastMCP<{ permissions: string[]; userId: number; }>({
+  const server = new FastMCP<{ permissions: string[]; userId: number }>({
     authenticate,
     name: "Test",
     version: "1.0.0",
@@ -2313,7 +2313,7 @@ test("provides auth to resource templates returning arrays", async () => {
     };
   });
 
-  const server = new FastMCP<{ accessLevel: number; teamId: string; }>({
+  const server = new FastMCP<{ accessLevel: number; teamId: string }>({
     authenticate,
     name: "Test",
     version: "1.0.0",
