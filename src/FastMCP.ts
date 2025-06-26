@@ -387,12 +387,14 @@ type InputPromptArgument = Readonly<{
 }>;
 
 type InputResourceTemplate<
+  T extends FastMCPSessionAuth,
   Arguments extends ResourceTemplateArgument[] = ResourceTemplateArgument[],
 > = {
   arguments: Arguments;
   description?: string;
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
+    auth?: T,
   ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
@@ -447,10 +449,10 @@ type PromptArgumentsToObject<T extends { name: string; required?: boolean }[]> =
 
 type PromptResult = Pick<GetPromptResult, "messages"> | string;
 
-type Resource = {
-  complete?: (name: string, value: string) => Promise<Completion>;
+type Resource<T extends FastMCPSessionAuth> = {
+  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
-  load: () => Promise<ResourceResult | ResourceResult[]>;
+  load: (auth?: T) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
   uri: string;
@@ -469,13 +471,15 @@ type ResourceResult =
     };
 
 type ResourceTemplate<
+  T extends FastMCPSessionAuth,
   Arguments extends ResourceTemplateArgument[] = ResourceTemplateArgument[],
 > = {
   arguments: Arguments;
-  complete?: (name: string, value: string) => Promise<Completion>;
+  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
+    auth?: T,
   ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
@@ -642,6 +646,8 @@ const FastMCPSessionEventEmitterBase: {
   new (): StrictEventEmitter<EventEmitter, FastMCPSessionEvents>;
 } = EventEmitter;
 
+type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
+
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
 
 class FastMCPSessionEventEmitter extends FastMCPSessionEventEmitterBase {}
@@ -676,9 +682,9 @@ export class FastMCPSession<
 
   #prompts: Prompt[] = [];
 
-  #resources: Resource[] = [];
+  #resources: Resource<T>[] = [];
 
-  #resourceTemplates: ResourceTemplate[] = [];
+  #resourceTemplates: ResourceTemplate<T>[] = [];
 
   #roots: Root[] = [];
 
@@ -704,8 +710,8 @@ export class FastMCPSession<
     name: string;
     ping?: ServerOptions<T>["ping"];
     prompts: Prompt[];
-    resources: Resource[];
-    resourcesTemplates: InputResourceTemplate[];
+    resources: Resource<T>[];
+    resourcesTemplates: InputResourceTemplate<T>[];
     roots?: ServerOptions<T>["roots"];
     tools: Tool<T>[];
     transportType?: "httpStream" | "stdio";
@@ -992,11 +998,11 @@ export class FastMCPSession<
     this.#prompts.push(prompt);
   }
 
-  private addResource(inputResource: Resource) {
+  private addResource(inputResource: Resource<T>) {
     this.#resources.push(inputResource);
   }
 
-  private addResourceTemplate(inputResourceTemplate: InputResourceTemplate) {
+  private addResourceTemplate(inputResourceTemplate: InputResourceTemplate<T>) {
     const completers: Record<string, ArgumentValueCompleter> = {};
 
     for (const argument of inputResourceTemplate.arguments ?? []) {
@@ -1179,7 +1185,7 @@ export class FastMCPSession<
     });
   }
 
-  private setupResourceHandlers(resources: Resource[]) {
+  private setupResourceHandlers(resources: Resource<T>[]) {
     this.#server.setRequestHandler(ListResourcesRequestSchema, async () => {
       return {
         resources: resources.map((resource) => ({
@@ -1214,7 +1220,7 @@ export class FastMCPSession<
 
               const uri = uriTemplate.fill(match);
 
-              const result = await resourceTemplate.load(match);
+              const result = await resourceTemplate.load(match, this.#auth);
 
               const resources = Array.isArray(result) ? result : [result];
               return {
@@ -1240,10 +1246,10 @@ export class FastMCPSession<
             throw new UnexpectedStateError("Resource does not support reading");
           }
 
-          let maybeArrayResult: Awaited<ReturnType<Resource["load"]>>;
+          let maybeArrayResult: Awaited<ReturnType<Resource<T>["load"]>>;
 
           try {
-            maybeArrayResult = await resource.load();
+            maybeArrayResult = await resource.load(this.#auth);
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : String(error);
@@ -1277,7 +1283,9 @@ export class FastMCPSession<
     );
   }
 
-  private setupResourceTemplateHandlers(resourceTemplates: ResourceTemplate[]) {
+  private setupResourceTemplateHandlers(
+    resourceTemplates: ResourceTemplate<T>[],
+  ) {
     this.#server.setRequestHandler(
       ListResourceTemplatesRequestSchema,
       async () => {
@@ -1566,12 +1574,10 @@ const FastMCPEventEmitterBase: {
   new (): StrictEventEmitter<EventEmitter, FastMCPEvents<FastMCPSessionAuth>>;
 } = EventEmitter;
 
-type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
-
 class FastMCPEventEmitter extends FastMCPEventEmitterBase {}
 
 export class FastMCP<
-  T extends Record<string, unknown> | undefined = undefined,
+  T extends FastMCPSessionAuth = FastMCPSessionAuth,
 > extends FastMCPEventEmitter {
   public get sessions(): FastMCPSession<T>[] {
     return this.#sessions;
@@ -1580,8 +1586,8 @@ export class FastMCP<
   #httpStreamServer: null | SSEServer = null;
   #options: ServerOptions<T>;
   #prompts: InputPrompt[] = [];
-  #resources: Resource[] = [];
-  #resourcesTemplates: InputResourceTemplate[] = [];
+  #resources: Resource<T>[] = [];
+  #resourcesTemplates: InputResourceTemplate<T>[] = [];
   #sessions: FastMCPSession<T>[] = [];
 
   #tools: Tool<T>[] = [];
@@ -1605,7 +1611,7 @@ export class FastMCP<
   /**
    * Adds a resource to the server.
    */
-  public addResource(resource: Resource) {
+  public addResource(resource: Resource<T>) {
     this.#resources.push(resource);
   }
 
@@ -1614,7 +1620,7 @@ export class FastMCP<
    */
   public addResourceTemplate<
     const Args extends InputResourceTemplateArgument[],
-  >(resource: InputResourceTemplate<Args>) {
+  >(resource: InputResourceTemplate<T, Args>) {
     this.#resourcesTemplates.push(resource);
   }
 
@@ -1738,7 +1744,7 @@ export class FastMCP<
       this.#sessions.push(session);
 
       this.emit("connect", {
-        session,
+        session: session as FastMCPSession<FastMCPSessionAuth>,
       });
     } else if (config.transportType === "httpStream") {
       const httpConfig = config.httpStream;
@@ -1766,7 +1772,7 @@ export class FastMCP<
         },
         onClose: async (session) => {
           this.emit("disconnect", {
-            session,
+            session: session as FastMCPSession<FastMCPSessionAuth>,
           });
         },
         onConnect: async (session) => {
@@ -1775,7 +1781,7 @@ export class FastMCP<
           console.info(`[FastMCP info] HTTP Stream session established`);
 
           this.emit("connect", {
-            session,
+            session: session as FastMCPSession<FastMCPSessionAuth>,
           });
         },
         onUnhandledRequest: async (req, res) => {
