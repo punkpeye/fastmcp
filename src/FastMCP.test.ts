@@ -2335,7 +2335,9 @@ test("tools without canAccess are accessible to all", async () => {
         arguments: {},
         name: "test-tool",
       });
-      expect(result.content[0]).toEqual({ text: "success", type: "text" });
+      expect(
+        (result.content as Array<{ text: string; type: string }>)[0],
+      ).toEqual({ text: "success", type: "text" });
     },
     server: async () => {
       const server = new FastMCP({ name: "Test", version: "1.0.0" });
@@ -2350,31 +2352,46 @@ test("tools without canAccess are accessible to all", async () => {
 });
 
 test("canAccess works without authentication", async () => {
-  await runWithTestServer({
-    run: async ({ client }) => {
-      const tools = await client.listTools();
-      expect(tools.tools.map((t) => t.name).sort()).toEqual([
-        "admin-tool",
-        "public-tool",
-      ]);
-    },
-    server: async () => {
-      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+  const port = await getRandomPort();
 
-      server.addTool({
-        canAccess: (auth) => auth?.role === "admin",
-        execute: async () => "admin",
-        name: "admin-tool",
-      });
-
-      server.addTool({
-        execute: async () => "public",
-        name: "public-tool",
-      });
-
-      return server;
-    },
+  const server = new FastMCP<{ role: string }>({
+    name: "Test",
+    version: "1.0.0",
   });
+
+  server.addTool({
+    canAccess: (auth) => auth?.role === "admin",
+    execute: async () => "admin",
+    name: "admin-tool",
+  });
+
+  server.addTool({
+    execute: async () => "public",
+    name: "public-tool",
+  });
+
+  await server.start({ httpStream: { port }, transportType: "httpStream" });
+
+  try {
+    const client = new Client(
+      { name: "test-client", version: "1.0.0" },
+      { capabilities: {} },
+    );
+    const transport = new SSEClientTransport(
+      new URL(`http://localhost:${port}/sse`),
+    );
+    await client.connect(transport);
+
+    const tools = await client.listTools();
+    expect(tools.tools.map((t) => t.name).sort()).toEqual([
+      "admin-tool",
+      "public-tool",
+    ]);
+
+    await client.close();
+  } finally {
+    await server.stop();
+  }
 });
 
 // We now use a direct approach for testing HTTP Stream functionality
