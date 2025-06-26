@@ -583,7 +583,9 @@ type Tool<
      */
     streamingHint?: boolean;
   } & ToolAnnotations;
+  canAccess?: (auth: T) => boolean;
   description?: string;
+
   execute: (
     args: StandardSchemaV1.InferOutput<Params>,
     context: Context<T>,
@@ -596,8 +598,6 @@ type Tool<
     | TextContent
     | void
   >;
-
-  canAccess?: (auth: T) => boolean;
   name: string;
   parameters?: Params;
   timeoutMs?: number;
@@ -1752,7 +1752,11 @@ export class FastMCP<
           if (this.#authenticate) {
             auth = await this.#authenticate(request);
           }
-          const allowedTools = auth ? this.#tools.filter((tool) => tool.canAccess ? tool.canAccess(auth) : true) : this.#tools;
+          const allowedTools = auth
+            ? this.#tools.filter((tool) =>
+                tool.canAccess ? tool.canAccess(auth) : true,
+              )
+            : this.#tools;
           return new FastMCPSession<T>({
             auth,
             name: this.#options.name,
