@@ -275,6 +275,19 @@ When creating tools that don't require parameters, you have two options:
 >
 > Both approaches are fully compatible with all MCP clients, including Cursor. FastMCP automatically generates the proper schema in both cases.
 
+#### Tool Authorization
+
+You can control which tools are available to authenticated users by adding an optional `canAccess` function to a tool's definition. This function receives the authentication context and should return `true` if the user is allowed to access the tool.
+
+```typescript
+server.addTool({
+  name: "admin-tool",
+  description: "An admin-only tool",
+  canAccess: (auth) => auth?.role === "admin",
+  execute: async () => "Welcome, admin!",
+});
+```
+
 #### Returning a string
 
 `execute` can return a string:
@@ -730,7 +743,7 @@ FastMCP supports streaming partial results from tools while they're still execut
 
 To enable streaming for a tool, add the `streamingHint` annotation and use the `streamContent` method:
 
-```js
+````js
 server.addTool({
   name: "generateText",
   description: "Generate text incrementally",
@@ -763,7 +776,6 @@ server.addTool({
     // return "Generation complete!";
   },
 });
-```
 
 Streaming works with all content types (text, image, audio) and can be combined with progress reporting:
 
@@ -798,7 +810,7 @@ server.addTool({
     return "Processing complete!";
   },
 });
-```
+````
 
 #### Tool Annotations
 
@@ -1129,7 +1141,14 @@ server.addPrompt({
 
 ### Authentication
 
-FastMCP allows you to `authenticate` clients using a custom function:
+FastMCP supports session-based authentication, allowing you to secure your server and control access to its features.
+
+> [!NOTE]
+> For more granular control over which tools are available to authenticated users, see the [Tool Authorization](#tool-authorization) section.
+
+To enable authentication, provide an `authenticate` function in the server options. This function receives the incoming HTTP request and should return a promise that resolves with the authentication context.
+
+If authentication fails, the function should throw a `Response` object, which will be sent to the client.
 
 ```ts
 const server = new FastMCP({
@@ -1163,6 +1182,45 @@ server.addTool({
   },
 });
 ```
+
+#### Tool Authorization
+
+You can control which tools are available to authenticated users by adding an optional `canAccess` function to a tool's definition. This function receives the authentication context and should return `true` if the user is allowed to access the tool.
+
+If `canAccess` is not provided, the tool is accessible to all authenticated users by default. If no authentication is configured on the server, all tools are available to all clients.
+
+**Example:**
+
+```typescript
+const server = new FastMCP<{ role: "admin" | "user" }>({
+  authenticate: async (request) => {
+    const role = request.headers["x-role"] as string;
+    return { role: role === "admin" ? "admin" : "user" };
+  },
+  name: "My Server",
+  version: "1.0.0",
+});
+
+server.addTool({
+  name: "admin-dashboard",
+  description: "An admin-only tool",
+  // Only users with the 'admin' role can see and execute this tool
+  canAccess: (auth) => auth?.role === "admin",
+  execute: async () => {
+    return "Welcome to the admin dashboard!";
+  },
+});
+
+server.addTool({
+  name: "public-info",
+  description: "A tool available to everyone",
+  execute: async () => {
+    return "This is public information.";
+  },
+});
+```
+
+In this example, only clients authenticating with the `admin` role will be able to list or call the `admin-dashboard` tool. The `public-info` tool will be available to all authenticated users.
 
 #### OAuth Support
 
