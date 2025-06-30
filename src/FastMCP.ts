@@ -1,5 +1,6 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
@@ -18,6 +19,7 @@ import {
   ListToolsRequestSchema,
   McpError,
   ReadResourceRequestSchema,
+  ResourceLink,
   Root,
   RootsListChangedNotificationSchema,
   ServerCapabilities,
@@ -321,13 +323,28 @@ const ResourceContentZodSchema = z
   })
   .strict() satisfies z.ZodType<ResourceContent>;
 
-type Content = AudioContent | ImageContent | ResourceContent | TextContent;
+const ResourceLinkZodSchema = z.object({
+  description: z.string().optional(),
+  mimeType: z.string().optional(),
+  name: z.string(),
+  title: z.string().optional(),
+  type: z.literal("resource_link"),
+  uri: z.string(),
+}) satisfies z.ZodType<ResourceLink>;
+
+type Content =
+  | AudioContent
+  | ImageContent
+  | ResourceContent
+  | ResourceLink
+  | TextContent;
 
 const ContentZodSchema = z.discriminatedUnion("type", [
   TextContentZodSchema,
   ImageContentZodSchema,
   AudioContentZodSchema,
   ResourceContentZodSchema,
+  ResourceLinkZodSchema,
 ]) satisfies z.ZodType<Content>;
 
 type ContentResult = {
@@ -366,41 +383,49 @@ const CompletionZodSchema = z.object({
   values: z.array(z.string()).max(100),
 }) satisfies z.ZodType<Completion>;
 
-type ArgumentValueCompleter = (value: string) => Promise<Completion>;
+type ArgumentValueCompleter<T extends FastMCPSessionAuth = FastMCPSessionAuth> =
+  (value: string, auth?: T) => Promise<Completion>;
 
 type InputPrompt<
-  Arguments extends InputPromptArgument[] = InputPromptArgument[],
+  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+  Arguments extends InputPromptArgument<T>[] = InputPromptArgument<T>[],
   Args = PromptArgumentsToObject<Arguments>,
 > = {
-  arguments?: InputPromptArgument[];
+  arguments?: InputPromptArgument<T>[];
   description?: string;
-  load: (args: Args) => Promise<PromptResult>;
+  load: (args: Args, auth?: T) => Promise<PromptResult>;
   name: string;
 };
 
-type InputPromptArgument = Readonly<{
-  complete?: ArgumentValueCompleter;
-  description?: string;
-  enum?: string[];
-  name: string;
-  required?: boolean;
-}>;
+type InputPromptArgument<T extends FastMCPSessionAuth = FastMCPSessionAuth> =
+  Readonly<{
+    complete?: ArgumentValueCompleter<T>;
+    description?: string;
+    enum?: string[];
+    name: string;
+    required?: boolean;
+  }>;
 
 type InputResourceTemplate<
-  Arguments extends ResourceTemplateArgument[] = ResourceTemplateArgument[],
+  T extends FastMCPSessionAuth,
+  Arguments extends
+    InputResourceTemplateArgument<T>[] = InputResourceTemplateArgument<T>[],
 > = {
   arguments: Arguments;
   description?: string;
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
+    auth?: T,
   ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
   uriTemplate: string;
 };
 
-type InputResourceTemplateArgument = Readonly<{
-  complete?: ArgumentValueCompleter;
+type InputResourceTemplateArgument<
+  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+> = Readonly<{
+  complete?: ArgumentValueCompleter<T>;
   description?: string;
   name: string;
   required?: boolean;
@@ -417,23 +442,25 @@ type LoggingLevel =
   | "warning";
 
 type Prompt<
-  Arguments extends PromptArgument[] = PromptArgument[],
+  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+  Arguments extends PromptArgument<T>[] = PromptArgument<T>[],
   Args = PromptArgumentsToObject<Arguments>,
 > = {
-  arguments?: PromptArgument[];
-  complete?: (name: string, value: string) => Promise<Completion>;
+  arguments?: PromptArgument<T>[];
+  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
-  load: (args: Args) => Promise<PromptResult>;
+  load: (args: Args, auth?: T) => Promise<PromptResult>;
   name: string;
 };
 
-type PromptArgument = Readonly<{
-  complete?: ArgumentValueCompleter;
-  description?: string;
-  enum?: string[];
-  name: string;
-  required?: boolean;
-}>;
+type PromptArgument<T extends FastMCPSessionAuth = FastMCPSessionAuth> =
+  Readonly<{
+    complete?: ArgumentValueCompleter<T>;
+    description?: string;
+    enum?: string[];
+    name: string;
+    required?: boolean;
+  }>;
 
 type PromptArgumentsToObject<T extends { name: string; required?: boolean }[]> =
   {
@@ -447,10 +474,10 @@ type PromptArgumentsToObject<T extends { name: string; required?: boolean }[]> =
 
 type PromptResult = Pick<GetPromptResult, "messages"> | string;
 
-type Resource = {
-  complete?: (name: string, value: string) => Promise<Completion>;
+type Resource<T extends FastMCPSessionAuth> = {
+  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
-  load: () => Promise<ResourceResult | ResourceResult[]>;
+  load: (auth?: T) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
   uri: string;
@@ -469,21 +496,26 @@ type ResourceResult =
     };
 
 type ResourceTemplate<
-  Arguments extends ResourceTemplateArgument[] = ResourceTemplateArgument[],
+  T extends FastMCPSessionAuth,
+  Arguments extends
+    ResourceTemplateArgument<T>[] = ResourceTemplateArgument<T>[],
 > = {
   arguments: Arguments;
-  complete?: (name: string, value: string) => Promise<Completion>;
+  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
+    auth?: T,
   ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
   uriTemplate: string;
 };
 
-type ResourceTemplateArgument = Readonly<{
-  complete?: ArgumentValueCompleter;
+type ResourceTemplateArgument<
+  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+> = Readonly<{
+  complete?: ArgumentValueCompleter<T>;
   description?: string;
   name: string;
   required?: boolean;
@@ -540,6 +572,75 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
   instructions?: string;
   name: string;
 
+  /**
+   * Configuration for OAuth well-known discovery endpoints that can be exposed
+   * when the server is running using HTTP-based transports (SSE or HTTP Stream).
+   * When enabled, the server will respond to requests for OAuth discovery endpoints
+   * with the configured metadata.
+   *
+   * The endpoints are only added when the server is started with
+   * `transportType: "httpStream"` – they are ignored for the stdio transport.
+   * Both SSE and HTTP Stream transports support OAuth endpoints.
+   */
+  oauth?: {
+    /**
+     * OAuth Authorization Server metadata for /.well-known/oauth-authorization-server
+     *
+     * This endpoint follows RFC 8414 (OAuth 2.0 Authorization Server Metadata)
+     * and provides metadata about the OAuth 2.0 authorization server.
+     *
+     * Required by MCP Specification 2025-03-26
+     */
+    authorizationServer?: {
+      authorizationEndpoint: string;
+      codeChallengeMethodsSupported?: string[];
+      // DPoP support
+      dpopSigningAlgValuesSupported?: string[];
+      grantTypesSupported?: string[];
+
+      introspectionEndpoint?: string;
+      // Required
+      issuer: string;
+      // Common optional
+      jwksUri?: string;
+      opPolicyUri?: string;
+      opTosUri?: string;
+      registrationEndpoint?: string;
+      responseModesSupported?: string[];
+      responseTypesSupported: string[];
+      revocationEndpoint?: string;
+      scopesSupported?: string[];
+      serviceDocumentation?: string;
+      tokenEndpoint: string;
+      tokenEndpointAuthMethodsSupported?: string[];
+      tokenEndpointAuthSigningAlgValuesSupported?: string[];
+
+      uiLocalesSupported?: string[];
+    };
+
+    /**
+     * Whether OAuth discovery endpoints should be enabled.
+     */
+    enabled: boolean;
+
+    /**
+     * OAuth Protected Resource metadata for /.well-known/oauth-protected-resource
+     *
+     * This endpoint follows RFC 9470 (OAuth 2.0 Protected Resource Metadata)
+     * and provides metadata about the OAuth 2.0 protected resource.
+     *
+     * Required by MCP Specification 2025-06-18
+     */
+    protectedResource?: {
+      authorizationServers: string[];
+      bearerMethodsSupported?: string[];
+      jwksUri?: string;
+      resource: string;
+      resourceDocumentation?: string;
+      resourcePolicyUri?: string;
+    };
+  };
+
   ping?: {
     /**
      * Whether ping should be enabled by default.
@@ -594,6 +695,7 @@ type Tool<
     | ContentResult
     | ImageContent
     | ResourceContent
+    | ResourceLink
     | string
     | TextContent
     | void
@@ -644,6 +746,8 @@ const FastMCPSessionEventEmitterBase: {
   new (): StrictEventEmitter<EventEmitter, FastMCPSessionEvents>;
 } = EventEmitter;
 
+type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
+
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
 
 class FastMCPSessionEventEmitter extends FastMCPSessionEventEmitterBase {}
@@ -676,11 +780,11 @@ export class FastMCPSession<
 
   #pingInterval: null | ReturnType<typeof setInterval> = null;
 
-  #prompts: Prompt[] = [];
+  #prompts: Prompt<T>[] = [];
 
-  #resources: Resource[] = [];
+  #resources: Resource<T>[] = [];
 
-  #resourceTemplates: ResourceTemplate[] = [];
+  #resourceTemplates: ResourceTemplate<T>[] = [];
 
   #roots: Root[] = [];
 
@@ -705,9 +809,9 @@ export class FastMCPSession<
     instructions?: string;
     name: string;
     ping?: ServerOptions<T>["ping"];
-    prompts: Prompt[];
-    resources: Resource[];
-    resourcesTemplates: InputResourceTemplate[];
+    prompts: Prompt<T>[];
+    resources: Resource<T>[];
+    resourcesTemplates: InputResourceTemplate<T>[];
     roots?: ServerOptions<T>["roots"];
     tools: Tool<T>[];
     transportType?: "httpStream" | "stdio";
@@ -950,8 +1054,8 @@ export class FastMCPSession<
     };
   }
 
-  private addPrompt(inputPrompt: InputPrompt) {
-    const completers: Record<string, ArgumentValueCompleter> = {};
+  private addPrompt(inputPrompt: InputPrompt<T>) {
+    const completers: Record<string, ArgumentValueCompleter<T>> = {};
     const enums: Record<string, string[]> = {};
     const fuseInstances: Record<string, Fuse<string>> = {};
 
@@ -971,9 +1075,9 @@ export class FastMCPSession<
 
     const prompt = {
       ...inputPrompt,
-      complete: async (name: string, value: string) => {
+      complete: async (name: string, value: string, auth?: T) => {
         if (completers[name]) {
-          return await completers[name](value);
+          return await completers[name](value, auth);
         }
 
         if (fuseInstances[name]) {
@@ -994,12 +1098,12 @@ export class FastMCPSession<
     this.#prompts.push(prompt);
   }
 
-  private addResource(inputResource: Resource) {
+  private addResource(inputResource: Resource<T>) {
     this.#resources.push(inputResource);
   }
 
-  private addResourceTemplate(inputResourceTemplate: InputResourceTemplate) {
-    const completers: Record<string, ArgumentValueCompleter> = {};
+  private addResourceTemplate(inputResourceTemplate: InputResourceTemplate<T>) {
+    const completers: Record<string, ArgumentValueCompleter<T>> = {};
 
     for (const argument of inputResourceTemplate.arguments ?? []) {
       if (argument.complete) {
@@ -1009,9 +1113,9 @@ export class FastMCPSession<
 
     const resourceTemplate = {
       ...inputResourceTemplate,
-      complete: async (name: string, value: string) => {
+      complete: async (name: string, value: string, auth?: T) => {
         if (completers[name]) {
-          return await completers[name](value);
+          return await completers[name](value, auth);
         }
 
         return {
@@ -1046,6 +1150,7 @@ export class FastMCPSession<
           await prompt.complete(
             request.params.argument.name,
             request.params.argument.value,
+            this.#auth,
           ),
         );
 
@@ -1082,6 +1187,7 @@ export class FastMCPSession<
           await resource.complete(
             request.params.argument.name,
             request.params.argument.value,
+            this.#auth,
           ),
         );
 
@@ -1110,7 +1216,7 @@ export class FastMCPSession<
     });
   }
 
-  private setupPromptHandlers(prompts: Prompt[]) {
+  private setupPromptHandlers(prompts: Prompt<T>[]) {
     this.#server.setRequestHandler(ListPromptsRequestSchema, async () => {
       return {
         prompts: prompts.map((prompt) => {
@@ -1149,10 +1255,13 @@ export class FastMCPSession<
         }
       }
 
-      let result: Awaited<ReturnType<Prompt["load"]>>;
+      let result: Awaited<ReturnType<Prompt<T>["load"]>>;
 
       try {
-        result = await prompt.load(args as Record<string, string | undefined>);
+        result = await prompt.load(
+          args as Record<string, string | undefined>,
+          this.#auth,
+        );
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
@@ -1181,7 +1290,7 @@ export class FastMCPSession<
     });
   }
 
-  private setupResourceHandlers(resources: Resource[]) {
+  private setupResourceHandlers(resources: Resource<T>[]) {
     this.#server.setRequestHandler(ListResourcesRequestSchema, async () => {
       return {
         resources: resources.map((resource) => ({
@@ -1216,7 +1325,7 @@ export class FastMCPSession<
 
               const uri = uriTemplate.fill(match);
 
-              const result = await resourceTemplate.load(match);
+              const result = await resourceTemplate.load(match, this.#auth);
 
               const resources = Array.isArray(result) ? result : [result];
               return {
@@ -1242,10 +1351,10 @@ export class FastMCPSession<
             throw new UnexpectedStateError("Resource does not support reading");
           }
 
-          let maybeArrayResult: Awaited<ReturnType<Resource["load"]>>;
+          let maybeArrayResult: Awaited<ReturnType<Resource<T>["load"]>>;
 
           try {
-            maybeArrayResult = await resource.load();
+            maybeArrayResult = await resource.load(this.#auth);
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : String(error);
@@ -1279,7 +1388,9 @@ export class FastMCPSession<
     );
   }
 
-  private setupResourceTemplateHandlers(resourceTemplates: ResourceTemplate[]) {
+  private setupResourceTemplateHandlers(
+    resourceTemplates: ResourceTemplate<T>[],
+  ) {
     this.#server.setRequestHandler(
       ListResourceTemplatesRequestSchema,
       async () => {
@@ -1519,6 +1630,7 @@ export class FastMCPSession<
           | ImageContent
           | null
           | ResourceContent
+          | ResourceLink
           | string
           | TextContent
           | undefined;
@@ -1564,16 +1676,37 @@ export class FastMCPSession<
   }
 }
 
+/**
+ * Converts camelCase to snake_case for OAuth endpoint responses
+ */
+function camelToSnakeCase(str: string): string {
+  return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+}
+
+/**
+ * Converts an object with camelCase keys to snake_case keys
+ */
+function convertObjectToSnakeCase(
+  obj: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    const snakeKey = camelToSnakeCase(key);
+    result[snakeKey] = value;
+  }
+
+  return result;
+}
+
 const FastMCPEventEmitterBase: {
   new (): StrictEventEmitter<EventEmitter, FastMCPEvents<FastMCPSessionAuth>>;
 } = EventEmitter;
 
-type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
-
 class FastMCPEventEmitter extends FastMCPEventEmitterBase {}
 
 export class FastMCP<
-  T extends Record<string, unknown> | undefined = undefined,
+  T extends FastMCPSessionAuth = FastMCPSessionAuth,
 > extends FastMCPEventEmitter {
   public get sessions(): FastMCPSession<T>[] {
     return this.#sessions;
@@ -1581,9 +1714,9 @@ export class FastMCP<
   #authenticate: Authenticate<T> | undefined;
   #httpStreamServer: null | SSEServer = null;
   #options: ServerOptions<T>;
-  #prompts: InputPrompt[] = [];
-  #resources: Resource[] = [];
-  #resourcesTemplates: InputResourceTemplate[] = [];
+  #prompts: InputPrompt<T>[] = [];
+  #resources: Resource<T>[] = [];
+  #resourcesTemplates: InputResourceTemplate<T>[] = [];
   #sessions: FastMCPSession<T>[] = [];
 
   #tools: Tool<T>[] = [];
@@ -1598,8 +1731,8 @@ export class FastMCP<
   /**
    * Adds a prompt to the server.
    */
-  public addPrompt<const Args extends InputPromptArgument[]>(
-    prompt: InputPrompt<Args>,
+  public addPrompt<const Args extends InputPromptArgument<T>[]>(
+    prompt: InputPrompt<T, Args>,
   ) {
     this.#prompts.push(prompt);
   }
@@ -1607,7 +1740,7 @@ export class FastMCP<
   /**
    * Adds a resource to the server.
    */
-  public addResource(resource: Resource) {
+  public addResource(resource: Resource<T>) {
     this.#resources.push(resource);
   }
 
@@ -1616,7 +1749,7 @@ export class FastMCP<
    */
   public addResourceTemplate<
     const Args extends InputResourceTemplateArgument[],
-  >(resource: InputResourceTemplate<Args>) {
+  >(resource: InputResourceTemplate<T, Args>) {
     this.#resourcesTemplates.push(resource);
   }
 
@@ -1714,7 +1847,11 @@ export class FastMCP<
    */
   public async start(
     options?: Partial<{
-      httpStream: { endpoint?: `/${string}`; port: number };
+      httpStream: {
+        endpoint?: `/${string}`;
+        eventStore?: EventStore;
+        port: number;
+      };
       transportType: "httpStream" | "stdio";
     }>,
   ) {
@@ -1740,7 +1877,7 @@ export class FastMCP<
       this.#sessions.push(session);
 
       this.emit("connect", {
-        session,
+        session: session as FastMCPSession<FastMCPSessionAuth>,
       });
     } else if (config.transportType === "httpStream") {
       const httpConfig = config.httpStream;
@@ -1770,9 +1907,10 @@ export class FastMCP<
             version: this.#options.version,
           });
         },
+        eventStore: httpConfig.eventStore,
         onClose: async (session) => {
           this.emit("disconnect", {
-            session,
+            session: session as FastMCPSession<FastMCPSessionAuth>,
           });
         },
         onConnect: async (session) => {
@@ -1781,9 +1919,10 @@ export class FastMCP<
           console.info(`[FastMCP info] HTTP Stream session established`);
 
           this.emit("connect", {
-            session,
+            session: session as FastMCPSession<FastMCPSessionAuth>,
           });
         },
+
         onUnhandledRequest: async (req, res) => {
           const healthConfig = this.#options.health ?? {};
 
@@ -1837,10 +1976,45 @@ export class FastMCP<
             }
           }
 
+          // Handle OAuth well-known endpoints
+          const oauthConfig = this.#options.oauth;
+          if (oauthConfig?.enabled && req.method === "GET") {
+            const url = new URL(req.url || "", "http://localhost");
+
+            if (
+              url.pathname === "/.well-known/oauth-authorization-server" &&
+              oauthConfig.authorizationServer
+            ) {
+              const metadata = convertObjectToSnakeCase(
+                oauthConfig.authorizationServer,
+              );
+              res
+                .writeHead(200, {
+                  "Content-Type": "application/json",
+                })
+                .end(JSON.stringify(metadata));
+              return;
+            }
+
+            if (
+              url.pathname === "/.well-known/oauth-protected-resource" &&
+              oauthConfig.protectedResource
+            ) {
+              const metadata = convertObjectToSnakeCase(
+                oauthConfig.protectedResource,
+              );
+              res
+                .writeHead(200, {
+                  "Content-Type": "application/json",
+                })
+                .end(JSON.stringify(metadata));
+              return;
+            }
+          }
+
           // If the request was not handled above, return 404
           res.writeHead(404).end();
         },
-
         port: httpConfig.port,
         streamEndpoint: httpConfig.endpoint,
       });
@@ -1872,7 +2046,11 @@ export class FastMCP<
     }>,
   ):
     | {
-        httpStream: { endpoint: `/${string}`; port: number };
+        httpStream: {
+          endpoint: `/${string}`;
+          eventStore?: EventStore;
+          port: number;
+        };
         transportType: "httpStream";
       }
     | { transportType: "stdio" } {
@@ -1931,6 +2109,7 @@ export type {
   Prompt,
   PromptArgument,
   Resource,
+  ResourceLink,
   ResourceResult,
   ResourceTemplate,
   ResourceTemplateArgument,

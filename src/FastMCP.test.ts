@@ -2123,6 +2123,583 @@ test("provides auth to tools", async () => {
   );
 });
 
+test("provides auth to resources", async () => {
+  const port = await getRandomPort();
+
+  const authenticate = vi.fn(async () => {
+    return {
+      role: "admin",
+      userId: 42,
+    };
+  });
+
+  const server = new FastMCP<{ role: string; userId: number }>({
+    authenticate,
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  const resourceLoad = vi.fn(async (auth) => {
+    return {
+      text: `User ${auth?.userId} with role ${auth?.role} loaded this resource`,
+    };
+  });
+
+  server.addResource({
+    load: resourceLoad,
+    mimeType: "text/plain",
+    name: "Auth Resource",
+    uri: "auth://resource",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  const transport = new SSEClientTransport(
+    new URL(`http://localhost:${port}/sse`),
+    {
+      eventSourceInit: {
+        fetch: async (url, init) => {
+          return fetch(url, {
+            ...init,
+            headers: {
+              ...init?.headers,
+              "x-api-key": "123",
+            },
+          });
+        },
+      },
+    },
+  );
+
+  await client.connect(transport);
+
+  const result = await client.readResource({
+    uri: "auth://resource",
+  });
+
+  expect(resourceLoad).toHaveBeenCalledTimes(1);
+  expect(resourceLoad).toHaveBeenCalledWith({
+    role: "admin",
+    userId: 42,
+  });
+
+  expect(result).toEqual({
+    contents: [
+      {
+        mimeType: "text/plain",
+        name: "Auth Resource",
+        text: "User 42 with role admin loaded this resource",
+        uri: "auth://resource",
+      },
+    ],
+  });
+});
+
+test("provides auth to resource templates", async () => {
+  const port = await getRandomPort();
+
+  const authenticate = vi.fn(async () => {
+    return {
+      permissions: ["read", "write"],
+      userId: 99,
+    };
+  });
+
+  const server = new FastMCP<{ permissions: string[]; userId: number }>({
+    authenticate,
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  const templateLoad = vi.fn(async (args, auth) => {
+    return {
+      text: `Resource ${args.resourceId} accessed by user ${auth?.userId} with permissions: ${auth?.permissions?.join(", ")}`,
+    };
+  });
+
+  server.addResourceTemplate({
+    arguments: [
+      {
+        name: "resourceId",
+        required: true,
+      },
+    ],
+    load: templateLoad,
+    mimeType: "text/plain",
+    name: "Auth Template",
+    uriTemplate: "auth://template/{resourceId}",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  const transport = new SSEClientTransport(
+    new URL(`http://localhost:${port}/sse`),
+    {
+      eventSourceInit: {
+        fetch: async (url, init) => {
+          return fetch(url, {
+            ...init,
+            headers: {
+              ...init?.headers,
+              "x-api-key": "123",
+            },
+          });
+        },
+      },
+    },
+  );
+
+  await client.connect(transport);
+
+  const result = await client.readResource({
+    uri: "auth://template/resource-123",
+  });
+
+  expect(templateLoad).toHaveBeenCalledTimes(1);
+  expect(templateLoad).toHaveBeenCalledWith(
+    { resourceId: "resource-123" },
+    { permissions: ["read", "write"], userId: 99 },
+  );
+
+  expect(result).toEqual({
+    contents: [
+      {
+        mimeType: "text/plain",
+        name: "Auth Template",
+        text: "Resource resource-123 accessed by user 99 with permissions: read, write",
+        uri: "auth://template/resource-123",
+      },
+    ],
+  });
+});
+
+test("provides auth to resource templates returning arrays", async () => {
+  const port = await getRandomPort();
+
+  const authenticate = vi.fn(async () => {
+    return {
+      accessLevel: 3,
+      teamId: "team-alpha",
+    };
+  });
+
+  const server = new FastMCP<{ accessLevel: number; teamId: string }>({
+    authenticate,
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  const templateLoad = vi.fn(async (args, auth) => {
+    return [
+      {
+        text: `Document 1 for ${args.category} - Team: ${auth?.teamId}`,
+      },
+      {
+        text: `Document 2 for ${args.category} - Access Level: ${auth?.accessLevel}`,
+      },
+    ];
+  });
+
+  server.addResourceTemplate({
+    arguments: [
+      {
+        name: "category",
+        required: true,
+      },
+    ],
+    load: templateLoad,
+    mimeType: "text/plain",
+    name: "Multi Doc Template",
+    uriTemplate: "docs://category/{category}",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  const transport = new SSEClientTransport(
+    new URL(`http://localhost:${port}/sse`),
+    {
+      eventSourceInit: {
+        fetch: async (url, init) => {
+          return fetch(url, {
+            ...init,
+            headers: {
+              ...init?.headers,
+              "x-api-key": "123",
+            },
+          });
+        },
+      },
+    },
+  );
+
+  await client.connect(transport);
+
+  const result = await client.readResource({
+    uri: "docs://category/reports",
+  });
+
+  expect(templateLoad).toHaveBeenCalledTimes(1);
+  expect(templateLoad).toHaveBeenCalledWith(
+    { category: "reports" },
+    { accessLevel: 3, teamId: "team-alpha" },
+  );
+
+  expect(result).toEqual({
+    contents: [
+      {
+        mimeType: "text/plain",
+        name: "Multi Doc Template",
+        text: "Document 1 for reports - Team: team-alpha",
+        uri: "docs://category/reports",
+      },
+      {
+        mimeType: "text/plain",
+        name: "Multi Doc Template",
+        text: "Document 2 for reports - Access Level: 3",
+        uri: "docs://category/reports",
+      },
+    ],
+  });
+});
+
+test("provides auth to prompt argument completion", async () => {
+  const port = await getRandomPort();
+
+  const authenticate = vi.fn(async () => {
+    return {
+      department: "engineering",
+      userId: 100,
+    };
+  });
+
+  const server = new FastMCP<{ department: string; userId: number }>({
+    authenticate,
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  const promptCompleter = vi.fn(async (value: string, auth) => {
+    return {
+      values: [
+        `${value}_user${auth?.userId}`,
+        `${value}_dept${auth?.department}`,
+      ],
+    };
+  });
+
+  server.addPrompt({
+    arguments: [
+      {
+        complete: promptCompleter,
+        description: "Project name",
+        name: "project",
+        required: true,
+      },
+    ],
+    async load(args) {
+      return `Loading project: ${args.project}`;
+    },
+    name: "load-project",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  const transport = new SSEClientTransport(
+    new URL(`http://localhost:${port}/sse`),
+    {
+      eventSourceInit: {
+        fetch: async (url, init) => {
+          return fetch(url, {
+            ...init,
+            headers: {
+              ...init?.headers,
+              "x-api-key": "123",
+            },
+          });
+        },
+      },
+    },
+  );
+
+  await client.connect(transport);
+
+  const completionResult = await client.complete({
+    argument: {
+      name: "project",
+      value: "test",
+    },
+    ref: {
+      name: "load-project",
+      type: "ref/prompt",
+    },
+  });
+
+  expect(promptCompleter).toHaveBeenCalledTimes(1);
+  expect(promptCompleter).toHaveBeenCalledWith("test", {
+    department: "engineering",
+    userId: 100,
+  });
+
+  expect(completionResult).toEqual({
+    completion: {
+      values: ["test_user100", "test_deptengineering"],
+    },
+  });
+});
+
+test("provides auth to prompt load function", async () => {
+  const port = await getRandomPort();
+
+  const authenticate = vi.fn(async () => {
+    return {
+      level: "admin",
+      username: "testuser",
+    };
+  });
+
+  const server = new FastMCP<{ level: string; username: string }>({
+    authenticate,
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  const promptLoad = vi.fn(async (args, auth) => {
+    return `Welcome ${auth?.username} (${auth?.level}): You selected ${args.option}`;
+  });
+
+  server.addPrompt({
+    arguments: [
+      {
+        description: "Option to select",
+        name: "option",
+        required: true,
+      },
+    ],
+    load: promptLoad,
+    name: "auth-prompt",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  const transport = new SSEClientTransport(
+    new URL(`http://localhost:${port}/sse`),
+    {
+      eventSourceInit: {
+        fetch: async (url, init) => {
+          return fetch(url, {
+            ...init,
+            headers: {
+              ...init?.headers,
+              "x-api-key": "123",
+            },
+          });
+        },
+      },
+    },
+  );
+
+  await client.connect(transport);
+
+  const result = await client.getPrompt({
+    arguments: { option: "dashboard" },
+    name: "auth-prompt",
+  });
+
+  expect(promptLoad).toHaveBeenCalledTimes(1);
+  expect(promptLoad).toHaveBeenCalledWith(
+    { option: "dashboard" },
+    { level: "admin", username: "testuser" },
+  );
+
+  expect(result).toEqual({
+    messages: [
+      {
+        content: {
+          text: "Welcome testuser (admin): You selected dashboard",
+          type: "text",
+        },
+        role: "user",
+      },
+    ],
+  });
+});
+
+test("provides auth to resource template argument completion", async () => {
+  const port = await getRandomPort();
+
+  const authenticate = vi.fn(async () => {
+    return {
+      region: "us-west",
+      teamId: "alpha",
+    };
+  });
+
+  const server = new FastMCP<{ region: string; teamId: string }>({
+    authenticate,
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  const resourceCompleter = vi.fn(async (value: string, auth) => {
+    return {
+      values: [`${value}_${auth?.region}`, `${value}_team_${auth?.teamId}`],
+    };
+  });
+
+  server.addResourceTemplate({
+    arguments: [
+      {
+        complete: resourceCompleter,
+        description: "Service ID",
+        name: "serviceId",
+        required: true,
+      },
+    ],
+    async load(args) {
+      return {
+        text: `Service ${args.serviceId} data`,
+      };
+    },
+    mimeType: "text/plain",
+    name: "Service Resource",
+    uriTemplate: "service://{serviceId}",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {},
+    },
+  );
+
+  const transport = new SSEClientTransport(
+    new URL(`http://localhost:${port}/sse`),
+    {
+      eventSourceInit: {
+        fetch: async (url, init) => {
+          return fetch(url, {
+            ...init,
+            headers: {
+              ...init?.headers,
+              "x-api-key": "123",
+            },
+          });
+        },
+      },
+    },
+  );
+
+  await client.connect(transport);
+
+  const completionResult = await client.complete({
+    argument: {
+      name: "serviceId",
+      value: "api",
+    },
+    ref: {
+      type: "ref/resource",
+      uri: "service://{serviceId}",
+    },
+  });
+
+  expect(resourceCompleter).toHaveBeenCalledTimes(1);
+  expect(resourceCompleter).toHaveBeenCalledWith("api", {
+    region: "us-west",
+    teamId: "alpha",
+  });
+
+  expect(completionResult).toEqual({
+    completion: {
+      values: ["api_us-west", "api_team_alpha"],
+    },
+  });
+});
+
 test("supports streaming output from tools", async () => {
   let streamResult: { content: Array<{ text: string; type: string }> };
 

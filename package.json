@@ -22,7 +22,7 @@
   "module": "dist/FastMCP.js",
   "types": "dist/FastMCP.d.ts",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.13.0",
     "@standard-schema/spec": "^1.0.0",
     "execa": "^9.6.0",
     "file-type": "^21.0.0",

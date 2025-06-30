@@ -9,6 +9,6 @@ export default tseslint.config(
   perfectionist.configs["recommended-alphabetical"],
   eslintConfigPrettier,
   {
-    ignores: ["**/*.js"],
+    ignores: ["**/*.js", "dist/**"],
   },
 );

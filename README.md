@@ -1222,6 +1222,110 @@ server.addTool({
 
 In this example, only clients authenticating with the `admin` role will be able to list or call the `admin-dashboard` tool. The `public-info` tool will be available to all authenticated users.
 
+#### OAuth Support
+
+FastMCP includes built-in support for OAuth discovery endpoints, supporting both **MCP Specification 2025-03-26** and **MCP Specification 2025-06-18** for OAuth integration. This makes it easy to integrate with OAuth authorization flows by providing standard discovery endpoints that comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9470 (OAuth 2.0 Protected Resource Metadata):
+
+```ts
+import { FastMCP } from "fastmcp";
+import { buildGetJwks } from "get-jwks";
+import fastJwt from "fast-jwt";
+
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  oauth: {
+    enabled: true,
+    authorizationServer: {
+      issuer: "https://auth.example.com",
+      authorizationEndpoint: "https://auth.example.com/oauth/authorize",
+      tokenEndpoint: "https://auth.example.com/oauth/token",
+      jwksUri: "https://auth.example.com/.well-known/jwks.json",
+      responseTypesSupported: ["code"],
+    },
+    protectedResource: {
+      resource: "mcp://my-server",
+      authorizationServers: ["https://auth.example.com"],
+    },
+  },
+  authenticate: async (request) => {
+    const authHeader = request.headers.authorization;
+
+    if (!authHeader?.startsWith("Bearer ")) {
+      throw new Response(null, {
+        status: 401,
+        statusText: "Missing or invalid authorization header",
+      });
+    }
+
+    const token = authHeader.slice(7); // Remove 'Bearer ' prefix
+
+    // Validate OAuth JWT access token using OpenID Connect discovery
+    try {
+      // TODO: Cache the discovery document to avoid repeated requests
+      // Discover OAuth/OpenID configuration from well-known endpoint
+      const discoveryUrl =
+        "https://auth.example.com/.well-known/openid-configuration";
+      // Alternative: Use OAuth authorization server metadata endpoint
+      // const discoveryUrl = 'https://auth.example.com/.well-known/oauth-authorization-server';
+
+      const discoveryResponse = await fetch(discoveryUrl);
+      if (!discoveryResponse.ok) {
+        throw new Error("Failed to fetch OAuth discovery document");
+      }
+
+      const config = await discoveryResponse.json();
+      const jwksUri = config.jwks_uri;
+      const issuer = config.issuer;
+
+      // Create JWKS client for token verification using discovered endpoint
+      const getJwks = buildGetJwks({
+        jwksUrl: jwksUri,
+        cache: true,
+        rateLimit: true,
+      });
+
+      // Create JWT verifier with JWKS and discovered issuer
+      const verify = fastJwt.createVerifier({
+        key: async (token) => {
+          const { header } = fastJwt.decode(token, { complete: true });
+          const jwk = await getJwks.getJwk({
+            kid: header.kid,
+            alg: header.alg,
+          });
+          return jwk;
+        },
+        algorithms: ["RS256", "ES256"],
+        issuer: issuer,
+        audience: "mcp://my-server",
+      });
+
+      // Verify the JWT token
+      const payload = await verify(token);
+
+      return {
+        userId: payload.sub,
+        scope: payload.scope,
+        email: payload.email,
+        // Include other claims as needed
+      };
+    } catch (error) {
+      throw new Response(null, {
+        status: 401,
+        statusText: "Invalid OAuth token",
+      });
+    }
+  },
+});
+```
+
+This configuration automatically exposes OAuth discovery endpoints:
+
+- `/.well-known/oauth-authorization-server` - Authorization server metadata (RFC 8414)
+- `/.well-known/oauth-protected-resource` - Protected resource metadata (RFC 9470)
+
+For JWT token validation, you can use libraries like [`get-jwks`](https://github.com/nearform/get-jwks) and [`@fastify/jwt`](https://github.com/fastify/fastify-jwt) for OAuth JWT tokens.
+
 #### Passing Headers Through Context
 
 If you are exposing your MCP server via HTTP, you may wish to allow clients to supply sensitive keys via headers, which can then be passed along to APIs that your tools interact with, allowing each client to supply their own API keys. This can be done by capturing the HTTP headers in the `authenticate` section and storing them in the session to be referenced by the tools later.
