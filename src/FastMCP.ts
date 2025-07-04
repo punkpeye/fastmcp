@@ -1635,6 +1635,10 @@ export class FastMCPSession<
           | TextContent
           | undefined;
 
+        // Without this test, we are running into situations where the last progress update is not reported.
+        // See the 'reports multiple progress updates without buffering' test in FastMCP.test.ts before refactoring.
+        await delay(1);
+
         if (maybeStringResult === undefined || maybeStringResult === null) {
           result = ContentResultZodSchema.parse({
             content: [],

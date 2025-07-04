@@ -1641,6 +1641,10 @@ Follow the guide https://modelcontextprotocol.io/quickstart/user and add the fol
 }
 ```
 
+### How to run FastMCP behind a proxy?
+
+Refer to this [issue](https://github.com/punkpeye/fastmcp/issues/25#issuecomment-3004568732) for an example of using FastMCP with `express` and `http-proxy-middleware`.
+
 ## Showcase
 
 > [!NOTE]
