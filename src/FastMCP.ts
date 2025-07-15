@@ -1850,6 +1850,7 @@ export class FastMCP<
   public async start(
     options?: Partial<{
       httpStream: {
+        enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
         eventStore?: EventStore;
         port: number;
@@ -1905,6 +1906,7 @@ export class FastMCP<
             version: this.#options.version,
           });
         },
+        enableJsonResponse: httpConfig.enableJsonResponse,
         eventStore: httpConfig.eventStore,
         onClose: async (session) => {
           this.emit("disconnect", {
@@ -2039,12 +2041,17 @@ export class FastMCP<
 
   #parseRuntimeConfig(
     overrides?: Partial<{
-      httpStream: { endpoint?: `/${string}`; port: number };
+      httpStream: {
+        enableJsonResponse?: boolean;
+        endpoint?: `/${string}`;
+        port: number;
+      };
       transportType: "httpStream" | "stdio";
     }>,
   ):
     | {
         httpStream: {
+          enableJsonResponse?: boolean;
           endpoint: `/${string}`;
           eventStore?: EventStore;
           port: number;
@@ -2082,9 +2089,15 @@ export class FastMCP<
       );
       const endpoint =
         overrides?.httpStream?.endpoint || endpointArg || envEndpoint || "/mcp";
+      const enableJsonResponse =
+        overrides?.httpStream?.enableJsonResponse || false;
 
       return {
-        httpStream: { endpoint: endpoint as `/${string}`, port },
+        httpStream: {
+          enableJsonResponse,
+          endpoint: endpoint as `/${string}`,
+          port,
+        },
         transportType: "httpStream" as const,
       };
     }
