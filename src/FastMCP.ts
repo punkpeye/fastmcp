@@ -744,7 +744,7 @@ const FastMCPSessionEventEmitterBase: {
   new (): StrictEventEmitter<EventEmitter, FastMCPSessionEvents>;
 } = EventEmitter;
 
-type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
+type Authenticate<T> = (request?: http.IncomingMessage) => Promise<T>;
 
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
 
@@ -1863,6 +1863,7 @@ export class FastMCP<
     if (config.transportType === "stdio") {
       const transport = new StdioServerTransport();
       const session = new FastMCPSession<T>({
+        auth: await this.#authenticate?.(),
         instructions: this.#options.instructions,
         name: this.#options.name,
         ping: this.#options.ping,
@@ -1887,14 +1888,8 @@ export class FastMCP<
 
       this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
         createServer: async (request) => {
-          let auth: T | undefined;
-
-          if (this.#authenticate) {
-            auth = await this.#authenticate(request);
-          }
-
           return new FastMCPSession<T>({
-            auth,
+            auth: await this.#authenticate?.(request),
             name: this.#options.name,
             ping: this.#options.ping,
             prompts: this.#prompts,

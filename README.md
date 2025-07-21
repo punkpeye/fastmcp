@@ -1164,6 +1164,23 @@ server.addTool({
 });
 ```
 
+> If you are using Stdio transport, you can determine the returned content based on whether the request parameter exists, allowing you to access authenticated session data in your tools.
+> ```ts
+> const server = new FastMCP({
+>   name: "My Server",
+>   version: "1.0.0",
+>   authenticate: (request) => {
+>     if (!request) {
+>       // Stdio transport does not provide request object
+>       return { 
+>         id: process.env.USER_ID
+>       };
+>     }
+>     // ...
+>   },
+> });
+> ```
+
 #### OAuth Support
 
 FastMCP includes built-in support for OAuth discovery endpoints, supporting both **MCP Specification 2025-03-26** and **MCP Specification 2025-06-18** for OAuth integration. This makes it easy to integrate with OAuth authorization flows by providing standard discovery endpoints that comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9470 (OAuth 2.0 Protected Resource Metadata):
