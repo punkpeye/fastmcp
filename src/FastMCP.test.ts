@@ -2914,3 +2914,60 @@ test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
     await server.stop();
   }
 });
+
+test("uses `formatInvalidParamsErrorMessage` callback to build ErrorCode.InvalidParams error message", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      try {
+        await client.callTool({
+          arguments: {
+            a: 1,
+            b: "invalid",
+          },
+          name: "add",
+        });
+      } catch (error) {
+        expect(error).toBeInstanceOf(McpError);
+
+        // @ts-expect-error - we know that error is an McpError
+        expect(error.code).toBe(ErrorCode.InvalidParams);
+
+        // @ts-expect-error - we know that error is an McpError
+        expect(error.message).toBe(
+          `MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: My custom error message: Field b failed with error 'Expected number, received string'. Please check the parameter types and values according to the tool's schema.`,
+        );
+      }
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        utils: {
+          formatInvalidParamsErrorMessage: (issues) => {
+            const message = issues
+              .map((issue) => {
+                const path = issue.path?.join(".") || "root";
+                return `Field ${path} failed with error '${issue.message}'`;
+              })
+              .join(", ");
+            return `My custom error message: ${message}`;
+          },
+        },
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Add two numbers",
+        execute: async (args) => {
+          return String(args.a + args.b);
+        },
+        name: "add",
+        parameters: z.object({
+          a: z.number(),
+          b: z.number(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
