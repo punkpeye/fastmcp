@@ -670,6 +670,14 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
      */
     enabled?: boolean;
   };
+  /**
+   * General utilities
+   */
+  utils?: {
+    formatInvalidParamsErrorMessage?: (
+      issues: readonly StandardSchemaV1.Issue[],
+    ) => string;
+  };
   version: `${number}.${number}.${number}`;
 };
 
@@ -792,6 +800,8 @@ export class FastMCPSession<
 
   #server: Server;
 
+  #utils?: ServerOptions<T>["utils"];
+
   constructor({
     auth,
     instructions,
@@ -803,6 +813,7 @@ export class FastMCPSession<
     roots,
     tools,
     transportType,
+    utils,
     version,
   }: {
     auth?: T;
@@ -815,6 +826,7 @@ export class FastMCPSession<
     roots?: ServerOptions<T>["roots"];
     tools: Tool<T>[];
     transportType?: "httpStream" | "stdio";
+    utils?: ServerOptions<T>["utils"];
     version: string;
   }) {
     super();
@@ -846,6 +858,8 @@ export class FastMCPSession<
       { name: name, version: version },
       { capabilities: this.#capabilities, instructions: instructions },
     );
+
+    this.#utils = utils;
 
     this.setupErrorHandling();
     this.setupLoggingHandlers();
@@ -1489,12 +1503,14 @@ export class FastMCPSession<
         );
 
         if (parsed.issues) {
-          const friendlyErrors = parsed.issues
-            .map((issue) => {
-              const path = issue.path?.join(".") || "root";
-              return `${path}: ${issue.message}`;
-            })
-            .join(", ");
+          const friendlyErrors = this.#utils?.formatInvalidParamsErrorMessage
+            ? this.#utils.formatInvalidParamsErrorMessage(parsed.issues)
+            : parsed.issues
+                .map((issue) => {
+                  const path = issue.path?.join(".") || "root";
+                  return `${path}: ${issue.message}`;
+                })
+                .join(", ");
 
           throw new McpError(
             ErrorCode.InvalidParams,
@@ -1852,6 +1868,7 @@ export class FastMCP<
   public async start(
     options?: Partial<{
       httpStream: {
+        enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
         eventStore?: EventStore;
         port: number;
@@ -1873,6 +1890,7 @@ export class FastMCP<
         roots: this.#options.roots,
         tools: this.#tools,
         transportType: "stdio",
+        utils: this.#options.utils,
         version: this.#options.version,
       });
 
@@ -1908,9 +1926,11 @@ export class FastMCP<
             roots: this.#options.roots,
             tools: allowedTools,
             transportType: "httpStream",
+            utils: this.#options.utils,
             version: this.#options.version,
           });
         },
+        enableJsonResponse: httpConfig.enableJsonResponse,
         eventStore: httpConfig.eventStore,
         onClose: async (session) => {
           this.emit("disconnect", {
@@ -2045,12 +2065,17 @@ export class FastMCP<
 
   #parseRuntimeConfig(
     overrides?: Partial<{
-      httpStream: { endpoint?: `/${string}`; port: number };
+      httpStream: {
+        enableJsonResponse?: boolean;
+        endpoint?: `/${string}`;
+        port: number;
+      };
       transportType: "httpStream" | "stdio";
     }>,
   ):
     | {
         httpStream: {
+          enableJsonResponse?: boolean;
           endpoint: `/${string}`;
           eventStore?: EventStore;
           port: number;
@@ -2088,9 +2113,15 @@ export class FastMCP<
       );
       const endpoint =
         overrides?.httpStream?.endpoint || endpointArg || envEndpoint || "/mcp";
+      const enableJsonResponse =
+        overrides?.httpStream?.enableJsonResponse || false;
 
       return {
-        httpStream: { endpoint: endpoint as `/${string}`, port },
+        httpStream: {
+          enableJsonResponse,
+          endpoint: endpoint as `/${string}`,
+          port,
+        },
         transportType: "httpStream" as const,
       };
     }
@@ -2100,6 +2131,7 @@ export class FastMCP<
 }
 
 export type {
+  AudioContent,
   Content,
   ContentResult,
   Context,
@@ -2113,6 +2145,7 @@ export type {
   Prompt,
   PromptArgument,
   Resource,
+  ResourceContent,
   ResourceLink,
   ResourceResult,
   ResourceTemplate,
