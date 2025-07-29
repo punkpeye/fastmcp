@@ -624,20 +624,162 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
     enabled: boolean;
 
     /**
-     * OAuth Protected Resource metadata for /.well-known/oauth-protected-resource
+     * OAuth Protected Resource metadata for `/.well-known/oauth-protected-resource`
      *
-     * This endpoint follows RFC 9470 (OAuth 2.0 Protected Resource Metadata)
-     * and provides metadata about the OAuth 2.0 protected resource.
+     * This endpoint follows {@link https://www.rfc-editor.org/rfc/rfc9728.html | RFC 9728}
+     * and provides metadata describing how an OAuth 2.0 protected resource (in this case,
+     * an MCP server) expects to be accessed.
      *
-     * Required by MCP Specification 2025-06-18
+     * When configured, FastMCP will automatically serve this metadata at the
+     * `/.well-known/oauth-protected-resource` endpoint. The `authorizationServers` and `resource`
+     * fields are required. All others are optional and will be omitted from the published
+     * metadata if not specified.
+     *
+     * This satisfies the requirements of the MCP Authorization specification's
+     * {@link https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization#authorization-server-location | Authorization Server Location section}.
+     *
+     * Clients consuming this metadata MUST validate that any presented values comply with
+     * RFC 9728, including strict validation of the `resource` identifier and intended audience
+     * when access tokens are issued and presented (per RFC 8707 §2).
+     *
+     * @remarks Required by MCP Specification version 2025-06-18
      */
     protectedResource?: {
+      /**
+       * Allows for additional metadata fields beyond those defined in RFC 9728.
+       *
+       * @remarks This supports vendor-specific or experimental extensions.
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2.3 | RFC 9728 §2.3}
+       */
+      [key: string]: unknown;
+
+      /**
+       * Supported values for the `authorization_details` parameter (RFC 9396).
+       *
+       * @remarks Used when fine-grained access control is in play.
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.23 | RFC 9728 §2.2.23}
+       */
+      authorizationDetailsTypesSupported?: string[];
+
+      /**
+       * List of OAuth 2.0 authorization server issuer identifiers.
+       *
+       * These correspond to ASes that can issue access tokens for this protected resource.
+       * MCP clients use these values to locate the relevant `/.well-known/oauth-authorization-server`
+       * metadata for initiating the OAuth flow.
+       *
+       * @remarks Required by the MCP spec. MCP servers MUST provide at least one issuer.
+       * Clients are responsible for choosing among them (see RFC 9728 §7.6).
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.3 | RFC 9728 §2.2.3}
+       */
       authorizationServers: string[];
+
+      /**
+       * List of supported methods for presenting OAuth 2.0 bearer tokens.
+       *
+       * @remarks Valid values are `header`, `body`, and `query`.
+       * If omitted, clients MAY assume only `header` is supported, per RFC 6750.
+       * This is a client-side interpretation and not a serialization default.
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.9 | RFC 9728 §2.2.9}
+       */
       bearerMethodsSupported?: string[];
+
+      /**
+       * Whether this resource requires all access tokens to be DPoP-bound.
+       *
+       * @remarks If omitted, clients SHOULD assume this is `false`.
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.27 | RFC 9728 §2.2.27}
+       */
+      dpopBoundAccessTokensRequired?: boolean;
+
+      /**
+       * Supported algorithms for verifying DPoP proofs (RFC 9449).
+       *
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.25 | RFC 9728 §2.2.25}
+       */
+      dpopSigningAlgValuesSupported?: string[];
+
+      /**
+       * JWKS URI of this resource. Used to validate access tokens or sign responses.
+       *
+       * @remarks When present, this MUST be an `https:` URI pointing to a valid JWK Set (RFC 7517).
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.5 | RFC 9728 §2.2.5}
+       */
       jwksUri?: string;
+
+      /**
+       * Canonical OAuth resource identifier for this protected resource (the MCP server).
+       *
+       * @remarks Typically the base URL of the MCP server. Clients MUST use this as the
+       * `resource` parameter in authorization and token requests (per RFC 8707).
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.1 | RFC 9728 §2.2.1}
+       */
       resource: string;
+
+      /**
+       * URL to developer-accessible documentation for this resource.
+       *
+       * @remarks This field MAY be localized.
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.15 | RFC 9728 §2.2.15}
+       */
       resourceDocumentation?: string;
+
+      /**
+       * Human-readable name for display purposes (e.g., in UIs).
+       *
+       * @remarks This field MAY be localized using language tags (`resource_name#en`, etc.).
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.13 | RFC 9728 §2.2.13}
+       */
+      resourceName?: string;
+
+      /**
+       * URL to a human-readable policy page describing acceptable use.
+       *
+       * @remarks This field MAY be localized.
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.17 | RFC 9728 §2.2.17}
+       */
       resourcePolicyUri?: string;
+
+      /**
+       * Supported JWS algorithms for signed responses from this resource (e.g., response signing).
+       *
+       * @remarks MUST NOT include `none`.
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.11 | RFC 9728 §2.2.11}
+       */
+      resourceSigningAlgValuesSupported?: string[];
+
+      /**
+       * URL to the protected resource’s Terms of Service.
+       *
+       * @remarks This field MAY be localized.
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.19 | RFC 9728 §2.2.19}
+       */
+      resourceTosUri?: string;
+
+      /**
+       * Supported OAuth scopes for requesting access to this resource.
+       *
+       * @remarks Useful for discovery, but clients SHOULD still request the minimal scope required.
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.7 | RFC 9728 §2.2.7}
+       */
+      scopesSupported?: string[];
+
+      /**
+       * Developer-accessible documentation for how to use the service (not end-user docs).
+       *
+       * @remarks Semantically equivalent to `resourceDocumentation`, but included under its
+       * alternate name for compatibility with tools or schemas expecting either.
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.15 | RFC 9728 §2.2.15}
+       */
+      serviceDocumentation?: string;
+
+      /**
+       * Whether mutual-TLS-bound access tokens are required.
+       *
+       * @remarks If omitted, clients SHOULD assume this is `false` (client-side behavior).
+       * @see {@link https://www.rfc-editor.org/rfc/rfc9728.html#section-2-2.21 | RFC 9728 §2.2.21}
+       */
+      tlsClientCertificateBoundAccessTokens?: boolean;
     };
   };
 
@@ -1451,7 +1593,11 @@ export class FastMCPSession<
                   "[FastMCP debug] listRoots method not supported by client",
                 );
               } else {
-                console.error("[FastMCP error] Error listing roots", error);
+                console.error(
+                  `[FastMCP error] received error listing roots.\n\n${
+                    error instanceof Error ? error.stack : JSON.stringify(error)
+                  }`,
+                );
               }
             });
         },

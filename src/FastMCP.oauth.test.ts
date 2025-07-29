@@ -74,11 +74,28 @@ describe("FastMCP OAuth Support", () => {
       oauth: {
         enabled: true,
         protectedResource: {
+          authorizationDetailsTypesSupported: ["payment_initiation"],
           authorizationServers: ["https://auth.example.com"],
           bearerMethodsSupported: ["header"],
+          dpopBoundAccessTokensRequired: true,
+          dpopSigningAlgValuesSupported: ["ES256", "RS256"],
           jwksUri: "https://test-server.example.com/.well-known/jwks.json",
           resource: "mcp://test-server",
           resourceDocumentation: "https://docs.example.com/api",
+          resourceName: "Test API",
+          resourcePolicyUri: "https://test-server.example.com/policy",
+          resourceSigningAlgValuesSupported: ["RS256"],
+          resourceTosUri: "https://test-server.example.com/tos",
+          scopesSupported: ["read", "write", "admin"],
+          serviceDocumentation: "https://developer.example.com/api",
+          tlsClientCertificateBoundAccessTokens: false,
+          vendorPrefix_complexObject: {
+            nestedArray: [1, 2, 3],
+            nestedProperty: "nested value",
+          },
+          // Vendor extensions (dynamic properties)
+          vendorPrefix_customField: "custom value",
+          x_api_version: "2.0",
         },
       },
       version: "1.0.0",
@@ -110,6 +127,37 @@ describe("FastMCP OAuth Support", () => {
       expect(metadata.resource_documentation).toBe(
         "https://docs.example.com/api",
       );
+
+      // New fields added for RFC 9728 compliance
+      expect(metadata.authorization_details_types_supported).toEqual([
+        "payment_initiation",
+      ]);
+      expect(metadata.dpop_bound_access_tokens_required).toBe(true);
+      expect(metadata.dpop_signing_alg_values_supported).toEqual([
+        "ES256",
+        "RS256",
+      ]);
+      expect(metadata.resource_name).toBe("Test API");
+      expect(metadata.resource_policy_uri).toBe(
+        "https://test-server.example.com/policy",
+      );
+      expect(metadata.resource_signing_alg_values_supported).toEqual(["RS256"]);
+      expect(metadata.resource_tos_uri).toBe(
+        "https://test-server.example.com/tos",
+      );
+      expect(metadata.scopes_supported).toEqual(["read", "write", "admin"]);
+      expect(metadata.service_documentation).toBe(
+        "https://developer.example.com/api",
+      );
+      expect(metadata.tls_client_certificate_bound_access_tokens).toBe(false);
+
+      // Vendor extensions (dynamic properties)
+      expect(metadata.vendor_prefix_custom_field).toBe("custom value");
+      expect(metadata.vendor_prefix_complex_object).toEqual({
+        nestedArray: [1, 2, 3],
+        nestedProperty: "nested value",
+      });
+      expect(metadata.x_api_version).toBe("2.0");
     } finally {
       await server.stop();
     }
