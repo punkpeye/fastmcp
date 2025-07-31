@@ -2018,6 +2018,7 @@ export class FastMCP<
         endpoint?: `/${string}`;
         eventStore?: EventStore;
         port: number;
+        stateless?: boolean;
       };
       transportType: "httpStream" | "stdio";
     }>,
@@ -2050,151 +2051,86 @@ export class FastMCP<
     } else if (config.transportType === "httpStream") {
       const httpConfig = config.httpStream;
 
-      this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
-        createServer: async (request) => {
-          let auth: T | undefined;
+      if (httpConfig.stateless) {
+        // Stateless mode - create new server instance for each request
+        console.info(
+          `[FastMCP info] Starting server in stateless mode on HTTP Stream at http://localhost:${httpConfig.port}${httpConfig.endpoint}`,
+        );
 
-          if (this.#authenticate) {
-            auth = await this.#authenticate(request);
-          }
-          const allowedTools = auth
-            ? this.#tools.filter((tool) =>
-                tool.canAccess ? tool.canAccess(auth) : true,
-              )
-            : this.#tools;
-          return new FastMCPSession<T>({
-            auth,
-            name: this.#options.name,
-            ping: this.#options.ping,
-            prompts: this.#prompts,
-            resources: this.#resources,
-            resourcesTemplates: this.#resourcesTemplates,
-            roots: this.#options.roots,
-            tools: allowedTools,
-            transportType: "httpStream",
-            utils: this.#options.utils,
-            version: this.#options.version,
-          });
-        },
-        enableJsonResponse: httpConfig.enableJsonResponse,
-        eventStore: httpConfig.eventStore,
-        onClose: async (session) => {
-          this.emit("disconnect", {
-            session: session as FastMCPSession<FastMCPSessionAuth>,
-          });
-        },
-        onConnect: async (session) => {
-          this.#sessions.push(session);
+        this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
+          createServer: async (request) => {
+            let auth: T | undefined;
 
-          console.info(`[FastMCP info] HTTP Stream session established`);
-
-          this.emit("connect", {
-            session: session as FastMCPSession<FastMCPSessionAuth>,
-          });
-        },
-
-        onUnhandledRequest: async (req, res) => {
-          const healthConfig = this.#options.health ?? {};
-
-          const enabled =
-            healthConfig.enabled === undefined ? true : healthConfig.enabled;
-
-          if (enabled) {
-            const path = healthConfig.path ?? "/health";
-            const url = new URL(req.url || "", "http://localhost");
-
-            try {
-              if (req.method === "GET" && url.pathname === path) {
-                res
-                  .writeHead(healthConfig.status ?? 200, {
-                    "Content-Type": "text/plain",
-                  })
-                  .end(healthConfig.message ?? "✓ Ok");
-
-                return;
-              }
-
-              // Enhanced readiness check endpoint
-              if (req.method === "GET" && url.pathname === "/ready") {
-                const readySessions = this.#sessions.filter(
-                  (s) => s.isReady,
-                ).length;
-                const totalSessions = this.#sessions.length;
-                const allReady =
-                  readySessions === totalSessions && totalSessions > 0;
-
-                const response = {
-                  ready: readySessions,
-                  status: allReady
-                    ? "ready"
-                    : totalSessions === 0
-                      ? "no_sessions"
-                      : "initializing",
-                  total: totalSessions,
-                };
-
-                res
-                  .writeHead(allReady ? 200 : 503, {
-                    "Content-Type": "application/json",
-                  })
-                  .end(JSON.stringify(response));
-
-                return;
-              }
-            } catch (error) {
-              console.error("[FastMCP error] health endpoint error", error);
-            }
-          }
-
-          // Handle OAuth well-known endpoints
-          const oauthConfig = this.#options.oauth;
-          if (oauthConfig?.enabled && req.method === "GET") {
-            const url = new URL(req.url || "", "http://localhost");
-
-            if (
-              url.pathname === "/.well-known/oauth-authorization-server" &&
-              oauthConfig.authorizationServer
-            ) {
-              const metadata = convertObjectToSnakeCase(
-                oauthConfig.authorizationServer,
-              );
-              res
-                .writeHead(200, {
-                  "Content-Type": "application/json",
-                })
-                .end(JSON.stringify(metadata));
-              return;
+            if (this.#authenticate) {
+              auth = await this.#authenticate(request);
             }
 
-            if (
-              url.pathname === "/.well-known/oauth-protected-resource" &&
-              oauthConfig.protectedResource
-            ) {
-              const metadata = convertObjectToSnakeCase(
-                oauthConfig.protectedResource,
-              );
-              res
-                .writeHead(200, {
-                  "Content-Type": "application/json",
-                })
-                .end(JSON.stringify(metadata));
-              return;
+            // In stateless mode, create a new session for each request
+            // without persisting it in the sessions array
+            return this.#createSession(auth);
+          },
+          enableJsonResponse: httpConfig.enableJsonResponse,
+          eventStore: httpConfig.eventStore,
+          // In stateless mode, we don't track sessions
+          onClose: async () => {
+            // No session tracking in stateless mode
+          },
+          onConnect: async () => {
+            // No persistent session tracking in stateless mode
+            console.debug(
+              `[FastMCP debug] Stateless HTTP Stream request handled`,
+            );
+          },
+          onUnhandledRequest: async (req, res) => {
+            await this.#handleUnhandledRequest(req, res, true);
+          },
+          port: httpConfig.port,
+          stateless: true,
+          streamEndpoint: httpConfig.endpoint,
+        });
+      } else {
+        // Regular mode with session management
+        this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
+          createServer: async (request) => {
+            let auth: T | undefined;
+
+            if (this.#authenticate) {
+              auth = await this.#authenticate(request);
             }
-          }
 
-          // If the request was not handled above, return 404
-          res.writeHead(404).end();
-        },
-        port: httpConfig.port,
-        streamEndpoint: httpConfig.endpoint,
-      });
+            return this.#createSession(auth);
+          },
+          enableJsonResponse: httpConfig.enableJsonResponse,
+          eventStore: httpConfig.eventStore,
+          onClose: async (session) => {
+            this.emit("disconnect", {
+              session: session as FastMCPSession<FastMCPSessionAuth>,
+            });
+          },
+          onConnect: async (session) => {
+            this.#sessions.push(session);
 
-      console.info(
-        `[FastMCP info] server is running on HTTP Stream at http://localhost:${httpConfig.port}${httpConfig.endpoint}`,
-      );
-      console.info(
-        `[FastMCP info] Transport type: httpStream (Streamable HTTP, not SSE)`,
-      );
+            console.info(`[FastMCP info] HTTP Stream session established`);
+
+            this.emit("connect", {
+              session: session as FastMCPSession<FastMCPSessionAuth>,
+            });
+          },
+
+          onUnhandledRequest: async (req, res) => {
+            await this.#handleUnhandledRequest(req, res, false);
+          },
+          port: httpConfig.port,
+          streamEndpoint: httpConfig.endpoint,
+        });
+
+        console.info(
+          `[FastMCP info] server is running on HTTP Stream at http://localhost:${httpConfig.port}${httpConfig.endpoint}`,
+        );
+        console.info(
+          `[FastMCP info] Transport type: httpStream (Streamable HTTP, not SSE)`,
+        );
+      }
     } else {
       throw new Error("Invalid transport type");
     }
@@ -2209,12 +2145,153 @@ export class FastMCP<
     }
   }
 
+  /**
+   * Creates a new FastMCPSession instance with the current configuration.
+   * Used both for regular sessions and stateless requests.
+   */
+  #createSession(auth?: T): FastMCPSession<T> {
+    const allowedTools = auth
+      ? this.#tools.filter((tool) =>
+          tool.canAccess ? tool.canAccess(auth) : true,
+        )
+      : this.#tools;
+    return new FastMCPSession<T>({
+      auth,
+      name: this.#options.name,
+      ping: this.#options.ping,
+      prompts: this.#prompts,
+      resources: this.#resources,
+      resourcesTemplates: this.#resourcesTemplates,
+      roots: this.#options.roots,
+      tools: allowedTools,
+      transportType: "httpStream",
+      utils: this.#options.utils,
+      version: this.#options.version,
+    });
+  }
+
+  /**
+   * Handles unhandled HTTP requests with health, readiness, and OAuth endpoints
+   */
+  #handleUnhandledRequest = async (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    isStateless = false,
+  ) => {
+    const healthConfig = this.#options.health ?? {};
+
+    const enabled =
+      healthConfig.enabled === undefined ? true : healthConfig.enabled;
+
+    if (enabled) {
+      const path = healthConfig.path ?? "/health";
+      const url = new URL(req.url || "", "http://localhost");
+
+      try {
+        if (req.method === "GET" && url.pathname === path) {
+          res
+            .writeHead(healthConfig.status ?? 200, {
+              "Content-Type": "text/plain",
+            })
+            .end(healthConfig.message ?? "✓ Ok");
+
+          return;
+        }
+
+        // Enhanced readiness check endpoint
+        if (req.method === "GET" && url.pathname === "/ready") {
+          if (isStateless) {
+            // In stateless mode, we're always ready if the server is running
+            const response = {
+              mode: "stateless",
+              ready: 1,
+              status: "ready",
+              total: 1,
+            };
+
+            res
+              .writeHead(200, {
+                "Content-Type": "application/json",
+              })
+              .end(JSON.stringify(response));
+          } else {
+            const readySessions = this.#sessions.filter(
+              (s) => s.isReady,
+            ).length;
+            const totalSessions = this.#sessions.length;
+            const allReady =
+              readySessions === totalSessions && totalSessions > 0;
+
+            const response = {
+              ready: readySessions,
+              status: allReady
+                ? "ready"
+                : totalSessions === 0
+                  ? "no_sessions"
+                  : "initializing",
+              total: totalSessions,
+            };
+
+            res
+              .writeHead(allReady ? 200 : 503, {
+                "Content-Type": "application/json",
+              })
+              .end(JSON.stringify(response));
+          }
+
+          return;
+        }
+      } catch (error) {
+        console.error("[FastMCP error] health endpoint error", error);
+      }
+    }
+
+    // Handle OAuth well-known endpoints
+    const oauthConfig = this.#options.oauth;
+    if (oauthConfig?.enabled && req.method === "GET") {
+      const url = new URL(req.url || "", "http://localhost");
+
+      if (
+        url.pathname === "/.well-known/oauth-authorization-server" &&
+        oauthConfig.authorizationServer
+      ) {
+        const metadata = convertObjectToSnakeCase(
+          oauthConfig.authorizationServer,
+        );
+        res
+          .writeHead(200, {
+            "Content-Type": "application/json",
+          })
+          .end(JSON.stringify(metadata));
+        return;
+      }
+
+      if (
+        url.pathname === "/.well-known/oauth-protected-resource" &&
+        oauthConfig.protectedResource
+      ) {
+        const metadata = convertObjectToSnakeCase(
+          oauthConfig.protectedResource,
+        );
+        res
+          .writeHead(200, {
+            "Content-Type": "application/json",
+          })
+          .end(JSON.stringify(metadata));
+        return;
+      }
+    }
+
+    // If the request was not handled above, return 404
+    res.writeHead(404).end();
+  };
   #parseRuntimeConfig(
     overrides?: Partial<{
       httpStream: {
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
         port: number;
+        stateless?: boolean;
       };
       transportType: "httpStream" | "stdio";
     }>,
@@ -2225,6 +2302,7 @@ export class FastMCP<
           endpoint: `/${string}`;
           eventStore?: EventStore;
           port: number;
+          stateless?: boolean;
         };
         transportType: "httpStream";
       }
@@ -2241,10 +2319,12 @@ export class FastMCP<
     const transportArg = getArg("transport");
     const portArg = getArg("port");
     const endpointArg = getArg("endpoint");
+    const statelessArg = getArg("stateless");
 
     const envTransport = process.env.FASTMCP_TRANSPORT;
     const envPort = process.env.FASTMCP_PORT;
     const envEndpoint = process.env.FASTMCP_ENDPOINT;
+    const envStateless = process.env.FASTMCP_STATELESS;
 
     // Overrides > CLI > env > defaults
     const transportType =
@@ -2261,12 +2341,18 @@ export class FastMCP<
         overrides?.httpStream?.endpoint || endpointArg || envEndpoint || "/mcp";
       const enableJsonResponse =
         overrides?.httpStream?.enableJsonResponse || false;
+      const stateless =
+        overrides?.httpStream?.stateless ||
+        statelessArg === "true" ||
+        envStateless === "true" ||
+        false;
 
       return {
         httpStream: {
           enableJsonResponse,
           endpoint: endpoint as `/${string}`,
           port,
+          stateless,
         },
         transportType: "httpStream" as const,
       };

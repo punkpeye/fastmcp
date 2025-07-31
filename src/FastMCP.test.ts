@@ -3123,3 +3123,115 @@ test("uses `formatInvalidParamsErrorMessage` callback to build ErrorCode.Invalid
     },
   });
 });
+
+test("stateless mode works correctly", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Add two numbers",
+    execute: async (args) => {
+      return String(args.a + args.b);
+    },
+    name: "add",
+    parameters: z.object({
+      a: z.number(),
+      b: z.number(),
+    }),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const client = new Client(
+      {
+        name: "Test client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+
+    await client.connect(transport);
+
+    // Tool call should work in stateless mode
+    const result = await client.callTool({
+      arguments: { a: 5, b: 7 },
+      name: "add",
+    });
+
+    expect(result.content).toEqual([
+      {
+        text: "12",
+        type: "text",
+      },
+    ]);
+
+    // Multiple calls should work independently in stateless mode
+    const result2 = await client.callTool({
+      arguments: { a: 10, b: 20 },
+      name: "add",
+    });
+
+    expect(result2.content).toEqual([
+      {
+        text: "30",
+        type: "text",
+      },
+    ]);
+
+    // Server should not track sessions in stateless mode
+    expect(server.sessions.length).toBe(0);
+
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("stateless mode health check includes mode indicator", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/ready`);
+    expect(response.status).toBe(200);
+
+    const json = await response.json();
+    expect(json).toEqual({
+      mode: "stateless",
+      ready: 1,
+      status: "ready",
+      total: 1,
+    });
+  } finally {
+    await server.stop();
+  }
+});

@@ -27,7 +27,7 @@
     "execa": "^9.6.0",
     "file-type": "^21.0.0",
     "fuse.js": "^7.1.0",
-    "mcp-proxy": "^5.4.0",
+    "mcp-proxy": "^5.5.0",
     "strict-event-emitter-types": "^2.0.0",
     "undici": "^7.11.0",
     "uri-templates": "^0.2.0",

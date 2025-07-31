@@ -18,6 +18,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Logging](#logging)
 - [Error handling](#errors)
 - [HTTP Streaming](#http-streaming) (with SSE compatibility)
+- [Stateless mode](#stateless-mode) for serverless deployments
 - CORS (enabled by default)
 - [Progress notifications](#progress)
 - [Streaming output](#streaming-output)
@@ -176,6 +177,52 @@ const client = new Client(
 const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
 
 await client.connect(transport);
+```
+
+#### Stateless Mode
+
+FastMCP supports stateless operation for HTTP streaming, where each request is handled independently without maintaining persistent sessions. This is ideal for serverless environments, load-balanced deployments, or when session state isn't required.
+
+In stateless mode:
+
+- No sessions are tracked on the server
+- Each request creates a temporary session that's discarded after the response
+- Reduced memory usage and better scalability
+- Perfect for stateless deployment environments
+
+You can enable stateless mode by adding the `stateless: true` option:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8080,
+    stateless: true,
+  },
+});
+```
+
+> **Note:** Stateless mode is only available with HTTP streaming transport. Features that depend on persistent sessions (like session-specific state) will not be available in stateless mode.
+
+You can also enable stateless mode using CLI arguments or environment variables:
+
+```bash
+# Via CLI argument
+npx fastmcp dev src/server.ts --transport http-stream --port 8080 --stateless true
+
+# Via environment variable
+FASTMCP_STATELESS=true npx fastmcp dev src/server.ts
+```
+
+The `/ready` health check endpoint will indicate when the server is running in stateless mode:
+
+```json
+{
+  "mode": "stateless",
+  "ready": 1,
+  "status": "ready",
+  "total": 1
+}
 ```
 
 ## Core Concepts
