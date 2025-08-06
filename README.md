@@ -696,6 +696,44 @@ server.addTool({
 });
 ```
 
+#### Custom Logger
+
+FastMCP allows you to provide a custom logger implementation to control how the server logs messages. This is useful for integrating with existing logging infrastructure or customizing log formatting.
+
+```ts
+import { FastMCP, Logger } from "fastmcp";
+
+class CustomLogger implements Logger {
+  debug(...args: unknown[]): void {
+    console.log("[DEBUG]", new Date().toISOString(), ...args);
+  }
+
+  error(...args: unknown[]): void {
+    console.error("[ERROR]", new Date().toISOString(), ...args);
+  }
+
+  info(...args: unknown[]): void {
+    console.info("[INFO]", new Date().toISOString(), ...args);
+  }
+
+  log(...args: unknown[]): void {
+    console.log("[LOG]", new Date().toISOString(), ...args);
+  }
+
+  warn(...args: unknown[]): void {
+    console.warn("[WARN]", new Date().toISOString(), ...args);
+  }
+}
+
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  logger: new CustomLogger(),
+});
+```
+
+See `src/examples/custom-logger.ts` for examples with Winston, Pino, and file-based logging.
+
 #### Logging
 
 Tools can log messages to the client using the `log` object in the context object:

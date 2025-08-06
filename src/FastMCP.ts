@@ -38,6 +38,14 @@ import parseURITemplate from "uri-templates";
 import { toJsonSchema } from "xsschema";
 import { z } from "zod";
 
+export interface Logger {
+  debug(...args: unknown[]): void;
+  error(...args: unknown[]): void;
+  info(...args: unknown[]): void;
+  log(...args: unknown[]): void;
+  warn(...args: unknown[]): void;
+}
+
 export type SSEServer = {
   close: () => Promise<void>;
 };
@@ -570,6 +578,11 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
     status?: number;
   };
   instructions?: string;
+  /**
+   * Custom logger instance. If not provided, defaults to console.
+   * Use this to integrate with your own logging system.
+   */
+  logger?: Logger;
   name: string;
 
   /**
@@ -924,6 +937,7 @@ export class FastMCPSession<
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
   #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
+  #logger: Logger;
   #loggingLevel: LoggingLevel = "info";
   #needsEventLoopFlush: boolean = false;
   #pingConfig?: ServerOptions<T>["ping"];
@@ -947,6 +961,7 @@ export class FastMCPSession<
   constructor({
     auth,
     instructions,
+    logger,
     name,
     ping,
     prompts,
@@ -960,6 +975,7 @@ export class FastMCPSession<
   }: {
     auth?: T;
     instructions?: string;
+    logger: Logger;
     name: string;
     ping?: ServerOptions<T>["ping"];
     prompts: Prompt<T>[];
@@ -974,6 +990,7 @@ export class FastMCPSession<
     super();
 
     this.#auth = auth;
+    this.#logger = logger;
     this.#pingConfig = ping;
     this.#rootsConfig = roots;
     this.#needsEventLoopFlush = transportType === "httpStream";
@@ -1043,7 +1060,7 @@ export class FastMCPSession<
     try {
       await this.#server.close();
     } catch (error) {
-      console.error("[FastMCP error]", "could not close server", error);
+      this.#logger.error("[FastMCP error]", "could not close server", error);
     }
   }
 
@@ -1073,7 +1090,7 @@ export class FastMCPSession<
       }
 
       if (!this.#clientCapabilities) {
-        console.warn(
+        this.#logger.warn(
           `[FastMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`,
         );
       }
@@ -1087,11 +1104,11 @@ export class FastMCPSession<
           this.#roots = roots?.roots || [];
         } catch (e) {
           if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
-            console.debug(
+            this.#logger.debug(
               "[FastMCP debug] listRoots method not supported by client",
             );
           } else {
-            console.error(
+            this.#logger.error(
               `[FastMCP error] received error listing roots.\n\n${
                 e instanceof Error ? e.stack : JSON.stringify(e)
               }`,
@@ -1114,17 +1131,17 @@ export class FastMCPSession<
               const logLevel = pingConfig.logLevel;
 
               if (logLevel === "debug") {
-                console.debug("[FastMCP debug] server ping failed");
+                this.#logger.debug("[FastMCP debug] server ping failed");
               } else if (logLevel === "warning") {
-                console.warn(
+                this.#logger.warn(
                   "[FastMCP warning] server is not responding to ping",
                 );
               } else if (logLevel === "error") {
-                console.error(
+                this.#logger.error(
                   "[FastMCP error] server is not responding to ping",
                 );
               } else {
-                console.info("[FastMCP info] server ping failed");
+                this.#logger.info("[FastMCP info] server ping failed");
               }
             }
           }, pingConfig.intervalMs);
@@ -1360,7 +1377,7 @@ export class FastMCPSession<
 
   private setupErrorHandling() {
     this.#server.onerror = (error) => {
-      console.error("[FastMCP error]", error);
+      this.#logger.error("[FastMCP error]", error);
     };
   }
 
@@ -1564,7 +1581,7 @@ export class FastMCPSession<
 
   private setupRootsHandlers() {
     if (this.#rootsConfig?.enabled === false) {
-      console.debug(
+      this.#logger.debug(
         "[FastMCP debug] roots capability explicitly disabled via config",
       );
       return;
@@ -1589,11 +1606,11 @@ export class FastMCPSession<
                 error instanceof McpError &&
                 error.code === ErrorCode.MethodNotFound
               ) {
-                console.debug(
+                this.#logger.debug(
                   "[FastMCP debug] listRoots method not supported by client",
                 );
               } else {
-                console.error(
+                this.#logger.error(
                   `[FastMCP error] received error listing roots.\n\n${
                     error instanceof Error ? error.stack : JSON.stringify(error)
                   }`,
@@ -1603,7 +1620,7 @@ export class FastMCPSession<
         },
       );
     } else {
-      console.debug(
+      this.#logger.debug(
         "[FastMCP debug] roots capability not available, not setting up notification handler",
       );
     }
@@ -1686,7 +1703,7 @@ export class FastMCPSession<
               await new Promise((resolve) => setImmediate(resolve));
             }
           } catch (progressError) {
-            console.warn(
+            this.#logger.warn(
               `[FastMCP warning] Failed to report progress for tool '${request.params.name}':`,
               progressError instanceof Error
                 ? progressError.message
@@ -1753,7 +1770,7 @@ export class FastMCPSession<
               await new Promise((resolve) => setImmediate(resolve));
             }
           } catch (streamError) {
-            console.warn(
+            this.#logger.warn(
               `[FastMCP warning] Failed to stream content for tool '${request.params.name}':`,
               streamError instanceof Error
                 ? streamError.message
@@ -1879,6 +1896,7 @@ export class FastMCP<
   }
   #authenticate: Authenticate<T> | undefined;
   #httpStreamServer: null | SSEServer = null;
+  #logger: Logger;
   #options: ServerOptions<T>;
   #prompts: InputPrompt<T>[] = [];
   #resources: Resource<T>[] = [];
@@ -1892,6 +1910,7 @@ export class FastMCP<
 
     this.#options = options;
     this.#authenticate = options.authenticate;
+    this.#logger = options.logger || console;
   }
 
   /**
@@ -2029,6 +2048,7 @@ export class FastMCP<
       const transport = new StdioServerTransport();
       const session = new FastMCPSession<T>({
         instructions: this.#options.instructions,
+        logger: this.#logger,
         name: this.#options.name,
         ping: this.#options.ping,
         prompts: this.#prompts,
@@ -2053,7 +2073,7 @@ export class FastMCP<
 
       if (httpConfig.stateless) {
         // Stateless mode - create new server instance for each request
-        console.info(
+        this.#logger.info(
           `[FastMCP info] Starting server in stateless mode on HTTP Stream at http://localhost:${httpConfig.port}${httpConfig.endpoint}`,
         );
 
@@ -2077,7 +2097,7 @@ export class FastMCP<
           },
           onConnect: async () => {
             // No persistent session tracking in stateless mode
-            console.debug(
+            this.#logger.debug(
               `[FastMCP debug] Stateless HTTP Stream request handled`,
             );
           },
@@ -2110,7 +2130,7 @@ export class FastMCP<
           onConnect: async (session) => {
             this.#sessions.push(session);
 
-            console.info(`[FastMCP info] HTTP Stream session established`);
+            this.#logger.info(`[FastMCP info] HTTP Stream session established`);
 
             this.emit("connect", {
               session: session as FastMCPSession<FastMCPSessionAuth>,
@@ -2124,10 +2144,10 @@ export class FastMCP<
           streamEndpoint: httpConfig.endpoint,
         });
 
-        console.info(
+        this.#logger.info(
           `[FastMCP info] server is running on HTTP Stream at http://localhost:${httpConfig.port}${httpConfig.endpoint}`,
         );
-        console.info(
+        this.#logger.info(
           `[FastMCP info] Transport type: httpStream (Streamable HTTP, not SSE)`,
         );
       }
@@ -2157,6 +2177,7 @@ export class FastMCP<
       : this.#tools;
     return new FastMCPSession<T>({
       auth,
+      logger: this.#logger,
       name: this.#options.name,
       ping: this.#options.ping,
       prompts: this.#prompts,
@@ -2242,7 +2263,7 @@ export class FastMCP<
           return;
         }
       } catch (error) {
-        console.error("[FastMCP error] health endpoint error", error);
+        this.#logger.error("[FastMCP error] health endpoint error", error);
       }
     }
 
