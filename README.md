@@ -18,6 +18,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Logging](#logging)
 - [Error handling](#errors)
 - [HTTP Streaming](#http-streaming) (with SSE compatibility)
+- [Custom HTTP routes](#custom-http-routes) for REST APIs, webhooks, and admin interfaces
 - [Stateless mode](#stateless-mode) for serverless deployments
 - CORS (enabled by default)
 - [Progress notifications](#progress)
@@ -178,6 +179,104 @@ const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
 
 await client.connect(transport);
 ```
+
+#### Custom HTTP Routes
+
+FastMCP allows you to add custom HTTP routes alongside MCP endpoints, enabling you to build comprehensive HTTP services that include REST APIs, webhooks, admin interfaces, and more - all within the same server process.
+
+```ts
+// Add REST API endpoints
+server.addRoute("GET", "/api/users", async (req, res) => {
+  res.json({ users: [] });
+});
+
+// Handle path parameters
+server.addRoute("GET", "/api/users/:id", async (req, res) => {
+  res.json({
+    userId: req.params.id,
+    query: req.query, // Access query parameters
+  });
+});
+
+// Handle POST requests with body parsing
+server.addRoute("POST", "/api/users", async (req, res) => {
+  const body = await req.json();
+  res.status(201).json({ created: body });
+});
+
+// Serve HTML content
+server.addRoute("GET", "/admin", async (req, res) => {
+  res.send("<html><body><h1>Admin Panel</h1></body></html>");
+});
+
+// Handle webhooks
+server.addRoute("POST", "/webhook/github", async (req, res) => {
+  const payload = await req.json();
+  const event = req.headers["x-github-event"];
+
+  // Process webhook...
+  res.json({ received: true });
+});
+```
+
+Custom routes support:
+
+- All HTTP methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
+- Path parameters (`:param`) and wildcards (`*`)
+- Query string parsing
+- JSON and text body parsing
+- Custom status codes and headers
+- Authentication via the same `authenticate` function as MCP
+- **Public routes** that bypass authentication
+
+Routes are matched in the order they are registered, allowing you to define specific routes before catch-all patterns.
+
+##### Public Routes
+
+By default, custom routes require authentication (if configured). You can make routes public by adding the `{ public: true }` option:
+
+```ts
+// Public route - no authentication required
+server.addRoute(
+  "GET",
+  "/.well-known/openid-configuration",
+  async (req, res) => {
+    res.json({
+      issuer: "https://example.com",
+      authorization_endpoint: "https://example.com/auth",
+      token_endpoint: "https://example.com/token",
+    });
+  },
+  { public: true },
+);
+
+// Private route - requires authentication
+server.addRoute("GET", "/api/users", async (req, res) => {
+  // req.auth contains authenticated user data
+  res.json({ users: [] });
+});
+
+// Public static files
+server.addRoute(
+  "GET",
+  "/public/*",
+  async (req, res) => {
+    // Serve static files without authentication
+    res.send(`File: ${req.url}`);
+  },
+  { public: true },
+);
+```
+
+Public routes are perfect for:
+
+- OAuth discovery endpoints (`.well-known/*`)
+- Health checks and status pages
+- Static assets and documentation
+- Webhook endpoints from external services
+- Public APIs that don't require user authentication
+
+See the [custom-routes example](src/examples/custom-routes.ts) for a complete demonstration.
 
 #### Stateless Mode
 

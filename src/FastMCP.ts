@@ -909,9 +909,81 @@ const FastMCPSessionEventEmitterBase: {
   new (): StrictEventEmitter<EventEmitter, FastMCPSessionEvents>;
 } = EventEmitter;
 
+/**
+ * Enhanced request object for custom routes
+ */
+export interface FastMCPRequest<
+  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+> {
+  auth?: T;
+  body?: unknown;
+  headers: http.IncomingHttpHeaders;
+  json(): Promise<unknown>;
+  method: string;
+  params: Record<string, string>;
+  query: Record<string, string | string[]>;
+  text(): Promise<string>;
+  url: string;
+}
+
+/**
+ * Enhanced response object for custom routes
+ */
+export interface FastMCPResponse {
+  end(data?: Buffer | string): void;
+  json(data: unknown): void;
+  send(data: Buffer | string): void;
+  setHeader(name: string, value: number | string | string[]): FastMCPResponse;
+  status(code: number): FastMCPResponse;
+}
+
+/**
+ * HTTP method types for custom routes
+ */
+export type HTTPMethod =
+  | "DELETE"
+  | "GET"
+  | "OPTIONS"
+  | "PATCH"
+  | "POST"
+  | "PUT";
+
+/**
+ * Route handler function type
+ */
+export type RouteHandler<T extends FastMCPSessionAuth = FastMCPSessionAuth> = (
+  req: FastMCPRequest<T>,
+  res: FastMCPResponse,
+) => Promise<void> | void;
+
+/**
+ * Options for configuring custom routes
+ */
+export interface RouteOptions {
+  /**
+   * Whether this route should bypass authentication.
+   * When true, the route handler will be called without authentication,
+   * and req.auth will be undefined.
+   * @default false
+   */
+  public?: boolean;
+}
+
 type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
 
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
+
+/**
+ * Internal route definition
+ */
+interface Route<T extends FastMCPSessionAuth = FastMCPSessionAuth> {
+  handler: RouteHandler<T>;
+  isPublic?: boolean;
+  method: HTTPMethod;
+  paramNames: string[];
+  path: string;
+  pattern: RegExp;
+}
 
 class FastMCPSessionEventEmitter extends FastMCPSessionEventEmitterBase {}
 
@@ -1901,6 +1973,7 @@ export class FastMCP<
   #prompts: InputPrompt<T>[] = [];
   #resources: Resource<T>[] = [];
   #resourcesTemplates: InputResourceTemplate<T>[] = [];
+  #routes: Route<T>[] = [];
   #sessions: FastMCPSession<T>[] = [];
 
   #tools: Tool<T>[] = [];
@@ -1936,6 +2009,76 @@ export class FastMCP<
     const Args extends InputResourceTemplateArgument[],
   >(resource: InputResourceTemplate<T, Args>) {
     this.#resourcesTemplates.push(resource);
+  }
+
+  /**
+   * Adds a custom HTTP route to the server.
+   *
+   * @param method - HTTP method (GET, POST, PUT, DELETE, PATCH, OPTIONS)
+   * @param path - Route path with optional parameters (e.g., "/users/:id")
+   * @param handler - Route handler function
+   * @param options - Optional route configuration
+   *
+   * @example
+   * ```typescript
+   * // Private route (requires authentication)
+   * server.addRoute('GET', '/api/users', async (req, res) => {
+   *   res.json({ users: [] });
+   * });
+   *
+   * // Public route (bypasses authentication)
+   * server.addRoute('GET', '/.well-known/openid-configuration', async (req, res) => {
+   *   res.json({ issuer: 'https://example.com' });
+   * }, { public: true });
+   *
+   * server.addRoute('GET', '/api/users/:id', async (req, res) => {
+   *   res.json({ id: req.params.id });
+   * });
+   * ```
+   */
+  public addRoute(
+    method: HTTPMethod,
+    path: string,
+    handler: RouteHandler<T>,
+    options?: RouteOptions,
+  ) {
+    // Validate inputs
+    if (!method || !path || !handler) {
+      throw new Error("Method, path, and handler are required for routes");
+    }
+
+    if (!path.startsWith("/")) {
+      throw new Error(`Route path must start with '/': ${path}`);
+    }
+
+    // Convert path to regex pattern and extract parameter names
+    const paramNames: string[] = [];
+    let pattern = path;
+
+    // Handle path parameters
+    pattern = pattern.replace(/:([^/]+)/g, (_, paramName) => {
+      paramNames.push(paramName);
+      return "([^/]+)";
+    });
+
+    // Handle wildcards - ensure they're only at the end
+    if (pattern.includes("*") && !pattern.endsWith("*")) {
+      throw new Error(
+        `Wildcards (*) can only be at the end of the path: ${path}`,
+      );
+    }
+    pattern = pattern.replace(/\*/g, ".*");
+
+    const route: Route<T> = {
+      handler,
+      isPublic: options?.public === true,
+      method: method.toUpperCase() as HTTPMethod,
+      paramNames,
+      path,
+      pattern: new RegExp(`^${pattern}$`),
+    };
+
+    this.#routes.push(route);
   }
 
   /**
@@ -2246,7 +2389,7 @@ export class FastMCP<
   }
 
   /**
-   * Handles unhandled HTTP requests with health, readiness, and OAuth endpoints
+   * Handles unhandled HTTP requests with health, readiness, OAuth endpoints, and custom routes
    */
   #handleUnhandledRequest = async (
     req: http.IncomingMessage,
@@ -2254,6 +2397,60 @@ export class FastMCP<
     isStateless = false,
     host: string,
   ) => {
+    const url = new URL(req.url || "", "http://localhost");
+    const method = req.method || "GET";
+
+    // Check custom routes first
+    for (const route of this.#routes) {
+      if (route.method !== method.toUpperCase()) continue;
+
+      const match = url.pathname.match(route.pattern);
+      if (match) {
+        try {
+          // Extract path parameters
+          const params: Record<string, string> = {};
+          route.paramNames.forEach((name, index) => {
+            // Decode URI components for proper handling of special characters
+            params[name] = decodeURIComponent(match[index + 1]);
+          });
+
+          // Get authentication if available and route is not public
+          let auth: T | undefined;
+          if (this.#authenticate && !route.isPublic) {
+            try {
+              auth = await this.#authenticate(req);
+            } catch (error) {
+              this.#logger.error(
+                "[FastMCP error] Route authentication failed",
+                error,
+              );
+              res.writeHead(401, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: "Authentication required" }));
+              return;
+            }
+          }
+
+          const wrappedReq = this.#wrapRequest(req, params, auth);
+          const wrappedRes = this.#wrapResponse(res);
+
+          await route.handler(wrappedReq, wrappedRes);
+          return;
+        } catch (error) {
+          this.#logger.error("[FastMCP error] Route handler error", error);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Internal server error",
+            }),
+          );
+          return;
+        }
+      }
+    }
+
     const healthConfig = this.#options.health ?? {};
 
     const enabled =
@@ -2362,6 +2559,57 @@ export class FastMCP<
     res.writeHead(404).end();
   };
 
+
+  /**
+   * Parses the request body as JSON or text
+   */
+  async #parseRequestBody(req: http.IncomingMessage): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      const maxSize = 10 * 1024 * 1024; // 10MB limit
+
+      req.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > maxSize) {
+          req.destroy();
+          reject(new Error("Request body too large (max 10MB)"));
+          return;
+        }
+        chunks.push(chunk);
+      });
+
+      req.on("end", () => {
+        const buffer = Buffer.concat(chunks);
+        if (buffer.length === 0) {
+          resolve(undefined);
+          return;
+        }
+
+        const body = buffer.toString("utf-8");
+        const contentType = req.headers["content-type"] || "";
+
+        // Handle JSON content type
+        if (contentType.includes("application/json")) {
+          try {
+            resolve(JSON.parse(body));
+          } catch (error) {
+            reject(
+              new Error(
+                `Invalid JSON in request body: ${error instanceof Error ? error.message : String(error)}`,
+              ),
+            );
+          }
+        } else {
+          // Return as string for other content types
+          resolve(body);
+        }
+      });
+
+      req.on("error", reject);
+    });
+  }
+
   #parseRuntimeConfig(
     overrides?: Partial<{
       httpStream: {
@@ -2454,6 +2702,108 @@ export class FastMCP<
       });
     }
   }
+
+  /**
+   * Wraps Node.js request with enhanced functionality
+   */
+  #wrapRequest(
+    req: http.IncomingMessage,
+    params: Record<string, string> = {},
+    auth?: T,
+  ): FastMCPRequest<T> {
+    const url = new URL(
+      req.url || "",
+      `http://${req.headers.host || "localhost"}`,
+    );
+    const query: Record<string, string | string[]> = {};
+
+    url.searchParams.forEach((value, key) => {
+      const existing = query[key];
+      if (existing) {
+        query[key] = Array.isArray(existing)
+          ? [...existing, value]
+          : [existing, value];
+      } else {
+        query[key] = value;
+      }
+    });
+
+    let bodyCache: unknown;
+
+    return {
+      auth,
+      get body() {
+        return bodyCache;
+      },
+      headers: req.headers,
+      json: async () => {
+        if (bodyCache === undefined) {
+          bodyCache = await this.#parseRequestBody(req);
+        }
+        // Ensure we return parsed JSON, not string
+        if (typeof bodyCache === "string") {
+          try {
+            return JSON.parse(bodyCache);
+          } catch {
+            throw new Error("Request body is not valid JSON");
+          }
+        }
+        return bodyCache;
+      },
+      method: req.method || "GET",
+      params,
+      query,
+      text: async () => {
+        if (bodyCache === undefined) {
+          bodyCache = await this.#parseRequestBody(req);
+        }
+        return String(bodyCache || "");
+      },
+      url: req.url || "/",
+    };
+  }
+  /**
+   * Wraps Node.js response with enhanced functionality
+   */
+  #wrapResponse(res: http.ServerResponse): FastMCPResponse {
+    let statusCode = 200;
+
+    return {
+      end: (data?: Buffer | string) => {
+        if (res.headersSent && data) {
+          throw new Error("Cannot send data, headers already sent");
+        }
+        res.statusCode = statusCode;
+        res.end(data);
+      },
+      json: (data: unknown) => {
+        if (res.headersSent) {
+          throw new Error("Cannot send JSON, headers already sent");
+        }
+        res.statusCode = statusCode;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(data));
+      },
+      send: (data: Buffer | string) => {
+        if (res.headersSent) {
+          throw new Error("Cannot send data, headers already sent");
+        }
+        res.statusCode = statusCode;
+        if (typeof data === "string" && !res.hasHeader("Content-Type")) {
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+        }
+        res.end(data);
+      },
+      setHeader: function (name: string, value: number | string | string[]) {
+        res.setHeader(name, value);
+        return this;
+      },
+      status: function (code: number) {
+        statusCode = code;
+        return this;
+      },
+    };
+  }
 }
 
 export type {
@@ -2462,6 +2812,7 @@ export type {
   ContentResult,
   Context,
   FastMCPEvents,
+  FastMCPSessionAuth,
   FastMCPSessionEvents,
   ImageContent,
   InputPrompt,
