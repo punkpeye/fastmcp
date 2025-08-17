@@ -2046,7 +2046,27 @@ export class FastMCP<
 
     if (config.transportType === "stdio") {
       const transport = new StdioServerTransport();
+
+      // For stdio transport, if authenticate function is provided, call it
+      // with undefined request (since stdio doesn't have HTTP request context)
+      let auth: T | undefined;
+
+      if (this.#authenticate) {
+        try {
+          auth = await this.#authenticate(
+            undefined as unknown as http.IncomingMessage,
+          );
+        } catch (error) {
+          this.#logger.error(
+            "[FastMCP error] Authentication failed for stdio transport:",
+            error instanceof Error ? error.message : String(error),
+          );
+          // Continue without auth if authentication fails
+        }
+      }
+
       const session = new FastMCPSession<T>({
+        auth,
         instructions: this.#options.instructions,
         logger: this.#logger,
         name: this.#options.name,
