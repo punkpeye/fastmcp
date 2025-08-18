@@ -2085,6 +2085,27 @@ export class FastMCP<
 
       this.#sessions.push(session);
 
+      session.once("error", () => {
+        this.#removeSession(session);
+      });
+
+      // Monitor the underlying transport for close events
+      if (transport.onclose) {
+        const originalOnClose = transport.onclose;
+
+        transport.onclose = () => {
+          this.#removeSession(session);
+
+          if (originalOnClose) {
+            originalOnClose();
+          }
+        };
+      } else {
+        transport.onclose = () => {
+          this.#removeSession(session);
+        };
+      }
+
       this.emit("connect", {
         session: session as FastMCPSession<FastMCPSessionAuth>,
       });
@@ -2143,6 +2164,10 @@ export class FastMCP<
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
           onClose: async (session) => {
+            const sessionIndex = this.#sessions.indexOf(session);
+
+            if (sessionIndex !== -1) this.#sessions.splice(sessionIndex, 1);
+
             this.emit("disconnect", {
               session: session as FastMCPSession<FastMCPSessionAuth>,
             });
@@ -2326,6 +2351,7 @@ export class FastMCP<
     // If the request was not handled above, return 404
     res.writeHead(404).end();
   };
+
   #parseRuntimeConfig(
     overrides?: Partial<{
       httpStream: {
@@ -2400,6 +2426,17 @@ export class FastMCP<
     }
 
     return { transportType: "stdio" as const };
+  }
+
+  #removeSession(session: FastMCPSession<T>): void {
+    const sessionIndex = this.#sessions.indexOf(session);
+
+    if (sessionIndex !== -1) {
+      this.#sessions.splice(sessionIndex, 1);
+      this.emit("disconnect", {
+        session: session as FastMCPSession<FastMCPSessionAuth>,
+      });
+    }
   }
 }
 
