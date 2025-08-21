@@ -1999,6 +1999,7 @@ test("closing event source does not produce error", async () => {
 
   await server.start({
     httpStream: {
+      host: "127.0.0.1",
       port,
     },
     transportType: "httpStream",
@@ -3231,6 +3232,31 @@ test("stateless mode health check includes mode indicator", async () => {
       status: "ready",
       total: 1,
     });
+  } finally {
+    await server.stop();
+  }
+});
+
+test("host configuration works with 0.0.0.0", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      host: "0.0.0.0",
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const healthResponse = await fetch(`http://0.0.0.0:${port}/health`);
+    expect(healthResponse.status).toBe(200);
+    expect(await healthResponse.text()).toBe("✓ Ok");
   } finally {
     await server.stop();
   }
