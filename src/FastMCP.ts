@@ -2036,6 +2036,7 @@ export class FastMCP<
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
         eventStore?: EventStore;
+        host?: string;
         port: number;
         stateless?: boolean;
       };
@@ -2094,7 +2095,7 @@ export class FastMCP<
       if (httpConfig.stateless) {
         // Stateless mode - create new server instance for each request
         this.#logger.info(
-          `[FastMCP info] Starting server in stateless mode on HTTP Stream at http://localhost:${httpConfig.port}${httpConfig.endpoint}`,
+          `[FastMCP info] Starting server in stateless mode on HTTP Stream at http://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
         );
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
@@ -2111,6 +2112,7 @@ export class FastMCP<
           },
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
+          host: httpConfig.host,
           // In stateless mode, we don't track sessions
           onClose: async () => {
             // No session tracking in stateless mode
@@ -2122,7 +2124,7 @@ export class FastMCP<
             );
           },
           onUnhandledRequest: async (req, res) => {
-            await this.#handleUnhandledRequest(req, res, true);
+            await this.#handleUnhandledRequest(req, res, true, httpConfig.host);
           },
           port: httpConfig.port,
           stateless: true,
@@ -2142,6 +2144,7 @@ export class FastMCP<
           },
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
+          host: httpConfig.host,
           onClose: async (session) => {
             this.emit("disconnect", {
               session: session as FastMCPSession<FastMCPSessionAuth>,
@@ -2158,14 +2161,19 @@ export class FastMCP<
           },
 
           onUnhandledRequest: async (req, res) => {
-            await this.#handleUnhandledRequest(req, res, false);
+            await this.#handleUnhandledRequest(
+              req,
+              res,
+              false,
+              httpConfig.host,
+            );
           },
           port: httpConfig.port,
           streamEndpoint: httpConfig.endpoint,
         });
 
         this.#logger.info(
-          `[FastMCP info] server is running on HTTP Stream at http://localhost:${httpConfig.port}${httpConfig.endpoint}`,
+          `[FastMCP info] server is running on HTTP Stream at http://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
         );
         this.#logger.info(
           `[FastMCP info] Transport type: httpStream (Streamable HTTP, not SSE)`,
@@ -2218,6 +2226,7 @@ export class FastMCP<
     req: http.IncomingMessage,
     res: http.ServerResponse,
     isStateless = false,
+    host: string,
   ) => {
     const healthConfig = this.#options.health ?? {};
 
@@ -2226,7 +2235,7 @@ export class FastMCP<
 
     if (enabled) {
       const path = healthConfig.path ?? "/health";
-      const url = new URL(req.url || "", "http://localhost");
+      const url = new URL(req.url || "", `http://${host}`);
 
       try {
         if (req.method === "GET" && url.pathname === path) {
@@ -2290,7 +2299,7 @@ export class FastMCP<
     // Handle OAuth well-known endpoints
     const oauthConfig = this.#options.oauth;
     if (oauthConfig?.enabled && req.method === "GET") {
-      const url = new URL(req.url || "", "http://localhost");
+      const url = new URL(req.url || "", `http://${host}`);
 
       if (
         url.pathname === "/.well-known/oauth-authorization-server" &&
@@ -2331,6 +2340,7 @@ export class FastMCP<
       httpStream: {
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
+        host?: string;
         port: number;
         stateless?: boolean;
       };
@@ -2342,6 +2352,7 @@ export class FastMCP<
           enableJsonResponse?: boolean;
           endpoint: `/${string}`;
           eventStore?: EventStore;
+          host: string;
           port: number;
           stateless?: boolean;
         };
@@ -2361,12 +2372,13 @@ export class FastMCP<
     const portArg = getArg("port");
     const endpointArg = getArg("endpoint");
     const statelessArg = getArg("stateless");
+    const hostArg = getArg("host");
 
     const envTransport = process.env.FASTMCP_TRANSPORT;
     const envPort = process.env.FASTMCP_PORT;
     const envEndpoint = process.env.FASTMCP_ENDPOINT;
     const envStateless = process.env.FASTMCP_STATELESS;
-
+    const envHost = process.env.FASTMCP_HOST;
     // Overrides > CLI > env > defaults
     const transportType =
       overrides?.transportType ||
@@ -2378,6 +2390,8 @@ export class FastMCP<
       const port = parseInt(
         overrides?.httpStream?.port?.toString() || portArg || envPort || "8080",
       );
+      const host =
+        overrides?.httpStream?.host || hostArg || envHost || "localhost";
       const endpoint =
         overrides?.httpStream?.endpoint || endpointArg || envEndpoint || "/mcp";
       const enableJsonResponse =
@@ -2392,6 +2406,7 @@ export class FastMCP<
         httpStream: {
           enableJsonResponse,
           endpoint: endpoint as `/${string}`,
+          host,
           port,
           stateless,
         },
