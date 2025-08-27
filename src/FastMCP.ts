@@ -2230,9 +2230,9 @@ export class FastMCP<
       : this.#tools;
     return new FastMCPSession<T>({
       auth,
+      instructions: this.#options.instructions,
       logger: this.#logger,
       name: this.#options.name,
-      instructions: this.#options.instructions,
       ping: this.#options.ping,
       prompts: this.#prompts,
       resources: this.#resources,
