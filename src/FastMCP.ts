@@ -2559,7 +2559,6 @@ export class FastMCP<
     res.writeHead(404).end();
   };
 
-
   /**
    * Parses the request body as JSON or text
    */
