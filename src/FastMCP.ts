@@ -207,6 +207,7 @@ type Context<T extends FastMCPSessionAuth> = {
     warn: (message: string, data?: SerializableValue) => void;
   };
   reportProgress: (progress: Progress) => Promise<void>;
+  server: Pick<Server, "getClientVersion">;
   session: T | undefined;
   streamContent: (content: Content | Content[]) => Promise<void>;
 };
@@ -1782,6 +1783,9 @@ export class FastMCPSession<
         const executeToolPromise = tool.execute(args, {
           log,
           reportProgress,
+          server: {
+            getClientVersion: () => this.#server.getClientVersion(),
+          },
           session: this.#auth,
           streamContent,
         });

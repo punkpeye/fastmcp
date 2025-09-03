@@ -2128,6 +2128,7 @@ test("provides auth to tools", async () => {
         warn: expect.any(Function),
       },
       reportProgress: expect.any(Function),
+      server: expect.any(Object),
       session: { id: 1 },
       streamContent: expect.any(Function),
     },
@@ -3260,4 +3261,41 @@ test("host configuration works with 0.0.0.0", async () => {
   } finally {
     await server.stop();
   }
+});
+
+test("tools can access client info", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const result = (await client.callTool({
+        name: "get-client-info",
+      })) as ContentResult;
+
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0]).toHaveProperty("type", "text");
+
+      const text = (result.content[0] as TextContent).text;
+      expect(text).toContain("Client name:");
+      expect(text).toContain("Client version:");
+      // The client info should contain some actual client information
+      expect(text).toMatch(/Client name:\s+\w+/);
+      expect(text).toMatch(/Client version:\s+[\d.]+/);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get client information",
+        execute: async (_args, context) => {
+          const clientInfo = context.server.getClientVersion();
+          return `Client name: ${clientInfo?.name || "unknown"}\nClient version: ${clientInfo?.version || "unknown"}`;
+        },
+        name: "get-client-info",
+      });
+
+      return server;
+    },
+  });
 });
