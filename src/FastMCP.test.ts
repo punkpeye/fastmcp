@@ -2121,6 +2121,7 @@ test("provides auth to tools", async () => {
       b: 2,
     },
     {
+      client: expect.any(Object),
       log: {
         debug: expect.any(Function),
         error: expect.any(Function),
@@ -2128,7 +2129,6 @@ test("provides auth to tools", async () => {
         warn: expect.any(Function),
       },
       reportProgress: expect.any(Function),
-      server: expect.any(Object),
       session: { id: 1 },
       streamContent: expect.any(Function),
     },
@@ -3289,7 +3289,7 @@ test("tools can access client info", async () => {
       server.addTool({
         description: "Get client information",
         execute: async (_args, context) => {
-          const clientInfo = context.server.getClientVersion();
+          const clientInfo = context.client.version;
           return `Client name: ${clientInfo?.name || "unknown"}\nClient version: ${clientInfo?.version || "unknown"}`;
         },
         name: "get-client-info",
