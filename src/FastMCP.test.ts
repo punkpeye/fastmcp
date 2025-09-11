@@ -431,6 +431,61 @@ test("handles UserError errors", async () => {
   });
 });
 
+test("handles UserError errors with extras", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      // Should include structuredContent if extras is present
+      expect(
+        await client.callTool({
+          arguments: { a: 1, b: 2 },
+          name: "add_with_extras",
+        }),
+      ).toEqual({
+        content: [{ text: "Something went wrong", type: "text" }],
+        isError: true,
+        structuredContent: { foo: "bar", num: 42 },
+      });
+
+      // Should NOT include structuredContent if extras is not present
+      expect(
+        await client.callTool({
+          arguments: { a: 1, b: 2 },
+          name: "add_without_extras",
+        }),
+      ).toEqual({
+        content: [{ text: "Something went wrong", type: "text" }],
+        isError: true,
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Throws UserError with extras",
+        execute: async () => {
+          throw new UserError("Something went wrong", { foo: "bar", num: 42 });
+        },
+        name: "add_with_extras",
+        parameters: z.object({ a: z.number(), b: z.number() }),
+      });
+
+      server.addTool({
+        description: "Throws UserError without extras",
+        execute: async () => {
+          throw new UserError("Something went wrong");
+        },
+        name: "add_without_extras",
+        parameters: z.object({ a: z.number(), b: z.number() }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("calling an unknown tool throws McpError with MethodNotFound code", async () => {
   await runWithTestServer({
     run: async ({ client }) => {

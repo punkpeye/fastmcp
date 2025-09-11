@@ -1844,6 +1844,7 @@ export class FastMCPSession<
           return {
             content: [{ text: error.message, type: "text" }],
             isError: true,
+            ...(error.extras ? { structuredContent: error.extras } : {}),
           };
         }
 
