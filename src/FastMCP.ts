@@ -19,6 +19,7 @@ import {
   ListToolsRequestSchema,
   McpError,
   ReadResourceRequestSchema,
+  RequestMeta,
   ResourceLink,
   Root,
   RootsListChangedNotificationSchema,
@@ -215,6 +216,7 @@ type Context<T extends FastMCPSessionAuth> = {
    * Available for all transports when the client provides it.
    */
   requestId?: string;
+  requestMetadata?: RequestMeta;
   session: T | undefined;
   /**
    * Session ID from the Mcp-Session-Id header.
@@ -371,12 +373,14 @@ const ContentZodSchema = z.discriminatedUnion("type", [
 ]) satisfies z.ZodType<Content>;
 
 type ContentResult = {
+  _meta?: Record<string, unknown>;
   content: Content[];
   isError?: boolean;
 };
 
 const ContentResultZodSchema = z
   .object({
+    _meta: z.record(z.unknown()).optional(),
     content: ContentZodSchema.array(),
     isError: z.boolean().optional(),
   })
@@ -1819,7 +1823,6 @@ export class FastMCPSession<
             );
           }
         };
-
         const executeToolPromise = tool.execute(args, {
           client: {
             version: this.#server.getClientVersion(),
@@ -1830,6 +1833,7 @@ export class FastMCPSession<
             typeof request.params?._meta?.requestId === "string"
               ? request.params._meta.requestId
               : undefined,
+          requestMetadata: request.params._meta,
           session: this.#auth,
           sessionId: this.#sessionId,
           streamContent,
@@ -1842,7 +1846,8 @@ export class FastMCPSession<
               new Promise<never>((_, reject) => {
                 const timeoutId = setTimeout(() => {
                   reject(
-                    new UserError(
+                    new McpError(
+                      ErrorCode.InternalError,
                       `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
                     ),
                   );
@@ -1883,6 +1888,11 @@ export class FastMCPSession<
           result = ContentResultZodSchema.parse(maybeStringResult);
         }
       } catch (error) {
+        // Re-throw McpError to let the MCP SDK handle it as a proper JSON-RPC error
+        if (error instanceof McpError) {
+          throw error;
+        }
+
         if (error instanceof UserError) {
           return {
             content: [{ text: error.message, type: "text" }],
@@ -2520,6 +2530,8 @@ export class FastMCP<
   }
 }
 
+export { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+
 export type {
   AudioContent,
   Content,
@@ -2534,6 +2546,7 @@ export type {
   Progress,
   Prompt,
   PromptArgument,
+  RequestMeta,
   Resource,
   ResourceContent,
   ResourceLink,

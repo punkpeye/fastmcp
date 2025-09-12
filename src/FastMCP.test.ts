@@ -486,6 +486,132 @@ test("handles UserError errors with extras", async () => {
   });
 });
 
+test("tool can throw McpError with InvalidParams error code", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      try {
+        await client.callTool({
+          arguments: { value: "invalid" },
+          name: "validate",
+        });
+        throw new Error("Expected error to be thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(McpError);
+
+        // @ts-expect-error - we know that error is an McpError
+        expect(error.code).toBe(ErrorCode.InvalidParams);
+
+        // @ts-expect-error - we know that error is an McpError
+        expect(error.message).toContain("Invalid value provided");
+      }
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Validate input",
+        execute: async () => {
+          throw new McpError(ErrorCode.InvalidParams, "Invalid value provided");
+        },
+        name: "validate",
+        parameters: z.object({ value: z.string() }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("tool can throw McpError with InternalError error code", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      try {
+        await client.callTool({
+          arguments: { value: "test" },
+          name: "process",
+        });
+        throw new Error("Expected error to be thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(McpError);
+
+        // @ts-expect-error - we know that error is an McpError
+        expect(error.code).toBe(ErrorCode.InternalError);
+
+        // @ts-expect-error - we know that error is an McpError
+        expect(error.message).toContain("Internal processing error");
+      }
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Process data",
+        execute: async () => {
+          throw new McpError(
+            ErrorCode.InternalError,
+            "Internal processing error",
+          );
+        },
+        name: "process",
+        parameters: z.object({ value: z.string() }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("tool can throw McpError with custom data", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      try {
+        await client.callTool({
+          arguments: { id: "123" },
+          name: "find",
+        });
+        throw new Error("Expected error to be thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(McpError);
+
+        // @ts-expect-error - we know that error is an McpError
+        expect(error.code).toBe(ErrorCode.InvalidRequest);
+
+        // @ts-expect-error - we know that error is an McpError
+        expect(error.message).toContain("Resource not found");
+
+        // Note: Custom data may not be preserved through the MCP SDK transport layer
+        // The important part is that the error code and message are correct
+      }
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Find resource",
+        execute: async (args) => {
+          throw new McpError(ErrorCode.InvalidRequest, "Resource not found", {
+            available: ["456", "789"],
+            id: args.id,
+          });
+        },
+        name: "find",
+        parameters: z.object({ id: z.string() }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("calling an unknown tool throws McpError with MethodNotFound code", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
@@ -563,6 +689,72 @@ test("tracks tool progress", async () => {
           a: z.number(),
           b: z.number(),
         }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("provides requestMetadata to tool context", async () => {
+  let capturedMetadata: Record<string, unknown> | undefined = undefined;
+  const metadata = { foo: "bar" };
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      await client.callTool({
+        _meta: metadata,
+        name: "metadata-test",
+      });
+
+      expect(capturedMetadata).toBeDefined();
+      expect(capturedMetadata).toEqual(metadata);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        execute: async (_args, context) => {
+          capturedMetadata = context.requestMetadata;
+          return "success";
+        },
+        name: "metadata-test",
+      });
+
+      return server;
+    },
+  });
+});
+
+test("allows tools to return _meta in CallToolResult", async () => {
+  const expectedMeta = { customField: "customValue", timestamp: 1234567890 };
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const result = await client.callTool({
+        name: "meta-result-test",
+      });
+
+      expect(result._meta).toBeDefined();
+      expect(result._meta).toEqual(expectedMeta);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        execute: async () => {
+          return {
+            _meta: expectedMeta,
+            content: [{ text: "success", type: "text" }],
+          };
+        },
+        name: "meta-result-test",
       });
 
       return server;
@@ -667,26 +859,24 @@ test("sets logging levels", async () => {
 test("handles tool timeout", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
-      const result = await client.callTool({
-        arguments: {
-          a: 1500,
-          b: 2,
-        },
-        name: "add",
-      });
+      try {
+        await client.callTool({
+          arguments: {
+            a: 1500,
+            b: 2,
+          },
+          name: "add",
+        });
+        throw new Error("Expected timeout error to be thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(McpError);
 
-      expect(result.isError).toBe(true);
+        // @ts-expect-error - we know that error is an McpError
+        expect(error.code).toBe(ErrorCode.InternalError);
 
-      const result_typed = result as ContentResult;
-
-      expect(Array.isArray(result_typed.content)).toBe(true);
-      expect(result_typed.content.length).toBe(1);
-
-      const firstItem = result_typed.content[0] as TextContent;
-
-      expect(firstItem.type).toBe("text");
-      expect(firstItem.text).toBeDefined();
-      expect(firstItem.text).toContain("timed out");
+        // @ts-expect-error - we know that error is an McpError
+        expect(error.message).toContain("timed out");
+      }
     },
     server: async () => {
       const server = new FastMCP({

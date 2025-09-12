@@ -771,7 +771,53 @@ The `log` object has the following methods:
 
 #### Errors
 
-The errors that are meant to be shown to the user should be thrown as `UserError` instances:
+FastMCP supports two ways to handle errors in tool execution:
+
+##### MCP Errors (Recommended)
+
+For standards-compliant error handling, throw `McpError` with appropriate error codes:
+
+```js
+import { ErrorCode, McpError } from "fastmcp";
+
+server.addTool({
+  name: "download",
+  description: "Download a file",
+  parameters: z.object({
+    url: z.string(),
+  }),
+  execute: async (args) => {
+    if (args.url.startsWith("https://example.com")) {
+      // Throw MCP error with InvalidParams code
+      throw new McpError(ErrorCode.InvalidParams, "This URL is not allowed");
+    }
+
+    // Throw MCP error with custom data
+    if (!urlExists(args.url)) {
+      throw new McpError(ErrorCode.InvalidRequest, "Resource not found", {
+        url: args.url,
+        statusCode: 404,
+      });
+    }
+
+    return "done";
+  },
+});
+```
+
+**Available Error Codes:**
+
+- `ErrorCode.InvalidParams` - Invalid parameters provided
+- `ErrorCode.InvalidRequest` - Invalid request
+- `ErrorCode.InternalError` - Internal server error
+- `ErrorCode.MethodNotFound` - Method/resource not found
+- And other standard JSON-RPC error codes
+
+When a tool throws `McpError`, it's propagated through the MCP protocol as a proper JSON-RPC error, allowing clients to handle different error types appropriately.
+
+##### User Errors (Legacy)
+
+For backward compatibility, you can still use `UserError` for simple error messages:
 
 ```js
 import { UserError } from "fastmcp";
@@ -791,6 +837,8 @@ server.addTool({
   },
 });
 ```
+
+`UserError` errors are converted to tool responses with `isError: true` and are displayed to the user as text content.
 
 #### Progress
 
