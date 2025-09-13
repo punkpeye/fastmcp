@@ -200,6 +200,9 @@ export const audioContent = async (
 };
 
 type Context<T extends FastMCPSessionAuth> = {
+  client: {
+    version: ReturnType<Server["getClientVersion"]>;
+  };
   log: {
     debug: (message: string, data?: SerializableValue) => void;
     error: (message: string, data?: SerializableValue) => void;
@@ -1852,6 +1855,9 @@ export class FastMCPSession<
         };
 
         const executeToolPromise = tool.execute(args, {
+          client: {
+            version: this.#server.getClientVersion(),
+          },
           log,
           reportProgress,
           session: this.#auth,
@@ -1910,6 +1916,7 @@ export class FastMCPSession<
           return {
             content: [{ text: error.message, type: "text" }],
             isError: true,
+            ...(error.extras ? { structuredContent: error.extras } : {}),
           };
         }
 
