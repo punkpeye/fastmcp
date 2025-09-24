@@ -2208,7 +2208,7 @@ export class FastMCP<
           `[FastMCP info] server is running on HTTP Stream at http://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
         );
         this.#logger.info(
-          `[FastMCP info] Transport type: httpStream (Streamable HTTP, not SSE)`,
+          `[FastMCP info] Transport type: httpStream (Streamable HTTP) or SSE at http://${httpConfig.host}:${httpConfig.port}/sse`,
         );
       }
     } else {
