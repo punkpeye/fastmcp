@@ -135,6 +135,8 @@ This will start the server and listen for HTTP streaming connections on `http://
 
 > **Note:** You can also customize the endpoint path using the `httpStream.endpoint` option (default is `/mcp`).
 
+> **Note:** This also starts an SSE server on `http://localhost:8080/sse`.
+
 You can connect to these servers using the appropriate client transport.
 
 For HTTP streaming connections:
