@@ -37,6 +37,7 @@ import { fetch } from "undici";
 import parseURITemplate from "uri-templates";
 import { toJsonSchema } from "xsschema";
 import { z } from "zod";
+import { enableAuthResponsePatch } from "./response-patcher.js";
 
 export interface Logger {
   debug(...args: unknown[]): void;
@@ -2119,6 +2120,15 @@ export class FastMCP<
       });
     } else if (config.transportType === "httpStream") {
       const httpConfig = config.httpStream;
+      
+      // Enable response patching if authentication is configured
+      // This fixes MCP SDK returning 400 instead of 401 for auth errors
+      if (this.#authenticate) {
+        enableAuthResponsePatch(httpConfig.port);
+        this.#logger.debug(
+          `[FastMCP debug] Enabled auth response patching on port ${httpConfig.port} to fix 400→401 status codes`
+        );
+      }
 
       if (httpConfig.stateless) {
         // Stateless mode - create new server instance for each request
