@@ -2127,6 +2127,7 @@ export class FastMCP<
         );
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
+          authenticate: this.#authenticate,
           createServer: async (request) => {
             let auth: T | undefined;
 
@@ -2161,6 +2162,7 @@ export class FastMCP<
       } else {
         // Regular mode with session management
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
+          authenticate: this.#authenticate,
           createServer: async (request) => {
             let auth: T | undefined;
 
@@ -2201,6 +2203,7 @@ export class FastMCP<
             );
           },
           port: httpConfig.port,
+          stateless: httpConfig.stateless,
           streamEndpoint: httpConfig.endpoint,
         });
 
