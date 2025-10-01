@@ -2133,6 +2133,12 @@ export class FastMCP<
 
             if (this.#authenticate) {
               auth = await this.#authenticate(request);
+
+              // In stateless mode, authentication is REQUIRED
+              // mcp-proxy will catch this error and return 401
+              if (auth === undefined || auth === null) {
+                throw new Error("Authentication required");
+              }
             }
 
             // In stateless mode, create a new session for each request
