@@ -830,7 +830,7 @@ FastMCP supports streaming partial results from tools while they're still execut
 
 To enable streaming for a tool, add the `streamingHint` annotation and use the `streamContent` method:
 
-````js
+```js
 server.addTool({
   name: "generateText",
   description: "Generate text incrementally",
@@ -863,6 +863,7 @@ server.addTool({
     // return "Generation complete!";
   },
 });
+```
 
 Streaming works with all content types (text, image, audio) and can be combined with progress reporting:
 
@@ -897,7 +898,7 @@ server.addTool({
     return "Processing complete!";
   },
 });
-````
+```
 
 #### Tool Annotations
 
