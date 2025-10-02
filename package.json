@@ -82,7 +82,8 @@
   "tsup": {
     "entry": [
       "src/FastMCP.ts",
-      "src/bin/fastmcp.ts"
+      "src/bin/fastmcp.ts",
+      "src/examples/custom-routes.ts"
     ],
     "format": [
       "esm"
