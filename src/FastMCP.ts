@@ -19,6 +19,7 @@ import {
   ListToolsRequestSchema,
   McpError,
   ReadResourceRequestSchema,
+  RequestMeta,
   ResourceLink,
   Root,
   RootsListChangedNotificationSchema,
@@ -210,6 +211,7 @@ type Context<T extends FastMCPSessionAuth> = {
     warn: (message: string, data?: SerializableValue) => void;
   };
   reportProgress: (progress: Progress) => Promise<void>;
+  requestMetadata?: RequestMeta;
   session: T | undefined;
   streamContent: (content: Content | Content[]) => Promise<void>;
 };
@@ -1781,13 +1783,13 @@ export class FastMCPSession<
             );
           }
         };
-
         const executeToolPromise = tool.execute(args, {
           client: {
             version: this.#server.getClientVersion(),
           },
           log,
           reportProgress,
+          requestMetadata: request.params._meta,
           session: this.#auth,
           streamContent,
         });
@@ -2483,6 +2485,7 @@ export type {
   Progress,
   Prompt,
   PromptArgument,
+  RequestMeta,
   Resource,
   ResourceContent,
   ResourceLink,

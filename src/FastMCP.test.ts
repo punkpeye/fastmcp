@@ -570,6 +570,39 @@ test("tracks tool progress", async () => {
   });
 });
 
+test("provides requestMetadata to tool context", async () => {
+  let capturedMetadata: Record<string, unknown> | undefined = undefined;
+  const metadata = { foo: "bar" };
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      await client.callTool({
+        _meta: metadata,
+        name: "metadata-test",
+      });
+
+      expect(capturedMetadata).toBeDefined();
+      expect(capturedMetadata).toEqual(metadata);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        execute: async (_args, context) => {
+          capturedMetadata = context.requestMetadata;
+          return "success";
+        },
+        name: "metadata-test",
+      });
+
+      return server;
+    },
+  });
+});
+
 test(
   "reports multiple progress updates without buffering",
   {
