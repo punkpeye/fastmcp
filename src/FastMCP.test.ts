@@ -3293,6 +3293,359 @@ test("stateless mode health check includes mode indicator", async () => {
   }
 });
 
+test("stateless mode with valid authentication allows access", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP<{ userId: string }>({
+    authenticate: async () => {
+      // Always authenticate successfully for this test
+      return { userId: "123" };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async () => {
+      return "pong";
+    },
+    name: "ping",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const client = new Client(
+      {
+        name: "Test client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+
+    await client.connect(transport);
+
+    const result = await client.callTool({
+      arguments: {},
+      name: "ping",
+    });
+
+    expect(result.content).toEqual([
+      {
+        text: "pong",
+        type: "text",
+      },
+    ]);
+
+    // Server should not track sessions in stateless mode
+    expect(server.sessions.length).toBe(0);
+
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("stateless mode rejects missing Authorization header", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP<{ userId: string }>({
+    authenticate: async (req) => {
+      const authHeader = req.headers.authorization;
+
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        throw new Response(null, {
+          status: 401,
+          statusText: "Unauthorized",
+        });
+      }
+
+      return { userId: "123" };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async () => {
+      return "pong";
+    },
+    name: "ping",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Send a raw HTTP request without Authorization header
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          arguments: {},
+          name: "ping",
+        },
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+
+    const body = (await response.json()) as { error?: { message?: string } };
+    expect(body.error?.message).toContain("Unauthorized");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("stateless mode rejects invalid authentication token", async () => {
+  const port = await getRandomPort();
+  const VALID_TOKEN = "valid_jwt_token";
+  const INVALID_TOKEN = "invalid_jwt_token";
+
+  const server = new FastMCP<{ userId: string }>({
+    authenticate: async (req) => {
+      const authHeader = req.headers.authorization;
+
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        throw new Response(null, {
+          status: 401,
+          statusText: "Unauthorized",
+        });
+      }
+
+      const token = authHeader.split(" ")[1];
+
+      if (token === VALID_TOKEN) {
+        return { userId: "123" };
+      }
+
+      throw new Response(null, {
+        status: 401,
+        statusText: "Unauthorized",
+      });
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async () => {
+      return "pong";
+    },
+    name: "ping",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Send a raw HTTP request with invalid token
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          arguments: {},
+          name: "ping",
+        },
+      }),
+      headers: {
+        Authorization: `Bearer ${INVALID_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+
+    const body = (await response.json()) as { error?: { message?: string } };
+    expect(body.error?.message).toContain("Unauthorized");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("stateless mode handles authentication function throwing errors", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP<{ userId: string }>({
+    authenticate: async () => {
+      // Simulate an internal error during token validation
+      throw new Error("JWT validation service is down");
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async () => {
+      return "pong";
+    },
+    name: "ping",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Send a raw HTTP request
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          arguments: {},
+          name: "ping",
+        },
+      }),
+      headers: {
+        Authorization: "Bearer any_token",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+
+    const body = (await response.json()) as { error?: { message?: string } };
+    expect(body.error?.message).toContain("Unauthorized");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("stateless mode handles concurrent requests with authentication", async () => {
+  const port = await getRandomPort();
+  let requestCount = 0;
+
+  const server = new FastMCP<{ requestId: number }>({
+    authenticate: async () => {
+      // Track each authentication request
+      requestCount++;
+      return { requestId: requestCount };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Echo request ID",
+    execute: async (_args, context) => {
+      return `Request ${context.session?.requestId}`;
+    },
+    name: "whoami",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Create two clients to test concurrent stateless requests
+    const client1 = new Client(
+      {
+        name: "Client 1",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const client2 = new Client(
+      {
+        name: "Client 2",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const transport1 = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+
+    const transport2 = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+
+    await client1.connect(transport1);
+    await client2.connect(transport2);
+
+    // Both clients should work independently
+    const result1 = await client1.callTool({
+      arguments: {},
+      name: "whoami",
+    });
+
+    const result2 = await client2.callTool({
+      arguments: {},
+      name: "whoami",
+    });
+
+    // Each request should have been authenticated
+    expect((result1.content as unknown[])[0]).toHaveProperty("text");
+    expect((result2.content as unknown[])[0]).toHaveProperty("text");
+
+    // Server should not track sessions in stateless mode
+    expect(server.sessions.length).toBe(0);
+
+    await client1.close();
+    await client2.close();
+  } finally {
+    await server.stop();
+  }
+});
+
 test("host configuration works with 0.0.0.0", async () => {
   const port = await getRandomPort();
 
