@@ -24,8 +24,8 @@ importers:
         specifier: ^7.1.0
         version: 7.1.0
       mcp-proxy:
-        specifier: ^5.5.4
-        version: 5.5.4
+        specifier: ^5.8.0
+        version: 5.8.0
       strict-event-emitter-types:
         specifier: ^2.0.0
         version: 2.0.0
@@ -1881,10 +1881,6 @@ packages:
     resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
     engines: {node: '>=18.0.0'}
 
-  eventsource@4.0.0:
-    resolution: {integrity: sha512-fvIkb9qZzdMxgZrEQDyll+9oJsyaVvY92I2Re+qK0qEJ+w5s0X3dtz+M0VAPOjP1gtU3iqWyjQ0G3nvd5CLZ2g==}
-    engines: {node: '>=20.0.0'}
-
   execa@8.0.1:
     resolution: {integrity: sha512-VyhnebXciFV2DESc+p6B+y0LjSm0krU4OgJN44qFAhBY0TJ+1V61tYD2+wHusZ6F9n5K+vl8k0sTy7PEfV4qpg==}
     engines: {node: '>=16.17'}
@@ -2439,8 +2435,8 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
-  mcp-proxy@5.5.4:
-    resolution: {integrity: sha512-+J1FNSTfnonpq0BL+fdxSY41mP3qrk0pBHTRq20VSv1nRY0IyH6RM/tGp40k1GOZfRnmxygwbSYTBZqbjI1ehg==}
+  mcp-proxy@5.8.0:
+    resolution: {integrity: sha512-qNdLNQzpFGj80UXu473Z7ZwZqRYMG6bvf64Wnmqqiaz8SU0GHaVD7U9odW++xYLSEI6EEZNl7SH3Vjw5NEdLXw==}
     hasBin: true
 
   media-typer@1.1.0:
@@ -5434,10 +5430,6 @@ snapshots:
     dependencies:
       eventsource-parser: 3.0.3
 
-  eventsource@4.0.0:
-    dependencies:
-      eventsource-parser: 3.0.3
-
   execa@8.0.1:
     dependencies:
       cross-spawn: 7.0.6
@@ -5988,13 +5980,7 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
-  mcp-proxy@5.5.4:
-    dependencies:
-      '@modelcontextprotocol/sdk': 1.17.2
-      eventsource: 4.0.0
-      yargs: 18.0.0
-    transitivePeerDependencies:
-      - supports-color
+  mcp-proxy@5.8.0: {}
 
   media-typer@1.1.0: {}
 

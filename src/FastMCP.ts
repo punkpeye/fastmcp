@@ -2127,11 +2127,18 @@ export class FastMCP<
         );
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
+          authenticate: this.#authenticate,
           createServer: async (request) => {
             let auth: T | undefined;
 
             if (this.#authenticate) {
               auth = await this.#authenticate(request);
+
+              // In stateless mode, authentication is REQUIRED
+              // mcp-proxy will catch this error and return 401
+              if (auth === undefined || auth === null) {
+                throw new Error("Authentication required");
+              }
             }
 
             // In stateless mode, create a new session for each request
@@ -2161,6 +2168,7 @@ export class FastMCP<
       } else {
         // Regular mode with session management
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
+          authenticate: this.#authenticate,
           createServer: async (request) => {
             let auth: T | undefined;
 
@@ -2201,6 +2209,7 @@ export class FastMCP<
             );
           },
           port: httpConfig.port,
+          stateless: httpConfig.stateless,
           streamEndpoint: httpConfig.endpoint,
         });
 
