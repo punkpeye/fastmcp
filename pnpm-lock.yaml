@@ -24,8 +24,8 @@ importers:
         specifier: ^7.1.0
         version: 7.1.0
       mcp-proxy:
-        specifier: github:gazzadownunder/mcp-proxy#main
-        version: https://codeload.github.com/gazzadownunder/mcp-proxy/tar.gz/d0fc84e9e82bcbab44c54b8151630d2e02e53803
+        specifier: ^5.8.0
+        version: 5.8.0
       strict-event-emitter-types:
         specifier: ^2.0.0
         version: 2.0.0
@@ -2435,9 +2435,8 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
-  mcp-proxy@https://codeload.github.com/gazzadownunder/mcp-proxy/tar.gz/d0fc84e9e82bcbab44c54b8151630d2e02e53803:
-    resolution: {tarball: https://codeload.github.com/gazzadownunder/mcp-proxy/tar.gz/d0fc84e9e82bcbab44c54b8151630d2e02e53803}
-    version: 1.0.0
+  mcp-proxy@5.8.0:
+    resolution: {integrity: sha512-qNdLNQzpFGj80UXu473Z7ZwZqRYMG6bvf64Wnmqqiaz8SU0GHaVD7U9odW++xYLSEI6EEZNl7SH3Vjw5NEdLXw==}
     hasBin: true
 
   media-typer@1.1.0:
@@ -5981,7 +5980,7 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
-  mcp-proxy@https://codeload.github.com/gazzadownunder/mcp-proxy/tar.gz/d0fc84e9e82bcbab44c54b8151630d2e02e53803: {}
+  mcp-proxy@5.8.0: {}
 
   media-typer@1.1.0: {}
 
