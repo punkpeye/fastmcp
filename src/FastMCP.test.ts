@@ -3551,7 +3551,8 @@ test("stateless mode handles authentication function throwing errors", async () 
     expect(response.status).toBe(401);
 
     const body = (await response.json()) as { error?: { message?: string } };
-    expect(body.error?.message).toContain("Unauthorized");
+    // The actual error message should be passed through
+    expect(body.error?.message).toContain("JWT validation service is down");
   } finally {
     await server.stop();
   }
@@ -3641,6 +3642,451 @@ test("stateless mode handles concurrent requests with authentication", async () 
 
     await client1.close();
     await client2.close();
+  } finally {
+    await server.stop();
+  }
+});
+
+// Tests for GitHub Issue: FastMCP authentication fix
+// Testing the fix for session creation despite authentication failure
+
+test("authentication failure handling: should throw error when auth.authenticated is false", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP<{ authenticated: boolean; error?: string }>({
+    authenticate: async () => {
+      // Simulate authentication failure with { authenticated: false }
+      return { authenticated: false, error: "Invalid JWT token" };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async () => {
+      return "pong";
+    },
+    name: "ping",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Send a raw HTTP request that should be rejected
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0" },
+          protocolVersion: "2024-11-05",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        Authorization: "Bearer invalid.jwt.token",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    // Should return 401 Unauthorized (handled by mcp-proxy)
+    expect(response.status).toBe(401);
+
+    const body = (await response.json()) as {
+      error?: { code?: number; message?: string };
+    };
+    expect(body.error?.message).toContain("Invalid JWT token");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("authentication failure handling: should create session when auth.authenticated is true", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP<{
+    authenticated: boolean;
+    session?: { userId: string };
+  }>({
+    authenticate: async () => {
+      // Simulate successful authentication
+      return { authenticated: true, session: { userId: "123" } };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async (_args, context) => {
+      return `User: ${context.session?.session?.userId}`;
+    },
+    name: "whoami",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const client = new Client(
+      {
+        name: "Test client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+
+    await client.connect(transport);
+
+    const result = await client.callTool({
+      arguments: {},
+      name: "whoami",
+    });
+
+    expect(result.content).toEqual([
+      {
+        text: "User: 123",
+        type: "text",
+      },
+    ]);
+
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("authentication failure handling: should create session when auth is null/undefined (anonymous)", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    // No authenticate function - anonymous access
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async (_args, context) => {
+      return `Anonymous: ${context.session === undefined}`;
+    },
+    name: "ping",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const client = new Client(
+      {
+        name: "Test client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+
+    await client.connect(transport);
+
+    const result = await client.callTool({
+      arguments: {},
+      name: "ping",
+    });
+
+    expect(result.content).toEqual([
+      {
+        text: "Anonymous: true",
+        type: "text",
+      },
+    ]);
+
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("authentication failure handling: should use default error message when auth.error is not provided", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP<{ authenticated: boolean }>({
+    authenticate: async () => {
+      // Return authenticated: false without custom error message
+      return { authenticated: false };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async () => {
+      return "pong";
+    },
+    name: "ping",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0" },
+          protocolVersion: "2024-11-05",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+
+    const body = (await response.json()) as {
+      error?: { message?: string };
+    };
+    expect(body.error?.message).toContain("Authentication failed");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("authentication failure handling: should preserve existing behavior for truthy auth results", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP<{ role: string; userId: string }>({
+    authenticate: async () => {
+      // Return a truthy object without 'authenticated' field (legacy pattern)
+      return { role: "admin", userId: "456" };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async (_args, context) => {
+      return `User: ${context.session?.userId}, Role: ${context.session?.role}`;
+    },
+    name: "whoami",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const client = new Client(
+      {
+        name: "Test client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+
+    await client.connect(transport);
+
+    const result = await client.callTool({
+      arguments: {},
+      name: "whoami",
+    });
+
+    expect(result.content).toEqual([
+      {
+        text: "User: 456, Role: admin",
+        type: "text",
+      },
+    ]);
+
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("authentication failure handling: should handle authentication with custom error messages", async () => {
+  const port = await getRandomPort();
+  const CUSTOM_ERROR_MSG = "Token expired at 2025-10-07T12:00:00Z";
+
+  const server = new FastMCP<{ authenticated: boolean; error?: string }>({
+    authenticate: async () => {
+      return { authenticated: false, error: CUSTOM_ERROR_MSG };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async () => {
+      return "pong";
+    },
+    name: "ping",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0" },
+          protocolVersion: "2024-11-05",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+
+    const body = (await response.json()) as {
+      error?: { message?: string };
+    };
+    expect(body.error?.message).toBe(CUSTOM_ERROR_MSG);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("authentication failure handling: should not create session for authenticated=false even with session data", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP<{
+    authenticated: boolean;
+    error?: string;
+    session?: { userId: string };
+  }>({
+    authenticate: async () => {
+      // Even if session data is present, authenticated: false should reject
+      return {
+        authenticated: false,
+        error: "Insufficient permissions",
+        session: { userId: "hacker" },
+      };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async () => {
+      return "pong";
+    },
+    name: "ping",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0" },
+          protocolVersion: "2024-11-05",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+
+    const body = (await response.json()) as {
+      error?: { message?: string };
+    };
+    expect(body.error?.message).toContain("Insufficient permissions");
+
+    // Verify session was never created
+    expect(server.sessions.length).toBe(0);
   } finally {
     await server.stop();
   }
