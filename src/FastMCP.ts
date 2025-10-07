@@ -1987,48 +1987,30 @@ export class FastMCP<
 
     // Try to match against resource templates
     for (const template of this.#resourcesTemplates) {
-      // Check if the URI starts with the template base
-      const templateBase = template.uriTemplate.split("{")[0];
-
-      if (uri.startsWith(templateBase)) {
-        const params: Record<string, string> = {};
-        const templateParts = template.uriTemplate.split("/");
-        const uriParts = uri.split("/");
-
-        for (let i = 0; i < templateParts.length; i++) {
-          const templatePart = templateParts[i];
-
-          if (templatePart?.startsWith("{") && templatePart.endsWith("}")) {
-            const paramName = templatePart.slice(1, -1);
-            const paramValue = uriParts[i];
-
-            if (paramValue) {
-              params[paramName] = paramValue;
-            }
-          }
-        }
-
-        const result = await template.load(
-          params as ResourceTemplateArgumentsToObject<
-            typeof template.arguments
-          >,
-        );
-
-        const resourceData: ResourceContent["resource"] = {
-          mimeType: template.mimeType,
-          uri,
-        };
-
-        if ("text" in result) {
-          resourceData.text = result.text;
-        }
-
-        if ("blob" in result) {
-          resourceData.blob = result.blob;
-        }
-
-        return resourceData; // The resource we're looking for
+      const parsedTemplate = parseURITemplate(template.uriTemplate);
+      const params = parsedTemplate.fromUri(uri);
+      if (!params) {
+        continue;
       }
+
+      const result = await template.load(
+        params as ResourceTemplateArgumentsToObject<typeof template.arguments>,
+      );
+
+      const resourceData: ResourceContent["resource"] = {
+        mimeType: template.mimeType,
+        uri,
+      };
+
+      if ("text" in result) {
+        resourceData.text = result.text;
+      }
+
+      if ("blob" in result) {
+        resourceData.blob = result.blob;
+      }
+
+      return resourceData; // The resource we're looking for
     }
 
     throw new UnexpectedStateError(`Resource not found: ${uri}`, { uri });

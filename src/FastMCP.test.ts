@@ -1052,6 +1052,238 @@ test("embedded resources work with direct resources", async () => {
   });
 });
 
+test("embedded resources work with URI templates and query parameters", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      // Test case 1: Simple query parameter extraction
+      expect(
+        await client.callTool({
+          arguments: {
+            uri: "ui://search?location=a&q=b",
+          },
+          name: "get_search_resource",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "application/json",
+              text: '{"location":"a","query":"b","type":"search"}',
+              uri: "ui://search?location=a&q=b",
+            },
+            type: "resource",
+          },
+        ],
+      });
+
+      // Test case 2: Query parameters with different order
+      expect(
+        await client.callTool({
+          arguments: {
+            uri: "ui://search?q=test&location=home",
+          },
+          name: "get_search_resource",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "application/json",
+              text: '{"location":"home","query":"test","type":"search"}',
+              uri: "ui://search?q=test&location=home",
+            },
+            type: "resource",
+          },
+        ],
+      });
+
+      // Test case 3: Query parameters with encoded values
+      expect(
+        await client.callTool({
+          arguments: {
+            uri: "ui://search?location=new%20york&q=hello%20world",
+          },
+          name: "get_search_resource",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "application/json",
+              text: '{"location":"new york","query":"hello world","type":"search"}',
+              uri: "ui://search?location=new%20york&q=hello%20world",
+            },
+            type: "resource",
+          },
+        ],
+      });
+    },
+
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResourceTemplate({
+        arguments: [
+          {
+            name: "location",
+            required: true,
+          },
+          {
+            name: "q",
+            required: true,
+          },
+        ],
+        async load(args) {
+          return {
+            text: JSON.stringify({
+              location: args.location,
+              query: args.q,
+              type: "search",
+            }),
+          };
+        },
+        mimeType: "application/json",
+        name: "Search Resource",
+        uriTemplate: "ui://search{?location,q}",
+      });
+
+      server.addTool({
+        description:
+          "Get search resource data using embedded function with query parameters",
+        execute: async (args) => {
+          return {
+            content: [
+              {
+                resource: await server.embedded(args.uri),
+                type: "resource",
+              },
+            ],
+          };
+        },
+        name: "get_search_resource",
+        parameters: z.object({
+          uri: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("embedded resources work with complex URI template patterns", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      // Test case 1: Path and query parameters combined
+      expect(
+        await client.callTool({
+          arguments: {
+            uri: "api://users/123?fields=name,email&format=json",
+          },
+          name: "get_user_data",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "application/json",
+              text: '{"userId":"123","fields":["name","email"],"format":"json"}',
+              uri: "api://users/123?fields=name,email&format=json",
+            },
+            type: "resource",
+          },
+        ],
+      });
+
+      // Test case 2: Optional query parameters (some missing)
+      expect(
+        await client.callTool({
+          arguments: {
+            uri: "api://users/456?format=xml",
+          },
+          name: "get_user_data",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "application/json",
+              text: '{"userId":"456","format":"xml"}',
+              uri: "api://users/456?format=xml",
+            },
+            type: "resource",
+          },
+        ],
+      });
+    },
+
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResourceTemplate({
+        arguments: [
+          {
+            name: "userId",
+            required: true,
+          },
+          {
+            name: "fields",
+            required: false,
+          },
+          {
+            name: "format",
+            required: false,
+          },
+        ],
+        async load(args) {
+          const result: Record<string, string> = {
+            userId: args.userId,
+          };
+          if (args.fields) {
+            result.fields = args.fields;
+          }
+          if (args.format) {
+            result.format = args.format;
+          }
+          return {
+            text: JSON.stringify(result),
+          };
+        },
+        mimeType: "application/json",
+        name: "User Data API",
+        uriTemplate: "api://users/{userId}{?fields,format}",
+      });
+
+      server.addTool({
+        description:
+          "Get user data using complex URI templates with path and query parameters",
+        execute: async (args) => {
+          return {
+            content: [
+              {
+                resource: await server.embedded(args.uri),
+                type: "resource",
+              },
+            ],
+          };
+        },
+        name: "get_user_data",
+        parameters: z.object({
+          uri: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("adds prompts", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
