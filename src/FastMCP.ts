@@ -1099,6 +1099,7 @@ export class FastMCPSession<
       }
 
       if (
+        this.#rootsConfig?.enabled === false &&
         this.#clientCapabilities?.roots?.listChanged &&
         typeof this.#server.listRoots === "function"
       ) {
