@@ -1105,9 +1105,11 @@ export class FastMCPSession<
       await this.#server.connect(transport);
 
       // Extract session ID from transport if available (HTTP transports only)
-      if ('sessionId' in transport) {
-        const transportWithSessionId = transport as { sessionId?: string } & Transport;
-        if (typeof transportWithSessionId.sessionId === 'string') {
+      if ("sessionId" in transport) {
+        const transportWithSessionId = transport as {
+          sessionId?: string;
+        } & Transport;
+        if (typeof transportWithSessionId.sessionId === "string") {
           this.#sessionId = transportWithSessionId.sessionId;
         }
       }
@@ -1824,9 +1826,10 @@ export class FastMCPSession<
           },
           log,
           reportProgress,
-          requestId: typeof request.params?._meta?.requestId === "string"
-            ? request.params._meta.requestId
-            : undefined,
+          requestId:
+            typeof request.params?._meta?.requestId === "string"
+              ? request.params._meta.requestId
+              : undefined,
           session: this.#auth,
           sessionId: this.#sessionId,
           streamContent,

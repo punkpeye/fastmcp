@@ -248,9 +248,15 @@ describe("FastMCP Session ID Support", () => {
         });
 
         // Verify counters are independent per session
-        expect((result1a.content as Array<{ text: string }>)[0].text).toContain(": 1");
-        expect((result1b.content as Array<{ text: string }>)[0].text).toContain(": 2");
-        expect((result2.content as Array<{ text: string }>)[0].text).toContain(": 1");
+        expect((result1a.content as Array<{ text: string }>)[0].text).toContain(
+          ": 1",
+        );
+        expect((result1b.content as Array<{ text: string }>)[0].text).toContain(
+          ": 2",
+        );
+        expect((result2.content as Array<{ text: string }>)[0].text).toContain(
+          ": 1",
+        );
 
         await client1.close();
         await client2.close();
