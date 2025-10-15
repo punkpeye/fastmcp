@@ -210,7 +210,19 @@ type Context<T extends FastMCPSessionAuth> = {
     warn: (message: string, data?: SerializableValue) => void;
   };
   reportProgress: (progress: Progress) => Promise<void>;
+  /**
+   * Request ID from the current MCP request.
+   * Available for all transports when the client provides it.
+   */
+  requestId?: string;
   session: T | undefined;
+  /**
+   * Session ID from the Mcp-Session-Id header.
+   * Only available for HTTP-based transports (SSE, HTTP Stream).
+   * Can be used to track per-session state, implement session-specific
+   * counters, or maintain user-specific data across multiple requests.
+   */
+  sessionId?: string;
   streamContent: (content: Content | Content[]) => Promise<void>;
 };
 
@@ -936,6 +948,12 @@ export class FastMCPSession<
   public get server(): Server {
     return this.#server;
   }
+  public get sessionId(): string | undefined {
+    return this.#sessionId;
+  }
+  public set sessionId(value: string | undefined) {
+    this.#sessionId = value;
+  }
   #auth: T | undefined;
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
@@ -959,6 +977,12 @@ export class FastMCPSession<
 
   #server: Server;
 
+  /**
+   * Session ID from the Mcp-Session-Id header (HTTP transports only).
+   * Used to track per-session state across multiple requests.
+   */
+  #sessionId?: string;
+
   #utils?: ServerOptions<T>["utils"];
 
   constructor({
@@ -971,6 +995,7 @@ export class FastMCPSession<
     resources,
     resourcesTemplates,
     roots,
+    sessionId,
     tools,
     transportType,
     utils,
@@ -985,6 +1010,7 @@ export class FastMCPSession<
     resources: Resource<T>[];
     resourcesTemplates: InputResourceTemplate<T>[];
     roots?: ServerOptions<T>["roots"];
+    sessionId?: string;
     tools: Tool<T>[];
     transportType?: "httpStream" | "stdio";
     utils?: ServerOptions<T>["utils"];
@@ -996,6 +1022,7 @@ export class FastMCPSession<
     this.#logger = logger;
     this.#pingConfig = ping;
     this.#rootsConfig = roots;
+    this.#sessionId = sessionId;
     this.#needsEventLoopFlush = transportType === "httpStream";
 
     if (tools.length) {
@@ -1076,6 +1103,14 @@ export class FastMCPSession<
 
     try {
       await this.#server.connect(transport);
+
+      // Extract session ID from transport if available (HTTP transports only)
+      if ('sessionId' in transport) {
+        const transportWithSessionId = transport as { sessionId?: string } & Transport;
+        if (typeof transportWithSessionId.sessionId === 'string') {
+          this.#sessionId = transportWithSessionId.sessionId;
+        }
+      }
 
       let attempt = 0;
       const maxAttempts = 10;
@@ -1789,7 +1824,11 @@ export class FastMCPSession<
           },
           log,
           reportProgress,
+          requestId: typeof request.params?._meta?.requestId === "string"
+            ? request.params._meta.requestId
+            : undefined,
           session: this.#auth,
+          sessionId: this.#sessionId,
           streamContent,
         });
 
@@ -2110,7 +2149,7 @@ export class FastMCP<
         );
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
-          authenticate: this.#authenticate,
+          ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
           createServer: async (request) => {
             let auth: T | undefined;
 
@@ -2124,9 +2163,14 @@ export class FastMCP<
               }
             }
 
+            // Extract session ID from headers
+            const sessionId = Array.isArray(request.headers["mcp-session-id"])
+              ? request.headers["mcp-session-id"][0]
+              : request.headers["mcp-session-id"];
+
             // In stateless mode, create a new session for each request
             // without persisting it in the sessions array
-            return this.#createSession(auth);
+            return this.#createSession(auth, sessionId);
           },
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
@@ -2151,7 +2195,7 @@ export class FastMCP<
       } else {
         // Regular mode with session management
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
-          authenticate: this.#authenticate,
+          ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
           createServer: async (request) => {
             let auth: T | undefined;
 
@@ -2159,7 +2203,12 @@ export class FastMCP<
               auth = await this.#authenticate(request);
             }
 
-            return this.#createSession(auth);
+            // Extract session ID from headers
+            const sessionId = Array.isArray(request.headers["mcp-session-id"])
+              ? request.headers["mcp-session-id"][0]
+              : request.headers["mcp-session-id"];
+
+            return this.#createSession(auth, sessionId);
           },
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
@@ -2218,7 +2267,7 @@ export class FastMCP<
    * Creates a new FastMCPSession instance with the current configuration.
    * Used both for regular sessions and stateless requests.
    */
-  #createSession(auth?: T): FastMCPSession<T> {
+  #createSession(auth?: T, sessionId?: string): FastMCPSession<T> {
     // Check if authentication failed
     if (
       auth &&
@@ -2249,6 +2298,7 @@ export class FastMCP<
       resources: this.#resources,
       resourcesTemplates: this.#resourcesTemplates,
       roots: this.#options.roots,
+      sessionId,
       tools: allowedTools,
       transportType: "httpStream",
       utils: this.#options.utils,

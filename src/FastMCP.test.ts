@@ -2416,7 +2416,9 @@ test("provides auth to tools", async () => {
         warn: expect.any(Function),
       },
       reportProgress: expect.any(Function),
+      requestId: undefined,
       session: { id: 1 },
+      sessionId: expect.any(String),
       streamContent: expect.any(Function),
     },
   );
