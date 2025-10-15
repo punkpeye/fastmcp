@@ -2219,6 +2219,21 @@ export class FastMCP<
    * Used both for regular sessions and stateless requests.
    */
   #createSession(auth?: T): FastMCPSession<T> {
+    // Check if authentication failed
+    if (
+      auth &&
+      typeof auth === "object" &&
+      "authenticated" in auth &&
+      !(auth as { authenticated: unknown }).authenticated
+    ) {
+      const errorMessage =
+        "error" in auth &&
+        typeof (auth as { error: unknown }).error === "string"
+          ? (auth as { error: string }).error
+          : "Authentication failed";
+      throw new Error(errorMessage);
+    }
+
     const allowedTools = auth
       ? this.#tools.filter((tool) =>
           tool.canAccess ? tool.canAccess(auth) : true,

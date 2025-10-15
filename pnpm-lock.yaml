@@ -24,8 +24,8 @@ importers:
         specifier: ^7.1.0
         version: 7.1.0
       mcp-proxy:
-        specifier: ^5.8.0
-        version: 5.8.0
+        specifier: ^5.8.1
+        version: 5.8.1
       strict-event-emitter-types:
         specifier: ^2.0.0
         version: 2.0.0
@@ -2435,8 +2435,8 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
-  mcp-proxy@5.8.0:
-    resolution: {integrity: sha512-qNdLNQzpFGj80UXu473Z7ZwZqRYMG6bvf64Wnmqqiaz8SU0GHaVD7U9odW++xYLSEI6EEZNl7SH3Vjw5NEdLXw==}
+  mcp-proxy@5.8.1:
+    resolution: {integrity: sha512-tlBekDacLg8iR6pe9k0AnOEi52zn2JLOWY3fPmbL/rhO+MRYIjEMsrBVWHD+D7vbAjR+gmZIzMUbvg3TawjafQ==}
     hasBin: true
 
   media-typer@1.1.0:
@@ -5980,7 +5980,7 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
-  mcp-proxy@5.8.0: {}
+  mcp-proxy@5.8.1: {}
 
   media-typer@1.1.0: {}
 
