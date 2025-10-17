@@ -35,6 +35,7 @@ import { StrictEventEmitter } from "strict-event-emitter-types";
 import { setTimeout as delay } from "timers/promises";
 import { fetch } from "undici";
 import parseURITemplate from "uri-templates";
+import { URL } from 'url';
 import { toJsonSchema } from "xsschema";
 import { z } from "zod";
 
@@ -60,6 +61,64 @@ type FastMCPSessionEvents = {
   ready: () => void;
   rootsChanged: (event: { roots: Root[] }) => void;
 };
+
+interface OpenAPIMediaType {
+  schema?: OpenAPISchema;
+}
+
+interface OpenAPIOperation {
+  description?: string;
+  operationId?: string;
+  parameters?: OpenAPIParameter[];
+  requestBody?: OpenAPIRequestBody;
+  responses?: Record<string, OpenAPIResponse>;
+  summary?: string;
+}
+
+interface OpenAPIParameter {
+  description?: string;
+  in: 'cookie' | 'header' | 'path' | 'query';
+  name: string;
+  required?: boolean;
+  schema?: OpenAPISchema;
+}
+
+interface OpenAPIPathItem {
+  [method: string]: OpenAPIOperation;
+}
+
+interface OpenAPIRequestBody {
+  content?: Record<string, OpenAPIMediaType>;
+  required?: boolean;
+}
+
+interface OpenAPIResponse {
+  content?: Record<string, OpenAPIMediaType>;
+  description: string;
+}
+
+interface OpenAPISchema {
+  default?: unknown;
+  enum?: unknown[];
+  format?: string;
+  items?: OpenAPISchema;
+  properties?: Record<string, OpenAPISchema>;
+  required?: string[];
+  type?: 'array' | 'boolean' | 'integer' | 'number' | 'object' | 'string';
+}
+
+interface OpenAPISpec {
+  info: {
+    title: string;
+    version: string;
+  };
+  openapi: string;
+  paths: Record<string, OpenAPIPathItem>;
+  servers?: Array<{
+    description?: string;
+    url: string;
+  }>;
+}
 
 export const imageContent = async (
   input: { buffer: Buffer } | { path: string } | { url: string },
@@ -1964,6 +2023,133 @@ export class FastMCP<
   }
 
   /**
+   * Loads resources, tools, and endpoints from an OpenAPI specification.
+   * @param openAPISource
+   * @param options
+   */
+  static async fromOpenAPI<T extends FastMCPSessionAuth = undefined>(
+      openAPISource: OpenAPISpec | string,
+      options: Omit<ServerOptions<T>, 'name' | 'version'> = {}
+  ): Promise<FastMCP<T>> {
+    let openAPISpec: OpenAPISpec;
+
+    if (typeof openAPISource === 'string') {
+      if (openAPISource.startsWith('http://') || openAPISource.startsWith('https://')) {
+        const response = await fetch(openAPISource);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch OpenAPI spec: ${response.statusText}`);
+        }
+        openAPISpec = await response.json() as OpenAPISpec;
+      } else {
+        const fs = await import('fs/promises');
+        const fileContent = await fs.readFile(openAPISource, 'utf-8');
+        openAPISpec = JSON.parse(fileContent) as OpenAPISpec;
+      }
+    } else {
+      openAPISpec = openAPISource;
+    }
+
+    const server = new FastMCP<T>({
+      name: openAPISpec.info.title,
+      version: openAPISpec.info.version as `${number}.${number}.${number}`,
+      ...options,
+    });
+
+    for (const [path, pathItem] of Object.entries(openAPISpec.paths)) {
+      for (const [method, operation] of Object.entries(pathItem)) {
+        if (!operation || typeof operation !== 'object' || !operation.operationId) {
+          continue;
+        }
+
+        const typedOperation = operation as OpenAPIOperation;
+
+        server.addTool({
+          description: typedOperation.summary || typedOperation.description || `${method.toUpperCase()} ${path}`,
+          execute: async (args: Record<string, unknown>) => {
+            try {
+              const baseUrl = openAPISpec.servers?.[0]?.url;
+
+              if (!baseUrl) {
+                throw new Error('No server URL defined in OpenAPI spec');
+              }
+
+              let fullPath = path;
+              const pathParams: Record<string, unknown> = {};
+              const queryParams: Record<string, unknown> = {};
+              const headers: Record<string, string> = {};
+              let body: unknown = null;
+
+              if (typedOperation.parameters) {
+                for (const param of typedOperation.parameters) {
+                  const value = args[param.name];
+                  if (value !== undefined) {
+                    switch (param.in) {
+                      case 'header':
+                        headers[param.name] = String(value);
+                        break;
+                      case 'path':
+                        pathParams[param.name] = value;
+                        fullPath = fullPath.replace(`{${param.name}}`, String(value));
+                        break;
+                      case 'query':
+                        queryParams[param.name] = value;
+                        break;
+                    }
+                  }
+                }
+              }
+
+              const url = new URL(fullPath, baseUrl);
+              Object.entries(queryParams).forEach(([key, value]) => {
+                url.searchParams.append(key, String(value));
+              });
+
+              if (['patch', 'post', 'put'].includes(method.toLowerCase())) {
+                const remainingArgs = { ...args };
+                if (typedOperation.parameters) {
+                  for (const param of typedOperation.parameters) {
+                    delete remainingArgs[param.name];
+                  }
+                }
+                if (Object.keys(remainingArgs).length > 0) {
+                  body = JSON.stringify(remainingArgs);
+                  headers['Content-Type'] = 'application/json';
+                }
+              }
+
+              const response = await fetch(url.toString(), {
+                body: body ? String(body) : undefined,
+                headers: headers,
+                method: method.toUpperCase(),
+              });
+
+              const responseText = await response.text();
+
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${responseText}`);
+              }
+
+              try {
+                const jsonResponse = JSON.parse(responseText);
+                return JSON.stringify(jsonResponse, null, 2);
+              } catch {
+                return responseText;
+              }
+
+            } catch (error) {
+              throw new Error(`Failed to execute API call: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          },
+          name: typedOperation.operationId!,
+          parameters: typedOperation.parameters ? server.convertOpenAPIParams(typedOperation.parameters) : z.object({}),
+        });
+      }
+    }
+
+    return server;
+  }
+
+  /**
    * Adds a prompt to the server.
    */
   public addPrompt<const Args extends InputPromptArgument<T>[]>(
@@ -1993,6 +2179,26 @@ export class FastMCP<
    */
   public addTool<Params extends ToolParameters>(tool: Tool<T, Params>) {
     this.#tools.push(tool as unknown as Tool<T>);
+  }
+
+  public convertOpenAPIParams(parameters: OpenAPIParameter[]): z.ZodObject<Record<string, z.ZodTypeAny>> {
+    const schemaFields: Record<string, z.ZodTypeAny> = {};
+
+    for (const param of parameters) {
+      let zodType: z.ZodTypeAny = z.unknown();
+
+      if (param.schema) {
+        zodType = this.convertOpenAPISchemaToZod(param.schema);
+      }
+
+      if (!param.required) {
+        zodType = zodType.optional();
+      }
+
+      schemaFields[param.name] = zodType;
+    }
+
+    return z.object(schemaFields);
   }
 
   /**
@@ -2516,6 +2722,39 @@ export class FastMCP<
       this.emit("disconnect", {
         session: session as FastMCPSession<FastMCPSessionAuth>,
       });
+    }
+  }
+
+  private convertOpenAPISchemaToZod(schema: OpenAPISchema): z.ZodTypeAny {
+    switch (schema.type) {
+      case 'array':
+        if (schema.items) {
+          return z.array(this.convertOpenAPISchemaToZod(schema.items));
+        }
+        return z.array(z.unknown());
+      case 'boolean':
+        return z.boolean();
+      case 'integer':
+        return z.number().int();
+      case 'number':
+        return z.number();
+      case 'object':
+        if (schema.properties) {
+          const objectFields: Record<string, z.ZodTypeAny> = {};
+          for (const [key, propSchema] of Object.entries(schema.properties)) {
+            let fieldType = this.convertOpenAPISchemaToZod(propSchema);
+            if (!schema.required?.includes(key)) {
+              fieldType = fieldType.optional();
+            }
+            objectFields[key] = fieldType;
+          }
+          return z.object(objectFields);
+        }
+        return z.object({});
+      case 'string':
+        return z.string();
+      default:
+        return z.unknown();
     }
   }
 }
