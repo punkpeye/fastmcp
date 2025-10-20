@@ -52,6 +52,9 @@
       "@sebbo2002/semantic-release-jsr"
     ]
   },
+  "files": [
+    "dist"
+  ],
   "devDependencies": {
     "@eslint/js": "^9.33.0",
     "@modelcontextprotocol/inspector": "^0.16.2",
