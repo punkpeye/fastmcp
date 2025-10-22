@@ -1,5 +1,6 @@
-import { expect, test, vi } from "vitest";
 import { setTimeout as delay } from "timers/promises";
+import { expect, test, vi } from "vitest";
+
 import { DiscoveryDocumentCache } from "./DiscoveryDocumentCache.js";
 
 test("caches discovery documents", async () => {
@@ -11,8 +12,8 @@ test("caches discovery documents", async () => {
   };
   // mock fetch
   const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
-    ok: true,
     json: async () => mockResponse,
+    ok: true,
   } as Response);
   // first call should fetch
   const result1 = await cache.get(testUrl);
@@ -43,12 +44,12 @@ test("respects TTL and refetches after expiration", async () => {
   const fetchSpy = vi
     .spyOn(global, "fetch")
     .mockResolvedValueOnce({
-      ok: true,
       json: async () => mockResponse1,
+      ok: true,
     } as Response)
     .mockResolvedValueOnce({
-      ok: true,
       json: async () => mockResponse2,
+      ok: true,
     } as Response);
   // first call
   const result1 = await cache.get(testUrl);
@@ -91,12 +92,12 @@ test("clears specific URL from cache", async () => {
   const fetchSpy = vi
     .spyOn(global, "fetch")
     .mockResolvedValueOnce({
-      ok: true,
       json: async () => mockResponse,
+      ok: true,
     } as Response)
     .mockResolvedValueOnce({
-      ok: true,
       json: async () => mockResponse,
+      ok: true,
     } as Response);
 
   // fetch and cache
@@ -125,8 +126,8 @@ test("clears all cached documents", async () => {
   const url2 = "https://auth2.example.com/.well-known/openid-configuration";
   const mockResponse = { issuer: "https://auth.example.com" };
   const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue({
-    ok: true,
     json: async () => mockResponse,
+    ok: true,
   } as Response);
 
   // fetch and cache both URLs
@@ -150,8 +151,8 @@ test("has() returns false for expired entries", async () => {
   const testUrl = "https://auth.example.com/.well-known/openid-configuration";
   const mockResponse = { issuer: "https://auth.example.com" };
   const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
-    ok: true,
     json: async () => mockResponse,
+    ok: true,
   } as Response);
 
   // fetch and cache
@@ -174,8 +175,8 @@ test("uses default TTL of 1 hour", async () => {
   const testUrl = "https://auth.example.com/.well-known/openid-configuration";
   const mockResponse = { issuer: "https://auth.example.com" };
   const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
-    ok: true,
     json: async () => mockResponse,
+    ok: true,
   } as Response);
 
   await cache.get(testUrl);
@@ -191,8 +192,8 @@ test("supports custom TTL values", async () => {
   const testUrl = "https://auth.example.com/.well-known/openid-configuration";
   const mockResponse = { issuer: "https://auth.example.com" };
   const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
-    ok: true,
     json: async () => mockResponse,
+    ok: true,
   } as Response);
 
   await cache.get(testUrl);
@@ -216,12 +217,12 @@ test("caches multiple different URLs independently", async () => {
   const fetchSpy = vi
     .spyOn(global, "fetch")
     .mockResolvedValueOnce({
-      ok: true,
       json: async () => mockResponse1,
+      ok: true,
     } as Response)
     .mockResolvedValueOnce({
-      ok: true,
       json: async () => mockResponse2,
+      ok: true,
     } as Response);
   const result1 = await cache.get(url1);
   const result2 = await cache.get(url2);
@@ -230,6 +231,112 @@ test("caches multiple different URLs independently", async () => {
   expect(result2).toEqual(mockResponse2);
   expect(cache.size).toBe(2);
   expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+  fetchSpy.mockRestore();
+});
+
+test("coalesces concurrent requests to prevent duplicate fetches", async () => {
+  const cache = new DiscoveryDocumentCache();
+  const testUrl = "https://auth.example.com/.well-known/openid-configuration";
+  const mockResponse = { issuer: "https://auth.example.com" };
+
+  let fetchCallCount = 0;
+
+  const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(async () => {
+    fetchCallCount++;
+
+    await delay(100); // simulate network delay
+    return {
+      json: async () => mockResponse,
+      ok: true,
+    } as Response;
+  });
+
+  // make 5 concurrent requests
+  const promises = Array.from({ length: 5 }, () => cache.get(testUrl));
+  const results = await Promise.all(promises);
+
+  // all should return the same data
+  results.forEach((result) => {
+    expect(result).toEqual(mockResponse);
+  });
+
+  // but fetch should only be called once
+  expect(fetchCallCount).toBe(1);
+  expect(cache.size).toBe(1);
+
+  fetchSpy.mockRestore();
+});
+
+test("calculates TTL after fetch completes, not before", async () => {
+  const cache = new DiscoveryDocumentCache({ ttl: 1000 }); // 1 second TTL
+  const testUrl = "https://auth.example.com/.well-known/openid-configuration";
+  const mockResponse = { issuer: "https://auth.example.com" };
+  const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(async () => {
+    await delay(500); // simulate slow network - 500ms
+
+    return {
+      json: async () => mockResponse,
+      ok: true,
+    } as Response;
+  });
+
+  const startTime = Date.now();
+
+  await cache.get(testUrl);
+
+  const fetchDuration = Date.now() - startTime;
+
+  // verify fetch took around 500ms
+  expect(fetchDuration).toBeGreaterThanOrEqual(450);
+
+  // wait 600ms (less than TTL of 1000ms)
+  await delay(600);
+
+  // should still be cached (TTL is 1000ms from when fetch completed, not started)
+  expect(cache.has(testUrl)).toBe(true);
+
+  // should use cache, not fetch again
+  await cache.get(testUrl);
+
+  expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+  fetchSpy.mockRestore();
+});
+
+test("handles concurrent requests with slow fetch correctly", async () => {
+  const cache = new DiscoveryDocumentCache();
+  const testUrl = "https://auth.example.com/.well-known/openid-configuration";
+  const mockResponse = { issuer: "https://auth.example.com" };
+
+  let fetchCallCount = 0;
+
+  const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(async () => {
+    fetchCallCount++;
+
+    await delay(200); // slow fetch
+
+    return {
+      json: async () => mockResponse,
+      ok: true,
+    } as Response;
+  });
+
+  // start first request
+  const promise1 = cache.get(testUrl);
+
+  // start second request after 50ms
+  // (while first is still in flight)
+
+  await delay(50);
+
+  const promise2 = cache.get(testUrl);
+  // both should resolve with the same data
+  const [result1, result2] = await Promise.all([promise1, promise2]);
+
+  expect(result1).toEqual(mockResponse);
+  expect(result2).toEqual(mockResponse);
+  expect(fetchCallCount).toBe(1); // should only fetch once
 
   fetchSpy.mockRestore();
 });
