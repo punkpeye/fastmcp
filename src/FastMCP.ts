@@ -2869,6 +2869,8 @@ export class FastMCP<
   }
 }
 
+export { DiscoveryDocumentCache } from "./DiscoveryDocumentCache.js";
+
 export type {
   AudioContent,
   Content,

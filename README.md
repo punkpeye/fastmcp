@@ -1415,9 +1415,14 @@ In this example, only clients authenticating with the `admin` role will be able 
 FastMCP includes built-in support for OAuth discovery endpoints, supporting both **MCP Specification 2025-03-26** and **MCP Specification 2025-06-18** for OAuth integration. This makes it easy to integrate with OAuth authorization flows by providing standard discovery endpoints that comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9470 (OAuth 2.0 Protected Resource Metadata):
 
 ```ts
-import { FastMCP } from "fastmcp";
+import { FastMCP, DiscoveryDocumentCache } from "fastmcp";
 import { buildGetJwks } from "get-jwks";
 import fastJwt from "fast-jwt";
+
+// Create a cache for discovery documents (reuse across requests)
+const discoveryCache = new DiscoveryDocumentCache({
+  ttl: 3600000, // Cache for 1 hour (default)
+});
 
 const server = new FastMCP({
   name: "My Server",
@@ -1450,19 +1455,16 @@ const server = new FastMCP({
 
     // Validate OAuth JWT access token using OpenID Connect discovery
     try {
-      // TODO: Cache the discovery document to avoid repeated requests
-      // Discover OAuth/OpenID configuration from well-known endpoint
+      // Fetch and cache the discovery document
       const discoveryUrl =
         "https://auth.example.com/.well-known/openid-configuration";
       // Alternative: Use OAuth authorization server metadata endpoint
       // const discoveryUrl = 'https://auth.example.com/.well-known/oauth-authorization-server';
 
-      const discoveryResponse = await fetch(discoveryUrl);
-      if (!discoveryResponse.ok) {
-        throw new Error("Failed to fetch OAuth discovery document");
-      }
-
-      const config = await discoveryResponse.json();
+      const config = (await discoveryCache.get(discoveryUrl)) as {
+        jwks_uri: string;
+        issuer: string;
+      };
       const jwksUri = config.jwks_uri;
       const issuer = config.issuer;
 
