@@ -924,12 +924,17 @@ const FastMCPSessionEventEmitterBase: {
   new (): StrictEventEmitter<EventEmitter, FastMCPSessionEvents>;
 } = EventEmitter;
 
+export enum ServerState {
+  Error = "error",
+  Running = "running",
+  Stopped = "stopped",
+}
+
 type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
 
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
 
 class FastMCPSessionEventEmitter extends FastMCPSessionEventEmitterBase {}
-
 export class FastMCPSession<
   T extends FastMCPSessionAuth = FastMCPSessionAuth,
 > extends FastMCPSessionEventEmitter {
@@ -1202,11 +1207,52 @@ export class FastMCPSession<
     }
   }
 
+  promptsListChanged(prompts: Prompt<T>[]) {
+    this.#prompts = [];
+    for (const prompt of prompts) {
+      this.addPrompt(prompt);
+    }
+    this.setupPromptHandlers(prompts);
+    this.triggerListChangedNotification("notifications/prompts/list_changed");
+  }
+
   public async requestSampling(
     message: z.infer<typeof CreateMessageRequestSchema>["params"],
     options?: RequestOptions,
   ): Promise<SamplingResponse> {
     return this.#server.createMessage(message, options);
+  }
+
+  resourcesListChanged(resources: Resource<T>[]) {
+    this.#resources = [];
+    for (const resource of resources) {
+      this.addResource(resource);
+    }
+    this.setupResourceHandlers(resources);
+    this.triggerListChangedNotification("notifications/resources/list_changed");
+  }
+
+  resourceTemplatesListChanged(resourceTemplates: ResourceTemplate<T>[]) {
+    this.#resourceTemplates = [];
+    for (const resourceTemplate of resourceTemplates) {
+      this.addResourceTemplate(resourceTemplate);
+    }
+    this.setupResourceTemplateHandlers(resourceTemplates);
+    this.triggerListChangedNotification("notifications/resources/list_changed");
+  }
+
+  toolsListChanged(tools: Tool<T>[]) {
+    const allowedTools = tools.filter((tool) =>
+      tool.canAccess ? tool.canAccess(this.#auth as T) : true,
+    );
+    this.setupToolHandlers(allowedTools);
+    this.triggerListChangedNotification("notifications/tools/list_changed");
+  }
+
+  triggerListChangedNotification(method: string) {
+    this.#server.notification({
+      method,
+    });
   }
 
   public waitForReady(): Promise<void> {
@@ -1429,7 +1475,6 @@ export class FastMCPSession<
       return {};
     });
   }
-
   private setupPromptHandlers(prompts: Prompt<T>[]) {
     this.#server.setRequestHandler(ListPromptsRequestSchema, async () => {
       return {
@@ -1503,7 +1548,6 @@ export class FastMCPSession<
       }
     });
   }
-
   private setupResourceHandlers(resources: Resource<T>[]) {
     this.#server.setRequestHandler(ListResourcesRequestSchema, async () => {
       return {
@@ -1601,7 +1645,6 @@ export class FastMCPSession<
       },
     );
   }
-
   private setupResourceTemplateHandlers(
     resourceTemplates: ResourceTemplate<T>[],
   ) {
@@ -1619,7 +1662,6 @@ export class FastMCPSession<
       },
     );
   }
-
   private setupRootsHandlers() {
     if (this.#rootsConfig?.enabled === false) {
       this.#logger.debug(
@@ -1666,7 +1708,6 @@ export class FastMCPSession<
       );
     }
   }
-
   private setupToolHandlers(tools: Tool<T>[]) {
     this.#server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
@@ -1941,6 +1982,10 @@ class FastMCPEventEmitter extends FastMCPEventEmitterBase {}
 export class FastMCP<
   T extends FastMCPSessionAuth = FastMCPSessionAuth,
 > extends FastMCPEventEmitter {
+  public get serverState(): ServerState {
+    return this.#serverState;
+  }
+
   public get sessions(): FastMCPSession<T>[] {
     return this.#sessions;
   }
@@ -1951,6 +1996,8 @@ export class FastMCP<
   #prompts: InputPrompt<T>[] = [];
   #resources: Resource<T>[] = [];
   #resourcesTemplates: InputResourceTemplate<T>[] = [];
+  #serverState: ServerState = ServerState.Stopped;
+
   #sessions: FastMCPSession<T>[] = [];
 
   #tools: Tool<T>[] = [];
@@ -1969,30 +2016,102 @@ export class FastMCP<
   public addPrompt<const Args extends InputPromptArgument<T>[]>(
     prompt: InputPrompt<T, Args>,
   ) {
+    this.#prompts = this.#prompts.filter((p) => p.name !== prompt.name);
     this.#prompts.push(prompt);
+    if (this.#serverState === ServerState.Running) {
+      this.#promptsListChanged(this.#prompts);
+    }
   }
-
+  /**
+   * Adds prompts to the server.
+   */
+  public addPrompts<const Args extends InputPromptArgument<T>[]>(
+    prompts: InputPrompt<T, Args>[],
+  ) {
+    for (const prompt of prompts) {
+      this.#prompts = this.#prompts.filter((p) => p.name !== prompt.name);
+      this.#prompts.push(prompt);
+    }
+    if (this.#serverState === ServerState.Running) {
+      this.#promptsListChanged(this.#prompts);
+    }
+  }
   /**
    * Adds a resource to the server.
    */
   public addResource(resource: Resource<T>) {
-    this.#resources.push(resource);
-  }
+    this.#resources = this.#resources.filter((r) => r.name !== resource.name);
 
+    this.#resources.push(resource);
+    if (this.#serverState === ServerState.Running) {
+      this.#resourcesListChanged(this.#resources);
+    }
+  }
+  /**
+   * Adds resources to the server.
+   */
+  public addResources(resources: Resource<T>[]) {
+    for (const resource of resources) {
+      this.#resources = this.#resources.filter((r) => r.name !== resource.name);
+      this.#resources.push(resource);
+    }
+    if (this.#serverState === ServerState.Running) {
+      this.#resourcesListChanged(this.#resources);
+    }
+  }
   /**
    * Adds a resource template to the server.
    */
   public addResourceTemplate<
     const Args extends InputResourceTemplateArgument[],
   >(resource: InputResourceTemplate<T, Args>) {
-    this.#resourcesTemplates.push(resource);
-  }
+    this.#resourcesTemplates = this.#resourcesTemplates.filter(
+      (t) => t.name !== resource.name,
+    );
 
+    this.#resourcesTemplates.push(resource);
+    if (this.#serverState === ServerState.Running) {
+      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
+    }
+  }
+  /**
+   * Adds resource templates to the server.
+   */
+  public addResourceTemplates<
+    const Args extends InputResourceTemplateArgument[],
+  >(resources: InputResourceTemplate<T, Args>[]) {
+    for (const resource of resources) {
+      this.#resourcesTemplates = this.#resourcesTemplates.filter(
+        (t) => t.name !== resource.name,
+      );
+      this.#resourcesTemplates.push(resource);
+    }
+    if (this.#serverState === ServerState.Running) {
+      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
+    }
+  }
   /**
    * Adds a tool to the server.
    */
   public addTool<Params extends ToolParameters>(tool: Tool<T, Params>) {
+    // Remove existing tool with the same name
+    this.#tools = this.#tools.filter((t) => t.name !== tool.name);
     this.#tools.push(tool as unknown as Tool<T>);
+    if (this.#serverState === ServerState.Running) {
+      this.#toolsListChanged(this.#tools);
+    }
+  }
+  /**
+   * Adds tools to the server.
+   */
+  public addTools<Params extends ToolParameters>(tools: Tool<T, Params>[]) {
+    for (const tool of tools) {
+      this.#tools = this.#tools.filter((t) => t.name !== tool.name);
+      this.#tools.push(tool as unknown as Tool<T>);
+    }
+    if (this.#serverState === ServerState.Running) {
+      this.#toolsListChanged(this.#tools);
+    }
   }
 
   /**
@@ -2057,6 +2176,93 @@ export class FastMCP<
     }
 
     throw new UnexpectedStateError(`Resource not found: ${uri}`, { uri });
+  }
+  /**
+   * Removes a prompt from the server.
+   */
+  public removePrompt(name: string) {
+    this.#prompts = this.#prompts.filter((p) => p.name !== name);
+    if (this.#serverState === ServerState.Running) {
+      this.#promptsListChanged(this.#prompts);
+    }
+  }
+  /**
+   * Removes prompts from the server.
+   */
+  public removePrompts(names: string[]) {
+    for (const name of names) {
+      this.#prompts = this.#prompts.filter((p) => p.name !== name);
+    }
+    if (this.#serverState === ServerState.Running) {
+      this.#promptsListChanged(this.#prompts);
+    }
+  }
+  /**
+   * Removes a resource from the server.
+   */
+  public removeResource(name: string) {
+    this.#resources = this.#resources.filter((r) => r.name !== name);
+    if (this.#serverState === ServerState.Running) {
+      this.#resourcesListChanged(this.#resources);
+    }
+  }
+
+  /**
+   * Removes resources from the server.
+   */
+  public removeResources(names: string[]) {
+    for (const name of names) {
+      this.#resources = this.#resources.filter((r) => r.name !== name);
+    }
+    if (this.#serverState === ServerState.Running) {
+      this.#resourcesListChanged(this.#resources);
+    }
+  }
+  /**
+   * Removes a resource template from the server.
+   */
+  public removeResourceTemplate(name: string) {
+    this.#resourcesTemplates = this.#resourcesTemplates.filter(
+      (t) => t.name !== name,
+    );
+    if (this.#serverState === ServerState.Running) {
+      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
+    }
+  }
+  /**
+   * Removes resource templates from the server.
+   */
+  public removeResourceTemplates(names: string[]) {
+    for (const name of names) {
+      this.#resourcesTemplates = this.#resourcesTemplates.filter(
+        (t) => t.name !== name,
+      );
+    }
+    if (this.#serverState === ServerState.Running) {
+      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
+    }
+  }
+  /**
+   * Removes a tool from the server.
+   */
+  public removeTool(name: string) {
+    // Remove existing tool with the same name
+    this.#tools = this.#tools.filter((t) => t.name !== name);
+    if (this.#serverState === ServerState.Running) {
+      this.#toolsListChanged(this.#tools);
+    }
+  }
+
+  /**
+   * Removes tools from the server.
+   */
+  public removeTools(names: string[]) {
+    for (const name of names) {
+      this.#tools = this.#tools.filter((t) => t.name !== name);
+    }
+    if (this.#serverState === ServerState.Running) {
+      this.#toolsListChanged(this.#tools);
+    }
   }
 
   /**
@@ -2142,6 +2348,7 @@ export class FastMCP<
       this.emit("connect", {
         session: session as FastMCPSession<FastMCPSessionAuth>,
       });
+      this.#serverState = ServerState.Running;
     } else if (config.transportType === "httpStream") {
       const httpConfig = config.httpStream;
 
@@ -2252,6 +2459,7 @@ export class FastMCP<
           `[FastMCP info] server is running on HTTP Stream at http://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
         );
       }
+      this.#serverState = ServerState.Running;
     } else {
       throw new Error("Invalid transport type");
     }
@@ -2264,6 +2472,7 @@ export class FastMCP<
     if (this.#httpStreamServer) {
       await this.#httpStreamServer.close();
     }
+    this.#serverState = ServerState.Stopped;
   }
 
   /**
@@ -2508,6 +2717,14 @@ export class FastMCP<
     return { transportType: "stdio" as const };
   }
 
+  /**
+   * Notifies all sessions that the prompts list has changed.
+   */
+  #promptsListChanged(prompts: Prompt<T>[]) {
+    for (const session of this.#sessions) {
+      session.promptsListChanged(prompts);
+    }
+  }
   #removeSession(session: FastMCPSession<T>): void {
     const sessionIndex = this.#sessions.indexOf(session);
 
@@ -2516,6 +2733,30 @@ export class FastMCP<
       this.emit("disconnect", {
         session: session as FastMCPSession<FastMCPSessionAuth>,
       });
+    }
+  }
+  /**
+   * Notifies all sessions that the resources list has changed.
+   */
+  #resourcesListChanged(resources: Resource<T>[]) {
+    for (const session of this.#sessions) {
+      session.resourcesListChanged(resources);
+    }
+  }
+  /**
+   * Notifies all sessions that the resource templates list has changed.
+   */
+  #resourceTemplatesListChanged(templates: InputResourceTemplate<T>[]) {
+    for (const session of this.#sessions) {
+      session.resourceTemplatesListChanged(templates);
+    }
+  }
+  /**
+   * Notifies all sessions that the tools list has changed.
+   */
+  #toolsListChanged(tools: Tool<T>[]) {
+    for (const session of this.#sessions) {
+      session.toolsListChanged(tools);
     }
   }
 }
