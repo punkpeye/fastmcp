@@ -1249,10 +1249,18 @@ export class FastMCPSession<
     this.triggerListChangedNotification("notifications/tools/list_changed");
   }
 
-  triggerListChangedNotification(method: string) {
-    this.#server.notification({
-      method,
-    });
+  async triggerListChangedNotification(method: string) {
+    try {
+      await this.#server.notification({
+        method,
+      });
+    } catch (error) {
+      this.#logger.error(
+        `[FastMCP error] failed to send ${method} notification.\n\n${
+          error instanceof Error ? error.stack : JSON.stringify(error)
+        }`,
+      );
+    }
   }
 
   public waitForReady(): Promise<void> {
@@ -2028,10 +2036,10 @@ export class FastMCP<
   public addPrompts<const Args extends InputPromptArgument<T>[]>(
     prompts: InputPrompt<T, Args>[],
   ) {
-    for (const prompt of prompts) {
-      this.#prompts = this.#prompts.filter((p) => p.name !== prompt.name);
-      this.#prompts.push(prompt);
-    }
+    const newPromptNames = new Set(prompts.map((prompt) => prompt.name));
+    this.#prompts = this.#prompts.filter((p) => !newPromptNames.has(p.name));
+    this.#prompts.push(...prompts);
+
     if (this.#serverState === ServerState.Running) {
       this.#promptsListChanged(this.#prompts);
     }
@@ -2051,10 +2059,14 @@ export class FastMCP<
    * Adds resources to the server.
    */
   public addResources(resources: Resource<T>[]) {
-    for (const resource of resources) {
-      this.#resources = this.#resources.filter((r) => r.name !== resource.name);
-      this.#resources.push(resource);
-    }
+    const newResourceNames = new Set(
+      resources.map((resource) => resource.name),
+    );
+    this.#resources = this.#resources.filter(
+      (r) => !newResourceNames.has(r.name),
+    );
+    this.#resources.push(...resources);
+
     if (this.#serverState === ServerState.Running) {
       this.#resourcesListChanged(this.#resources);
     }
@@ -2080,12 +2092,14 @@ export class FastMCP<
   public addResourceTemplates<
     const Args extends InputResourceTemplateArgument[],
   >(resources: InputResourceTemplate<T, Args>[]) {
-    for (const resource of resources) {
-      this.#resourcesTemplates = this.#resourcesTemplates.filter(
-        (t) => t.name !== resource.name,
-      );
-      this.#resourcesTemplates.push(resource);
-    }
+    const newResourceTemplateNames = new Set(
+      resources.map((resource) => resource.name),
+    );
+    this.#resourcesTemplates = this.#resourcesTemplates.filter(
+      (t) => !newResourceTemplateNames.has(t.name),
+    );
+    this.#resourcesTemplates.push(...resources);
+
     if (this.#serverState === ServerState.Running) {
       this.#resourceTemplatesListChanged(this.#resourcesTemplates);
     }
@@ -2105,10 +2119,10 @@ export class FastMCP<
    * Adds tools to the server.
    */
   public addTools<Params extends ToolParameters>(tools: Tool<T, Params>[]) {
-    for (const tool of tools) {
-      this.#tools = this.#tools.filter((t) => t.name !== tool.name);
-      this.#tools.push(tool as unknown as Tool<T>);
-    }
+    const newToolNames = new Set(tools.map((tool) => tool.name));
+    this.#tools = this.#tools.filter((t) => !newToolNames.has(t.name));
+    this.#tools.push(...(tools as unknown as Tool<T>[]));
+
     if (this.#serverState === ServerState.Running) {
       this.#toolsListChanged(this.#tools);
     }
