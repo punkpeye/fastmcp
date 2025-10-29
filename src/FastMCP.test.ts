@@ -4601,40 +4601,36 @@ test(
   },
 );
 
-test(
-  "CORS configuration: disabled CORS",
-  { timeout: 20000 },
-  async () => {
-    const port = await getRandomPort();
-    const server = new FastMCP({
-      name: "Test No CORS",
-      version: "1.0.0",
-    });
+test("CORS configuration: disabled CORS", { timeout: 20000 }, async () => {
+  const port = await getRandomPort();
+  const server = new FastMCP({
+    name: "Test No CORS",
+    version: "1.0.0",
+  });
 
-    // Start server with CORS disabled
-    await server.start({
-      httpStream: {
-        cors: false,
-        port,
+  // Start server with CORS disabled
+  await server.start({
+    httpStream: {
+      cors: false,
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Make an OPTIONS preflight request
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      headers: {
+        "Access-Control-Request-Method": "POST",
+        Origin: "http://example.com",
       },
-      transportType: "httpStream",
+      method: "OPTIONS",
     });
 
-    try {
-      // Make an OPTIONS preflight request
-      const response = await fetch(`http://localhost:${port}/mcp`, {
-        headers: {
-          "Access-Control-Request-Method": "POST",
-          Origin: "http://example.com",
-        },
-        method: "OPTIONS",
-      });
-
-      // Verify CORS headers are NOT present when disabled
-      expect(response.headers.get("access-control-allow-origin")).toBeNull();
-      expect(response.headers.get("access-control-allow-methods")).toBeNull();
-    } finally {
-      await server.stop();
-    }
-  },
-);
+    // Verify CORS headers are NOT present when disabled
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response.headers.get("access-control-allow-methods")).toBeNull();
+  } finally {
+    await server.stop();
+  }
+});

@@ -37,7 +37,9 @@ console.log("\n=== Example 1: Default CORS Settings ===");
 console.log("CORS is enabled by default with permissive settings:");
 console.log("- origin: '*' (all origins allowed)");
 console.log("- methods: ['GET', 'POST', 'OPTIONS']");
-console.log("- allowedHeaders: 'Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id'");
+console.log(
+  "- allowedHeaders: 'Content-Type, Authorization, Accept, Mcp-Session-Id, Last-Event-Id'",
+);
 console.log("- credentials: true");
 console.log("- exposedHeaders: ['Mcp-Session-Id']");
 
@@ -82,7 +84,9 @@ customCorsServer.start({
   transportType: "httpStream",
 });
 
-console.log(`Custom CORS server running on http://localhost:${PORT_CUSTOM}/mcp`);
+console.log(
+  `Custom CORS server running on http://localhost:${PORT_CUSTOM}/mcp`,
+);
 
 // Example 3: Dynamic origin validation with function
 console.log("\n=== Example 3: Dynamic Origin Validation ===");
@@ -110,8 +114,10 @@ dynamicCorsServer.start({
       // Use a function to dynamically validate origins
       origin: (origin: string) => {
         // Allow all localhost origins and example.com
-        return origin.startsWith("http://localhost") || 
-               origin.endsWith(".example.com");
+        return (
+          origin.startsWith("http://localhost") ||
+          origin.endsWith(".example.com")
+        );
       },
     },
     port: PORT_DYNAMIC,
@@ -119,7 +125,9 @@ dynamicCorsServer.start({
   transportType: "httpStream",
 });
 
-console.log(`Dynamic CORS server running on http://localhost:${PORT_DYNAMIC}/mcp`);
+console.log(
+  `Dynamic CORS server running on http://localhost:${PORT_DYNAMIC}/mcp`,
+);
 
 // Example 4: Disable CORS
 console.log("\n=== Example 4: CORS Disabled ===");
@@ -160,11 +168,15 @@ server.start({
   transportType: "httpStream",
 });
 
-console.log(`\nDefault CORS server running on http://localhost:${PORT_DEFAULT}/mcp`);
+console.log(
+  `\nDefault CORS server running on http://localhost:${PORT_DEFAULT}/mcp`,
+);
 
 console.log("\n=== Testing the servers ===");
 console.log("You can test CORS by making requests from different origins:");
-console.log("\nFrom browser console (assuming you're on http://localhost:3000):");
+console.log(
+  "\nFrom browser console (assuming you're on http://localhost:3000):",
+);
 console.log(`
 fetch('http://localhost:${PORT_CUSTOM}/mcp', {
   method: 'POST',
@@ -192,7 +204,9 @@ curl -X OPTIONS http://localhost:${PORT_CUSTOM}/mcp \\
 
 console.log("\n=== Summary ===");
 console.log("CORS options available:");
-console.log("- origin: string | string[] | ((origin: string) => boolean) - Control allowed origins");
+console.log(
+  "- origin: string | string[] | ((origin: string) => boolean) - Control allowed origins",
+);
 console.log("- methods: string[] - Allowed HTTP methods");
 console.log("- allowedHeaders: string | string[] - Allowed request headers");
 console.log("- credentials: boolean - Allow credentials");
@@ -200,4 +214,3 @@ console.log("- exposedHeaders: string[] - Headers exposed to the client");
 console.log("- maxAge: number - Preflight cache duration in seconds");
 console.log("\nSet cors: false to disable CORS entirely");
 console.log("Omit cors option to use default permissive settings");
-
