@@ -4387,3 +4387,254 @@ test("tools can access client info", async () => {
     },
   });
 });
+
+test(
+  "CORS configuration: default CORS headers",
+  { timeout: 20000 },
+  async () => {
+    const port = await getRandomPort();
+    const server = new FastMCP({
+      name: "Test CORS",
+      version: "1.0.0",
+    });
+
+    // Start server with default CORS (should be enabled)
+    await server.start({
+      httpStream: {
+        port,
+      },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Make an OPTIONS preflight request to check CORS headers
+      const response = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          "Access-Control-Request-Method": "POST",
+          Origin: "http://example.com",
+        },
+        method: "OPTIONS",
+      });
+
+      // Check that CORS headers are present (default behavior)
+      expect(response.headers.get("access-control-allow-origin")).toBeTruthy();
+      expect(response.headers.get("access-control-allow-methods")).toBeTruthy();
+    } finally {
+      await server.stop();
+    }
+  },
+);
+
+test(
+  "CORS configuration: custom CORS settings",
+  { timeout: 20000 },
+  async () => {
+    const port = await getRandomPort();
+    const server = new FastMCP({
+      name: "Test Custom CORS",
+      version: "1.0.0",
+    });
+
+    // Start server with custom CORS configuration
+    await server.start({
+      httpStream: {
+        cors: {
+          allowedHeaders: ["Content-Type", "X-Custom-Header"],
+          credentials: true,
+          exposedHeaders: ["X-Response-Header"],
+          maxAge: 3600,
+          methods: ["GET", "POST"],
+          origin: "http://localhost:3000",
+        },
+        port,
+      },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Make an OPTIONS preflight request with matching origin
+      const response = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          "Access-Control-Request-Method": "POST",
+          Origin: "http://localhost:3000",
+        },
+        method: "OPTIONS",
+      });
+
+      // Verify custom CORS headers
+      expect(response.headers.get("access-control-allow-origin")).toBe(
+        "http://localhost:3000",
+      );
+      expect(response.headers.get("access-control-allow-methods")).toContain(
+        "POST",
+      );
+      expect(response.headers.get("access-control-allow-credentials")).toBe(
+        "true",
+      );
+      expect(response.headers.get("access-control-max-age")).toBe("3600");
+    } finally {
+      await server.stop();
+    }
+  },
+);
+
+test(
+  "CORS configuration: CORS with array of origins",
+  { timeout: 20000 },
+  async () => {
+    const port = await getRandomPort();
+    const server = new FastMCP({
+      name: "Test CORS Array",
+      version: "1.0.0",
+    });
+
+    // Start server with array of allowed origins
+    await server.start({
+      httpStream: {
+        cors: {
+          origin: ["http://localhost:3000", "https://example.com"],
+        },
+        port,
+      },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Test with allowed origin
+      const response1 = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          Origin: "http://localhost:3000",
+        },
+        method: "OPTIONS",
+      });
+      expect(response1.headers.get("access-control-allow-origin")).toBe(
+        "http://localhost:3000",
+      );
+
+      // Test with another allowed origin
+      const response2 = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          Origin: "https://example.com",
+        },
+        method: "OPTIONS",
+      });
+      expect(response2.headers.get("access-control-allow-origin")).toBe(
+        "https://example.com",
+      );
+
+      // Test with disallowed origin
+      const response3 = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          Origin: "http://unauthorized.com",
+        },
+        method: "OPTIONS",
+      });
+      // When origin is not allowed, the header is either not set or set to "false"
+      const origin3 = response3.headers.get("access-control-allow-origin");
+      expect(origin3 === null || origin3 === "false").toBe(true);
+    } finally {
+      await server.stop();
+    }
+  },
+);
+
+test(
+  "CORS configuration: CORS with function validator",
+  { timeout: 20000 },
+  async () => {
+    const port = await getRandomPort();
+    const server = new FastMCP({
+      name: "Test CORS Function",
+      version: "1.0.0",
+    });
+
+    // Start server with function-based origin validation
+    await server.start({
+      httpStream: {
+        cors: {
+          origin: (origin: string) => {
+            // Allow all localhost origins
+            return origin.startsWith("http://localhost");
+          },
+        },
+        port,
+      },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Test with allowed localhost origin
+      const response1 = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          Origin: "http://localhost:3000",
+        },
+        method: "OPTIONS",
+      });
+      expect(response1.headers.get("access-control-allow-origin")).toBe(
+        "http://localhost:3000",
+      );
+
+      // Test with another allowed localhost origin
+      const response2 = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          Origin: "http://localhost:8080",
+        },
+        method: "OPTIONS",
+      });
+      expect(response2.headers.get("access-control-allow-origin")).toBe(
+        "http://localhost:8080",
+      );
+
+      // Test with disallowed origin
+      const response3 = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          Origin: "https://example.com",
+        },
+        method: "OPTIONS",
+      });
+      // When origin is not allowed, the header is either not set or set to "false"
+      const origin3 = response3.headers.get("access-control-allow-origin");
+      expect(origin3 === null || origin3 === "false").toBe(true);
+    } finally {
+      await server.stop();
+    }
+  },
+);
+
+test(
+  "CORS configuration: disabled CORS",
+  { timeout: 20000 },
+  async () => {
+    const port = await getRandomPort();
+    const server = new FastMCP({
+      name: "Test No CORS",
+      version: "1.0.0",
+    });
+
+    // Start server with CORS disabled
+    await server.start({
+      httpStream: {
+        cors: false,
+        port,
+      },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Make an OPTIONS preflight request
+      const response = await fetch(`http://localhost:${port}/mcp`, {
+        headers: {
+          "Access-Control-Request-Method": "POST",
+          Origin: "http://example.com",
+        },
+        method: "OPTIONS",
+      });
+
+      // Verify CORS headers are NOT present when disabled
+      expect(response.headers.get("access-control-allow-origin")).toBeNull();
+      expect(response.headers.get("access-control-allow-methods")).toBeNull();
+    } finally {
+      await server.stop();
+    }
+  },
+);
