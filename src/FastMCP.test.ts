@@ -4387,3 +4387,153 @@ test("tools can access client info", async () => {
     },
   });
 });
+
+test("OAuth config is passed to mcp-proxy and returns RFC 9728 compliant WWW-Authenticate header", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    authenticate: async (request) => {
+      // Simulate authentication failure for testing
+      const authHeader = request.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return undefined;
+      }
+      return { userId: "test-user" };
+    },
+    name: "Test Server",
+    oauth: {
+      authorizationServer: {
+        authorizationEndpoint: "https://auth.example.com/oauth/authorize",
+        issuer: "https://auth.example.com",
+        responseTypesSupported: ["code"],
+        tokenEndpoint: "https://auth.example.com/oauth/token",
+      },
+      enabled: true,
+      protectedResource: {
+        authorizationServers: ["https://auth.example.com"],
+        resource: "mcp://test-server",
+      },
+    },
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async () => {
+      return "test result";
+    },
+    name: "test_tool",
+  });
+
+  await server.start({
+    httpStream: { port, stateless: true },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Make a request without authentication to trigger 401
+    const initResponse = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test-client", version: "1.0.0" },
+          protocolVersion: "2024-11-05",
+        },
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    // Should return 401 Unauthorized
+    expect(initResponse.status).toBe(401);
+
+    // Check for WWW-Authenticate header with Bearer scheme and resource_metadata
+    // Per RFC 9728 Section 5.1
+    const wwwAuthHeader = initResponse.headers.get("WWW-Authenticate");
+    expect(wwwAuthHeader).toBeTruthy();
+    expect(wwwAuthHeader).toContain("Bearer");
+    expect(wwwAuthHeader).toContain(
+      'resource_metadata="mcp://test-server/.well-known/oauth-protected-resource"',
+    );
+
+    // Check response body
+    const errorBody = (await initResponse.json()) as {
+      error: { code: number; message: string };
+      jsonrpc: string;
+    };
+    expect(errorBody.error).toBeDefined();
+    expect(errorBody.error.code).toBe(-32000);
+    expect(errorBody.jsonrpc).toBe("2.0");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("OAuth config with only protectedResource returns Bearer WWW-Authenticate", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    authenticate: async () => {
+      // Always fail authentication for this test
+      return undefined;
+    },
+    name: "Test Server",
+    oauth: {
+      enabled: true,
+      protectedResource: {
+        authorizationServers: ["https://auth.example.com"],
+        resource: "mcp://test-server",
+      },
+    },
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool",
+    execute: async () => {
+      return "test result";
+    },
+    name: "test_tool",
+  });
+
+  await server.start({
+    httpStream: { port, stateless: true },
+    transportType: "httpStream",
+  });
+
+  try {
+    const initResponse = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test-client", version: "1.0.0" },
+          protocolVersion: "2024-11-05",
+        },
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(initResponse.status).toBe(401);
+
+    // Check for WWW-Authenticate header with Bearer scheme
+    const wwwAuthHeader = initResponse.headers.get("WWW-Authenticate");
+    expect(wwwAuthHeader).toBeTruthy();
+    expect(wwwAuthHeader).toContain("Bearer");
+    expect(wwwAuthHeader).toContain(
+      'resource_metadata="mcp://test-server/.well-known/oauth-protected-resource"',
+    );
+  } finally {
+    await server.stop();
+  }
+});
