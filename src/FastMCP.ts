@@ -2399,6 +2399,16 @@ export class FastMCP<
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
           host: httpConfig.host,
+          ...(this.#options.oauth?.enabled &&
+          this.#options.oauth.protectedResource?.resource
+            ? {
+                oauth: {
+                  protectedResource: {
+                    resource: this.#options.oauth.protectedResource.resource,
+                  },
+                },
+              }
+            : {}),
           // In stateless mode, we don't track sessions
           onClose: async () => {
             // No session tracking in stateless mode
@@ -2437,6 +2447,16 @@ export class FastMCP<
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
           host: httpConfig.host,
+          ...(this.#options.oauth?.enabled &&
+          this.#options.oauth.protectedResource?.resource
+            ? {
+                oauth: {
+                  protectedResource: {
+                    resource: this.#options.oauth.protectedResource.resource,
+                  },
+                },
+              }
+            : {}),
           onClose: async (session) => {
             const sessionIndex = this.#sessions.indexOf(session);
 
