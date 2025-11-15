@@ -1,6 +1,6 @@
 {
   "name": "firecrawl-fastmcp",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "dist/FastMCP.js",
   "scripts": {
     "build": "tsup",
@@ -24,7 +24,7 @@
   "module": "dist/FastMCP.js",
   "types": "dist/FastMCP.d.ts",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.18.0",
+    "@modelcontextprotocol/sdk": "1.18.0",
     "@standard-schema/spec": "^1.0.0",
     "execa": "^9.6.0",
     "file-type": "^21.0.0",
