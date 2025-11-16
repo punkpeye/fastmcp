@@ -1812,6 +1812,40 @@ test("completes template resource arguments", async () => {
   });
 });
 
+test("advertises completions capability to prevent Cursor startup error", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      // The server should advertise completions capability, allowing Cursor to start
+      // Verify that completion requests work without crashing
+      const response = await client.complete({
+        argument: {
+          name: "test",
+          value: "value",
+        },
+        ref: {
+          name: "nonexistent-prompt",
+          type: "ref/prompt",
+        },
+      });
+
+      // Should return empty completion instead of crashing
+      expect(response).toEqual({
+        completion: {
+          values: [],
+        },
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      return server;
+    },
+  });
+});
+
 test("lists resource templates", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
