@@ -1404,13 +1404,16 @@ export class FastMCPSession<
           (prompt) => prompt.name === request.params.ref.name,
         );
 
-        if (!prompt || !prompt.complete) {
-          // Return empty completion instead of throwing error
-          return {
-            completion: {
-              values: [],
-            },
-          };
+        if (!prompt) {
+          throw new UnexpectedStateError("Unknown prompt", {
+            request,
+          });
+        }
+
+        if (!prompt.complete) {
+          throw new UnexpectedStateError("Prompt does not support completion", {
+            request,
+          });
         }
 
         const completion = CompletionZodSchema.parse(
@@ -1431,13 +1434,23 @@ export class FastMCPSession<
           (resource) => resource.uriTemplate === request.params.ref.uri,
         );
 
-        if (!resource || !("uriTemplate" in resource) || !resource.complete) {
-          // Return empty completion instead of throwing error
-          return {
-            completion: {
-              values: [],
+        if (!resource) {
+          throw new UnexpectedStateError("Unknown resource", {
+            request,
+          });
+        }
+
+        if (!("uriTemplate" in resource)) {
+          throw new UnexpectedStateError("Unexpected resource");
+        }
+
+        if (!resource.complete) {
+          throw new UnexpectedStateError(
+            "Resource does not support completion",
+            {
+              request,
             },
-          };
+          );
         }
 
         const completion = CompletionZodSchema.parse(
@@ -1453,13 +1466,9 @@ export class FastMCPSession<
         };
       }
 
-      // Return empty completion for unsupported completion request types
-      // This allows Cursor to work even if we don't support all completion types
-      return {
-        completion: {
-          values: [],
-        },
-      };
+      throw new UnexpectedStateError("Unexpected completion request", {
+        request,
+      });
     });
   }
 
