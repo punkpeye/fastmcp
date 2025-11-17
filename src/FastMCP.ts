@@ -1048,6 +1048,8 @@ export class FastMCPSession<
 
     this.#capabilities.logging = {};
 
+    this.#capabilities.completions = {};
+
     this.#server = new Server(
       { name: name, version: version },
       { capabilities: this.#capabilities, instructions: instructions },
