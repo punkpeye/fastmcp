@@ -160,6 +160,32 @@ export interface OAuthProviderConfig {
 }
 
 /**
+ * Custom claims passthrough configuration
+ */
+export interface CustomClaimsPassthroughConfig {
+  /** Enable passthrough from upstream access token (if JWT format). Default: true */
+  fromAccessToken?: boolean;
+
+  /** Enable passthrough from upstream ID token. Default: true */
+  fromIdToken?: boolean;
+
+  /** Prefix upstream claims to prevent collisions. Default: false (no prefix) */
+  claimPrefix?: string | false;
+
+  /** Only passthrough these specific claims (allowlist). Default: undefined (allow all non-protected) */
+  allowedClaims?: string[];
+
+  /** Never passthrough these claims (blocklist, in addition to protected claims). Default: [] */
+  blockedClaims?: string[];
+
+  /** Maximum length for claim values. Default: 2000 */
+  maxClaimValueSize?: number;
+
+  /** Allow nested objects/arrays in claims. Default: false (only primitives) */
+  allowComplexClaims?: boolean;
+}
+
+/**
  * Configuration for the OAuth Proxy
  */
 export interface OAuthProxyConfig {
@@ -173,6 +199,15 @@ export interface OAuthProxyConfig {
   consentRequired?: boolean;
   /** Secret key for signing consent cookies */
   consentSigningKey?: string;
+  /**
+   * Custom claims passthrough configuration.
+   * When enabled (default), extracts custom claims from upstream access token and ID token
+   * and includes them in the proxy's issued JWT tokens.
+   * This enables authorization based on upstream roles, permissions, etc.
+   * Set to false to disable claims passthrough entirely.
+   * Default: true (enabled with default settings)
+   */
+  customClaimsPassthrough?: CustomClaimsPassthroughConfig | boolean;
   /** Enable token swap pattern (default: true) - issues short-lived JWTs instead of passing through upstream tokens */
   enableTokenSwap?: boolean;
   /** Encryption key for token storage (default: auto-generated). Set to false to disable encryption. */
