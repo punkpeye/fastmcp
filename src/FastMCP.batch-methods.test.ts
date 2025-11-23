@@ -40,19 +40,19 @@ const runWithTestServer = async ({
     transportType: "httpStream",
   });
 
-  try {
-    const client = createClient
-      ? await createClient()
-      : new Client(
-          {
-            name: "example-client",
-            version: "1.0.0",
-          },
-          {
-            capabilities: {},
-          },
-        );
+  const client = createClient
+    ? await createClient()
+    : new Client(
+        {
+          name: "example-client",
+          version: "1.0.0",
+        },
+        {
+          capabilities: {},
+        },
+      );
 
+  try {
     const transport = new SSEClientTransport(
       new URL(`http://localhost:${port}/sse`),
     );
@@ -69,6 +69,11 @@ const runWithTestServer = async ({
 
     await run({ client, server, session });
   } finally {
+    try {
+      await client.close();
+    } catch {
+      // Ignore errors during client cleanup
+    }
     await server.stop();
   }
 
