@@ -21,6 +21,16 @@
   "description": "A TypeScript framework for building MCP servers.",
   "module": "dist/FastMCP.js",
   "types": "dist/FastMCP.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/FastMCP.js",
+      "types": "./dist/FastMCP.d.ts"
+    },
+    "./auth": {
+      "import": "./dist/auth/index.js",
+      "types": "./dist/auth/index.d.ts"
+    }
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.2",
     "@standard-schema/spec": "^1.0.0",
@@ -35,6 +45,14 @@
     "yargs": "^18.0.0",
     "zod": "^3.25.76",
     "zod-to-json-schema": "^3.24.6"
+  },
+  "peerDependencies": {
+    "jose": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "jose": {
+      "optional": true
+    }
   },
   "repository": {
     "url": "https://github.com/punkpeye/fastmcp"
@@ -85,7 +103,8 @@
   "tsup": {
     "entry": [
       "src/FastMCP.ts",
-      "src/bin/fastmcp.ts"
+      "src/bin/fastmcp.ts",
+      "src/auth/index.ts"
     ],
     "format": [
       "esm"
