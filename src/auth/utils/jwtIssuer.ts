@@ -34,6 +34,8 @@ export interface JWTClaims {
   jti: string;
   /** Scopes */
   scope: string[];
+  /** Additional custom claims from upstream tokens */
+  [key: string]: unknown;
 }
 
 /**
@@ -99,7 +101,11 @@ export class JWTIssuer {
   /**
    * Issue an access token
    */
-  issueAccessToken(clientId: string, scope: string[]): string {
+  issueAccessToken(
+    clientId: string,
+    scope: string[],
+    additionalClaims?: Record<string, unknown>,
+  ): string {
     const now = Math.floor(Date.now() / 1000);
     const jti = this.generateJti();
 
@@ -111,6 +117,8 @@ export class JWTIssuer {
       iss: this.issuer,
       jti,
       scope,
+      // Merge additional claims (custom claims from upstream)
+      ...(additionalClaims || {}),
     };
 
     return this.signToken(claims);
@@ -119,7 +127,11 @@ export class JWTIssuer {
   /**
    * Issue a refresh token
    */
-  issueRefreshToken(clientId: string, scope: string[]): string {
+  issueRefreshToken(
+    clientId: string,
+    scope: string[],
+    additionalClaims?: Record<string, unknown>,
+  ): string {
     const now = Math.floor(Date.now() / 1000);
     const jti = this.generateJti();
 
@@ -131,6 +143,8 @@ export class JWTIssuer {
       iss: this.issuer,
       jti,
       scope,
+      // Merge additional claims (custom claims from upstream)
+      ...(additionalClaims || {}),
     };
 
     return this.signToken(claims);
