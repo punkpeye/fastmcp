@@ -3,22 +3,12 @@
  * Provides persistent file-based storage for OAuth tokens and transaction state
  */
 
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "fs/promises";
 import { join } from "path";
 
 import type { TokenStorage } from "../types.js";
 
-interface StorageEntry {
-  expiresAt: number;
-  value: unknown;
-}
-
 export interface DiskStoreOptions {
-  /**
-   * Directory path for storing data
-   */
-  directory: string;
-
   /**
    * How often to run cleanup (in milliseconds)
    * @default 60000 (1 minute)
@@ -26,10 +16,20 @@ export interface DiskStoreOptions {
   cleanupIntervalMs?: number;
 
   /**
+   * Directory path for storing data
+   */
+  directory: string;
+
+  /**
    * File extension for stored files
    * @default ".json"
    */
   fileExtension?: string;
+}
+
+interface StorageEntry {
+  expiresAt: number;
+  value: unknown;
 }
 
 /**
@@ -186,9 +186,7 @@ export class DiskStore implements TokenStorage {
     try {
       const stats = await stat(this.directory);
       if (!stats.isDirectory()) {
-        throw new Error(
-          `Path ${this.directory} exists but is not a directory`,
-        );
+        throw new Error(`Path ${this.directory} exists but is not a directory`);
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {

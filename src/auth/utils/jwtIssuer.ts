@@ -9,17 +9,11 @@ import { promisify } from "util";
 const pbkdf2Async = promisify(pbkdf2);
 
 /**
- * JWT Header
- */
-interface JWTHeader {
-  alg: string;
-  typ: string;
-}
-
-/**
  * JWT Claims for FastMCP tokens
  */
 export interface JWTClaims {
+  /** Additional custom claims from upstream tokens */
+  [key: string]: unknown;
   /** Audience */
   aud: string;
   /** Client ID */
@@ -34,20 +28,6 @@ export interface JWTClaims {
   jti: string;
   /** Scopes */
   scope: string[];
-  /** Additional custom claims from upstream tokens */
-  [key: string]: unknown;
-}
-
-/**
- * Token validation result
- */
-export interface TokenValidationResult {
-  /** Decoded claims if valid */
-  claims?: JWTClaims;
-  /** Error message if invalid */
-  error?: string;
-  /** Whether token is valid */
-  valid: boolean;
 }
 
 /**
@@ -64,6 +44,26 @@ export interface JWTIssuerConfig {
   refreshTokenTtl?: number;
   /** Secret key for signing tokens */
   signingKey: string;
+}
+
+/**
+ * Token validation result
+ */
+export interface TokenValidationResult {
+  /** Decoded claims if valid */
+  claims?: JWTClaims;
+  /** Error message if invalid */
+  error?: string;
+  /** Whether token is valid */
+  valid: boolean;
+}
+
+/**
+ * JWT Header
+ */
+interface JWTHeader {
+  alg: string;
+  typ: string;
 }
 
 /**

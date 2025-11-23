@@ -25,6 +25,7 @@ The TypeScript implementation is a **comprehensive and faithful port** of the Py
 Python FastMCP includes an **OAuth Client** component for building client applications (CLI tools, desktop apps) that connect to OAuth-protected servers. TypeScript does not include this client-side tooling.
 
 **Key distinction:** OAuth Proxy (server) and OAuth Client (client) serve different purposes:
+
 - **Server-Side (OAuthProxy)**: Protects your MCP server with OAuth authentication
 - **Client-Side (OAuthClient)**: Helps client apps authenticate to protected servers
 
@@ -38,27 +39,27 @@ This section compares server-side OAuth Proxy functionality for **protecting MCP
 
 ## Server-Side Feature Comparison Matrix
 
-| Feature | Python FastMCP | TypeScript FastMCP | Notes |
-|---------|---------------|-------------------|-------|
-| **Core Proxy** | ✅ | ✅ | Identical functionality |
-| **Dynamic Client Registration** | ✅ | ✅ | RFC 7591 compliant |
-| **Authorization Code Flow** | ✅ | ✅ | Full OAuth 2.1 support |
-| **PKCE Support** | ✅ (S256 only) | ✅ (S256 + plain) | TypeScript supports both methods |
-| **Refresh Token Flow** | ✅ | ✅ | Identical |
-| **Token Swap Pattern** | ✅ (default) | ✅ (default) | Both enabled by default |
-| **Consent Screen** | ✅ | ✅ | Both have full HTML UI |
-| **Pre-configured Providers** | ✅ Multiple | ✅ Google, GitHub, Azure | Similar approach |
-| **Storage Interface** | ✅ `AsyncKeyValue` | ✅ `TokenStorage` | Different interface names, same concept |
-| **In-Memory Storage** | ✅ | ✅ | Available in both |
-| **Disk Storage** | ✅ `DiskStore` | ✅ `DiskStore` | Similar implementation |
-| **Encrypted Storage** | ✅ Fernet (default) | ✅ AES-256-GCM (default) | Both encrypt by default |
-| **JWT Issuer** | ✅ python-jose | ✅ Custom HS256 | Different libraries, same functionality |
-| **JWT Algorithms** | ✅ HS256, RS256 | ✅ HS256 (RS256 via jose) | Python built-in, TypeScript optional |
-| **JWKS Support** | ✅ Built-in | ✅ Optional (requires `jose`) | Both supported, TypeScript opt-in |
-| **Automatic Route Registration** | ✅ | ✅ | Seamless integration in both |
-| **Discovery Metadata** | ✅ | ✅ | RFC 8414 compliant |
-| **Error Handling** | ✅ authlib errors | ✅ `OAuthProxyError` | Similar standardized errors |
-| **Token Rotation Tracking** | ✅ Advanced | ⚠️ Basic | Python has more sophisticated tracking |
+| Feature                          | Python FastMCP      | TypeScript FastMCP            | Notes                                   |
+| -------------------------------- | ------------------- | ----------------------------- | --------------------------------------- |
+| **Core Proxy**                   | ✅                  | ✅                            | Identical functionality                 |
+| **Dynamic Client Registration**  | ✅                  | ✅                            | RFC 7591 compliant                      |
+| **Authorization Code Flow**      | ✅                  | ✅                            | Full OAuth 2.1 support                  |
+| **PKCE Support**                 | ✅ (S256 only)      | ✅ (S256 + plain)             | TypeScript supports both methods        |
+| **Refresh Token Flow**           | ✅                  | ✅                            | Identical                               |
+| **Token Swap Pattern**           | ✅ (default)        | ✅ (default)                  | Both enabled by default                 |
+| **Consent Screen**               | ✅                  | ✅                            | Both have full HTML UI                  |
+| **Pre-configured Providers**     | ✅ Multiple         | ✅ Google, GitHub, Azure      | Similar approach                        |
+| **Storage Interface**            | ✅ `AsyncKeyValue`  | ✅ `TokenStorage`             | Different interface names, same concept |
+| **In-Memory Storage**            | ✅                  | ✅                            | Available in both                       |
+| **Disk Storage**                 | ✅ `DiskStore`      | ✅ `DiskStore`                | Similar implementation                  |
+| **Encrypted Storage**            | ✅ Fernet (default) | ✅ AES-256-GCM (default)      | Both encrypt by default                 |
+| **JWT Issuer**                   | ✅ python-jose      | ✅ Custom HS256               | Different libraries, same functionality |
+| **JWT Algorithms**               | ✅ HS256, RS256     | ✅ HS256 (RS256 via jose)     | Python built-in, TypeScript optional    |
+| **JWKS Support**                 | ✅ Built-in         | ✅ Optional (requires `jose`) | Both supported, TypeScript opt-in       |
+| **Automatic Route Registration** | ✅                  | ✅                            | Seamless integration in both            |
+| **Discovery Metadata**           | ✅                  | ✅                            | RFC 8414 compliant                      |
+| **Error Handling**               | ✅ authlib errors   | ✅ `OAuthProxyError`          | Similar standardized errors             |
+| **Token Rotation Tracking**      | ✅ Advanced         | ⚠️ Basic                      | Python has more sophisticated tracking  |
 
 **Result:** TypeScript has **complete server-side parity** with Python for MCP server development.
 
@@ -116,6 +117,7 @@ Dependencies:
 ### Creating an OAuth Proxy
 
 **Python:**
+
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.auth import OAuthProxy
@@ -132,6 +134,7 @@ mcp = FastMCP(name="My Server", auth=auth)
 ```
 
 **TypeScript:**
+
 ```typescript
 import { FastMCP } from "fastmcp";
 import { OAuthProxy } from "fastmcp/auth";
@@ -141,7 +144,7 @@ const auth = new OAuthProxy({
   upstreamTokenEndpoint: "https://provider.com/oauth/token",
   upstreamClientId: "client-id",
   upstreamClientSecret: "client-secret",
-  baseUrl: "https://your-server.com"
+  baseUrl: "https://your-server.com",
 });
 
 const mcp = new FastMCP({
@@ -150,17 +153,19 @@ const mcp = new FastMCP({
     enabled: true,
     authorizationServer: auth.getAuthorizationServerMetadata(),
     proxy: auth,
-  }
+  },
 });
 ```
 
 **Differences:**
+
 - Python: `auth=auth` parameter
 - TypeScript: `oauth.proxy` nested configuration
 
 ### Using Pre-configured Providers
 
 **Python:**
+
 ```python
 from fastmcp.server.auth import GoogleProvider
 
@@ -175,6 +180,7 @@ mcp = FastMCP(name="My Server", auth=auth)
 ```
 
 **TypeScript:**
+
 ```typescript
 import { GoogleProvider } from "fastmcp/auth";
 
@@ -182,7 +188,7 @@ const auth = new GoogleProvider({
   clientId: "xxx.apps.googleusercontent.com",
   clientSecret: "secret",
   baseUrl: "https://your-server.com",
-  scopes: ["openid", "profile", "email"]
+  scopes: ["openid", "profile", "email"],
 });
 
 const mcp = new FastMCP({
@@ -191,7 +197,7 @@ const mcp = new FastMCP({
     enabled: true,
     authorizationServer: auth.getAuthorizationServerMetadata(),
     proxy: auth,
-  }
+  },
 });
 ```
 
@@ -200,6 +206,7 @@ const mcp = new FastMCP({
 ### Token Swap Pattern
 
 **Python (Default Behavior):**
+
 ```python
 auth = OAuthProxy(
     # ... config
@@ -211,6 +218,7 @@ auth = OAuthProxy(
 ```
 
 **TypeScript (Same - Enabled by Default):**
+
 ```typescript
 const auth = new OAuthProxy({
   // ... config
@@ -229,6 +237,7 @@ const upstreamTokens = await auth.loadUpstreamTokens(clientToken);
 ### Storage Configuration
 
 **Python (Encrypted by Default):**
+
 ```python
 from py_key_value.providers import DiskStore
 from py_key_value.middlewares import FernetEncryptionWrapper
@@ -241,6 +250,7 @@ auth = OAuthProxy(
 ```
 
 **TypeScript (Encrypted by Default):**
+
 ```typescript
 import { DiskStore } from "fastmcp/auth";
 
@@ -263,6 +273,7 @@ const auth2 = new OAuthProxy({
 ### JWT Key Derivation
 
 **Python:**
+
 ```python
 from fastmcp.server.auth import derive_key
 
@@ -270,6 +281,7 @@ jwt_key = derive_key(secret, iterations=100000)
 ```
 
 **TypeScript:**
+
 ```typescript
 import { JWTIssuer } from "fastmcp/auth";
 
@@ -280,25 +292,27 @@ const jwtKey = await JWTIssuer.deriveKey(secret, 100000);
 
 ## Default Behaviors
 
-| Aspect | Python | TypeScript | Recommendation |
-|--------|--------|-----------|----------------|
-| **Token Swap** | Enabled | Enabled | ✅ Secure by default |
-| **Storage** | Encrypted Disk | In-Memory (encrypted) | Use DiskStore for production |
-| **Encryption** | Enabled (Fernet) | Enabled (AES-256-GCM) | ✅ Secure by default |
-| **Consent Screen** | Required | Required | ✅ Keep enabled |
-| **PKCE** | S256 only | S256 + plain | Use S256 |
-| **Cleanup Interval** | 60s | 60s | ✅ Same default |
+| Aspect               | Python           | TypeScript            | Recommendation               |
+| -------------------- | ---------------- | --------------------- | ---------------------------- |
+| **Token Swap**       | Enabled          | Enabled               | ✅ Secure by default         |
+| **Storage**          | Encrypted Disk   | In-Memory (encrypted) | Use DiskStore for production |
+| **Encryption**       | Enabled (Fernet) | Enabled (AES-256-GCM) | ✅ Secure by default         |
+| **Consent Screen**   | Required         | Required              | ✅ Keep enabled              |
+| **PKCE**             | S256 only        | S256 + plain          | Use S256                     |
+| **Cleanup Interval** | 60s              | 60s                   | ✅ Same default              |
 
 ## Migration Guide: Python to TypeScript
 
 ### Step 1: Install Dependencies
 
 **Python:**
+
 ```bash
 pip install fastmcp
 ```
 
 **TypeScript:**
+
 ```bash
 npm install fastmcp
 ```
@@ -306,12 +320,14 @@ npm install fastmcp
 ### Step 2: Update Imports
 
 **Python:**
+
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.auth import OAuthProxy, GoogleProvider
 ```
 
 **TypeScript:**
+
 ```typescript
 import { FastMCP } from "fastmcp";
 import { OAuthProxy, GoogleProvider } from "fastmcp/auth";
@@ -320,6 +336,7 @@ import { OAuthProxy, GoogleProvider } from "fastmcp/auth";
 ### Step 3: Convert Configuration
 
 **Python:**
+
 ```python
 auth = GoogleProvider(
     client_id=os.environ["GOOGLE_CLIENT_ID"],
@@ -332,12 +349,13 @@ mcp = FastMCP(name="My Server", auth=auth)
 ```
 
 **TypeScript:**
+
 ```typescript
 const auth = new GoogleProvider({
   clientId: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
   baseUrl: "https://example.com",
-  scopes: ["openid", "profile"]
+  scopes: ["openid", "profile"],
 });
 
 const mcp = new FastMCP({
@@ -346,13 +364,14 @@ const mcp = new FastMCP({
     enabled: true,
     authorizationServer: auth.getAuthorizationServerMetadata(),
     proxy: auth,
-  }
+  },
 });
 ```
 
 ### Step 4: Adjust Storage (If Using Disk)
 
 **Python:**
+
 ```python
 from py_key_value.providers import DiskStore
 
@@ -363,6 +382,7 @@ auth = OAuthProxy(
 ```
 
 **TypeScript:**
+
 ```typescript
 import { DiskStore } from "fastmcp/auth";
 
@@ -377,11 +397,13 @@ const auth = new OAuthProxy({
 ### Step 5: Configure Token Swap (Optional - Enabled by Default)
 
 **Python (automatic):**
+
 ```python
 # Token swap is enabled by default, no config needed
 ```
 
 **TypeScript (also automatic, optionally customize):**
+
 ```typescript
 import { JWTIssuer } from "fastmcp/auth";
 
@@ -396,6 +418,7 @@ const auth = new OAuthProxy({
 ### Step 6: Update Token Access
 
 **Python:**
+
 ```python
 @mcp.tool()
 async def protected_tool(session: Session):
@@ -405,6 +428,7 @@ async def protected_tool(session: Session):
 ```
 
 **TypeScript:**
+
 ```typescript
 server.addTool({
   name: "protected-tool",
@@ -416,9 +440,9 @@ server.addTool({
 
     // Use upstream tokens
     const response = await fetch("https://api.provider.com/user", {
-      headers: { Authorization: `Bearer ${upstreamTokens.accessToken}` }
+      headers: { Authorization: `Bearer ${upstreamTokens.accessToken}` },
     });
-  }
+  },
 });
 ```
 
@@ -430,15 +454,15 @@ This section compares client-side OAuth functionality for **building application
 
 ## Client-Side Feature Comparison Matrix
 
-| Feature | Python FastMCP | TypeScript FastMCP | Notes |
-|---------|---------------|-------------------|-------|
-| **OAuth Client Class** | ✅ `OAuthClient` | ❌ | Python includes complete client implementation |
-| **Browser Launching** | ✅ Automatic | ❌ | Opens browser for authorization |
-| **Local Callback Server** | ✅ Automatic | ❌ | Handles OAuth redirects with auto port selection |
-| **Token Management** | ✅ Automatic | ❌ | Storage and retrieval |
-| **Token Refresh** | ✅ Automatic | ❌ | Background refresh handling |
-| **PKCE Flow** | ✅ Client-side | ❌ | Automatic verifier generation |
-| **Timeout Handling** | ✅ 5 min default | ❌ | Callback timeout management |
+| Feature                   | Python FastMCP   | TypeScript FastMCP | Notes                                            |
+| ------------------------- | ---------------- | ------------------ | ------------------------------------------------ |
+| **OAuth Client Class**    | ✅ `OAuthClient` | ❌                 | Python includes complete client implementation   |
+| **Browser Launching**     | ✅ Automatic     | ❌                 | Opens browser for authorization                  |
+| **Local Callback Server** | ✅ Automatic     | ❌                 | Handles OAuth redirects with auto port selection |
+| **Token Management**      | ✅ Automatic     | ❌                 | Storage and retrieval                            |
+| **Token Refresh**         | ✅ Automatic     | ❌                 | Background refresh handling                      |
+| **PKCE Flow**             | ✅ Client-side   | ❌                 | Automatic verifier generation                    |
+| **Timeout Handling**      | ✅ 5 min default | ❌                 | Callback timeout management                      |
 
 **Result:** Python provides client-side OAuth tooling. TypeScript does not (client developers must implement OAuth manually).
 
@@ -508,39 +532,41 @@ These features are server-side but Python-specific:
 
 ## Performance Characteristics
 
-| Metric | Python | TypeScript | Notes |
-|--------|--------|-----------|-------|
-| **Startup Time** | Fast | Instant | Both are quick |
-| **Memory (Base)** | ~15MB | ~10MB | TypeScript slightly lighter |
-| **OAuth Flow** | <100ms | <100ms | Similar performance |
-| **Storage Overhead** | Depends on backend | Depends on backend | Similar |
-| **Encryption Overhead** | Fernet (~5%) | AES-GCM (~3%) | Negligible difference |
+| Metric                  | Python             | TypeScript         | Notes                       |
+| ----------------------- | ------------------ | ------------------ | --------------------------- |
+| **Startup Time**        | Fast               | Instant            | Both are quick              |
+| **Memory (Base)**       | ~15MB              | ~10MB              | TypeScript slightly lighter |
+| **OAuth Flow**          | <100ms             | <100ms             | Similar performance         |
+| **Storage Overhead**    | Depends on backend | Depends on backend | Similar                     |
+| **Encryption Overhead** | Fernet (~5%)       | AES-GCM (~3%)      | Negligible difference       |
 
 ## Security Comparison
 
 Both implementations provide equivalent security:
 
-| Security Feature | Python | TypeScript |
-|-----------------|--------|-----------|
-| **Two-tier PKCE** | ✅ | ✅ |
-| **User Consent** | ✅ | ✅ |
-| **Encrypted Storage** | ✅ (default) | ✅ (default) |
-| **HMAC-signed Cookies** | ✅ | ✅ |
-| **State Validation** | ✅ | ✅ |
-| **Redirect URI Validation** | ✅ | ✅ |
-| **One-time Auth Codes** | ✅ | ✅ |
-| **OAuth 2.1 Compliance** | ✅ | ✅ |
+| Security Feature            | Python       | TypeScript   |
+| --------------------------- | ------------ | ------------ |
+| **Two-tier PKCE**           | ✅           | ✅           |
+| **User Consent**            | ✅           | ✅           |
+| **Encrypted Storage**       | ✅ (default) | ✅ (default) |
+| **HMAC-signed Cookies**     | ✅           | ✅           |
+| **State Validation**        | ✅           | ✅           |
+| **Redirect URI Validation** | ✅           | ✅           |
+| **One-time Auth Codes**     | ✅           | ✅           |
+| **OAuth 2.1 Compliance**    | ✅           | ✅           |
 
 **Parity:** Both implementations provide equivalent security with encryption enabled by default.
 
 ## Testing Coverage
 
 **Python:**
+
 - pytest-based test suite
 - Comprehensive unit and integration tests
 - Mock-based OAuth provider testing
 
 **TypeScript:**
+
 - Vitest-based test suite
 - 29+ tests covering all core functionality
 - PKCE, storage, JWT, consent, and integration tests
@@ -573,10 +599,12 @@ For **server-side OAuth proxy**, migration is straightforward with minimal code 
 ## Resources
 
 ### Python FastMCP
+
 - Repository: [jlowin/fastmcp](https://github.com/jlowin/fastmcp)
 - Documentation: [fastmcp.io](https://fastmcp.io)
 
 ### TypeScript FastMCP
+
 - Repository: [FastMCP TypeScript](https://github.com/your-org/fastmcp)
 - Documentation: See `docs/` directory
   - [OAuth Proxy Features](oauth-proxy-features.md)

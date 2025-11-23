@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm } from "fs/promises";
+import { readdir, rm } from "fs/promises";
 import { join } from "path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 

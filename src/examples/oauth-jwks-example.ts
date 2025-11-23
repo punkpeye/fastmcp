@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * JWKS (JSON Web Key Set) Verification Example
  *
@@ -10,8 +11,8 @@
  * ```
  */
 
-import { FastMCP } from "../FastMCP.js";
 import { JWKSVerifier, OAuthProxy } from "../auth/index.js";
+import { FastMCP } from "../FastMCP.js";
 
 /**
  * Example 1: Basic JWKS Verification
@@ -19,9 +20,9 @@ import { JWKSVerifier, OAuthProxy } from "../auth/index.js";
  */
 async function example1_basicJWKS() {
   const verifier = new JWKSVerifier({
-    jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
     audience: "your-google-client-id.apps.googleusercontent.com",
     issuer: "https://accounts.google.com",
+    jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
   });
 
   // Example token (you would get this from a real OAuth flow)
@@ -50,37 +51,38 @@ async function example1_basicJWKS() {
 async function example2_withOAuthProxy() {
   // Create JWKS verifier for upstream provider
   const jwksVerifier = new JWKSVerifier({
-    jwksUri: "https://login.microsoftonline.com/common/discovery/v2.0/keys",
     audience: "your-azure-client-id",
     issuer: "https://login.microsoftonline.com/{tenant}/v2.0",
+    jwksUri: "https://login.microsoftonline.com/common/discovery/v2.0/keys",
   });
 
   // Create OAuth proxy with JWKS verification
   const authProxy = new OAuthProxy({
     baseUrl: "https://your-server.com",
+    // Optional: Use JWKS verifier for additional upstream token validation
+    tokenVerifier: jwksVerifier,
     upstreamAuthorizationEndpoint:
       "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
-    upstreamTokenEndpoint:
-      "https://login.microsoftonline.com/common/oauth2/v2.0/token",
     upstreamClientId: process.env.AZURE_CLIENT_ID!,
     upstreamClientSecret: process.env.AZURE_CLIENT_SECRET!,
 
-    // Optional: Use JWKS verifier for additional upstream token validation
-    tokenVerifier: jwksVerifier,
+    upstreamTokenEndpoint:
+      "https://login.microsoftonline.com/common/oauth2/v2.0/token",
   });
 
   const server = new FastMCP({
     name: "Azure OAuth with JWKS",
     oauth: {
-      enabled: true,
       authorizationServer: authProxy.getAuthorizationServerMetadata(),
+      enabled: true,
       proxy: authProxy,
     },
+    version: "1.0.0",
   });
 
   await server.start({
-    transportType: "httpStream",
     httpStream: { port: 3000 },
+    transportType: "httpStream",
   });
 
   console.log("Server started with JWKS verification enabled");
@@ -93,18 +95,18 @@ async function example2_withOAuthProxy() {
 async function example3_multiProvider() {
   // Create verifiers for different providers
   const googleVerifier = new JWKSVerifier({
-    jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
     issuer: "https://accounts.google.com",
+    jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
   });
 
   const auth0Verifier = new JWKSVerifier({
-    jwksUri: "https://your-tenant.auth0.com/.well-known/jwks.json",
     issuer: "https://your-tenant.auth0.com/",
+    jwksUri: "https://your-tenant.auth0.com/.well-known/jwks.json",
   });
 
   const oktaVerifier = new JWKSVerifier({
-    jwksUri: "https://your-domain.okta.com/oauth2/v1/keys",
     issuer: "https://your-domain.okta.com",
+    jwksUri: "https://your-domain.okta.com/oauth2/v1/keys",
   });
 
   // Verify token with appropriate provider
@@ -112,11 +114,11 @@ async function example3_multiProvider() {
     let verifier: JWKSVerifier;
 
     switch (provider) {
-      case "google":
-        verifier = googleVerifier;
-        break;
       case "auth0":
         verifier = auth0Verifier;
+        break;
+      case "google":
+        verifier = googleVerifier;
         break;
       case "okta":
         verifier = oktaVerifier;
@@ -139,33 +141,25 @@ async function example3_multiProvider() {
  */
 async function example4_protectedTools() {
   const jwksVerifier = new JWKSVerifier({
-    jwksUri: "https://your-identity-provider.com/.well-known/jwks.json",
     audience: "your-api-audience",
     issuer: "https://your-identity-provider.com",
+    jwksUri: "https://your-identity-provider.com/.well-known/jwks.json",
   });
 
   const server = new FastMCP({
     name: "Protected API",
+    version: "1.0.0",
   });
 
   // Add a protected tool that verifies tokens using JWKS
   server.addTool({
-    name: "get-user-data",
+    canAccess: () => true, // Verification done in execute
+
     description: "Get authenticated user data (JWKS-verified)",
-    canAccess: async ({ session }) => {
-      const authHeader = session?.headers?.["authorization"];
-      if (!authHeader) {
-        return false;
-      }
-
-      const token = authHeader.replace("Bearer ", "");
-
-      // Verify token using JWKS
-      const result = await jwksVerifier.verify(token);
-      return result.valid;
-    },
-    execute: async (args, { session }) => {
-      const token = session?.headers?.["authorization"]?.replace("Bearer ", "");
+    execute: async (_args, { session }) => {
+      const token = (session?.headers as Record<string, string>)?.[
+        "authorization"
+      ]?.replace("Bearer ", "");
 
       if (!token) {
         throw new Error("No authorization token provided");
@@ -181,25 +175,26 @@ async function example4_protectedTools() {
       return {
         content: [
           {
-            type: "text",
             text: JSON.stringify(
               {
-                user: result.claims?.sub || result.claims?.client_id,
-                email: result.claims?.email,
                 claims: result.claims,
+                email: result.claims?.email,
+                user: result.claims?.sub || result.claims?.client_id,
               },
               null,
               2,
             ),
+            type: "text",
           },
         ],
       };
     },
+    name: "get-user-data",
   });
 
   await server.start({
-    transportType: "httpStream",
     httpStream: { port: 3000 },
+    transportType: "httpStream",
   });
 
   console.log("Server started with JWKS-protected tools");
@@ -211,9 +206,9 @@ async function example4_protectedTools() {
  */
 async function example5_keyRotation() {
   const verifier = new JWKSVerifier({
-    jwksUri: "https://provider.com/.well-known/jwks.json",
     cacheDuration: 3600000, // Cache keys for 1 hour
     cooldownDuration: 30000, // Minimum 30s between refetches
+    jwksUri: "https://provider.com/.well-known/jwks.json",
   });
 
   // Normal verification

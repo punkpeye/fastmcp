@@ -78,6 +78,7 @@ await server.start({
 ```
 
 **That's it!** All OAuth endpoints are automatically registered:
+
 - `/oauth/register` - DCR endpoint
 - `/oauth/authorize` - Authorization endpoint
 - `/oauth/token` - Token exchange
@@ -91,6 +92,7 @@ No manual route setup required - exactly like Python FastMCP! 🎉
 ### Pre-configured Providers
 
 #### Google
+
 ```typescript
 import { GoogleProvider } from "fastmcp/auth";
 
@@ -104,6 +106,7 @@ const authProxy = new GoogleProvider({
 **Setup:** [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
 
 #### GitHub
+
 ```typescript
 import { GitHubProvider } from "fastmcp/auth";
 
@@ -117,6 +120,7 @@ const authProxy = new GitHubProvider({
 **Setup:** [GitHub Developer Settings](https://github.com/settings/developers)
 
 #### Azure/Entra ID
+
 ```typescript
 import { AzureProvider } from "fastmcp/auth";
 
@@ -213,23 +217,27 @@ server.addTool({
 ## Security Features
 
 ### Two-Tier PKCE
+
 - Client-to-proxy PKCE validation
 - Proxy-to-upstream PKCE protection
 - Prevents authorization code interception
 
 ### User Consent Flow
+
 - Prevents confused deputy attacks
 - Shows clear scope permissions
 - Signed consent cookies (5-minute TTL)
 - Can be disabled for trusted environments
 
 ### Token Security
+
 - Optional encryption at rest (AES-256-GCM)
 - Automatic expiration and cleanup
 - Secure random ID generation
 - One-time authorization codes
 
 ### OAuth 2.1 Compliance
+
 - PKCE required by default
 - State parameter validation
 - Redirect URI validation
@@ -267,6 +275,7 @@ npm run build
 The TypeScript implementation maintains API compatibility with Python FastMCP:
 
 **Python:**
+
 ```python
 from fastmcp import FastMCP
 from fastmcp.server.auth import OAuthProxy
@@ -282,6 +291,7 @@ mcp = FastMCP(name="My Server", auth=auth)
 ```
 
 **TypeScript:**
+
 ```typescript
 import { FastMCP } from "fastmcp";
 import { OAuthProxy } from "fastmcp/auth";
@@ -309,17 +319,21 @@ See [Python vs TypeScript Comparison](oauth-python-typescript.md) for detailed m
 ## Troubleshooting
 
 ### "Invalid redirect URI" error
+
 Ensure the redirect URI registered with your OAuth provider matches:
+
 ```
 {baseUrl}/oauth/callback
 ```
 
 ### "Invalid state" error
+
 - Transaction expired (default 10 minutes)
 - Server restarted (use persistent storage)
 - Clock skew between client and server
 
 ### "PKCE validation failed"
+
 Ensure client is sending the correct `code_verifier` that matches the `code_challenge`.
 
 See [Implementation Guide](oauth-proxy-guide.md#troubleshooting) for more solutions.
@@ -335,6 +349,7 @@ See [Implementation Guide](oauth-proxy-guide.md#troubleshooting) for more soluti
 ## Support
 
 For issues, questions, or contributions:
+
 - Report bugs in the [issue tracker](https://github.com/your-org/fastmcp/issues)
 - Check [examples](../src/examples/) for working code
 - Review [documentation](oauth-proxy-guide.md) for detailed guidance

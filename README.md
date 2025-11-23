@@ -1316,6 +1316,7 @@ In this example, only clients authenticating with the `admin` role will be able 
 FastMCP includes a built-in **OAuth Proxy** that acts as a secure intermediary between MCP clients and upstream OAuth providers. The proxy handles the complete OAuth 2.1 authorization flow, including Dynamic Client Registration (DCR), PKCE, consent management, and token management with encryption and token swap patterns enabled by default.
 
 **Key Features:**
+
 - 🔐 **Secure by Default**: Automatic encryption (AES-256-GCM) and token swap pattern
 - 🚀 **Zero Configuration**: Auto-generates keys and handles OAuth flows automatically
 - 🔌 **Pre-configured Providers**: Built-in support for Google, GitHub, and Azure
@@ -1346,6 +1347,7 @@ const server = new FastMCP({
 ```
 
 **Documentation:**
+
 - [OAuth Proxy Features](docs/oauth-proxy-features.md) - Complete feature list and capabilities
 - [OAuth Proxy Implementation Guide](docs/oauth-proxy-guide.md) - Setup and configuration
 - [Python vs TypeScript Comparison](docs/oauth-python-typescript.md) - Feature comparison

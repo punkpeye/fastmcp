@@ -25,7 +25,10 @@ import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
 import { JWTIssuer } from "./utils/jwtIssuer.js";
 import { PKCEUtils } from "./utils/pkce.js";
-import { EncryptedTokenStorage, MemoryTokenStorage } from "./utils/tokenStore.js";
+import {
+  EncryptedTokenStorage,
+  MemoryTokenStorage,
+} from "./utils/tokenStore.js";
 
 /**
  * OAuth 2.1 Proxy
@@ -58,13 +61,15 @@ export class OAuthProxy {
 
     // Wrap storage with encryption if not already encrypted
     // Check if it's already an EncryptedTokenStorage instance
-    const isAlreadyEncrypted = storage.constructor.name === 'EncryptedTokenStorage';
+    const isAlreadyEncrypted =
+      storage.constructor.name === "EncryptedTokenStorage";
 
     if (!isAlreadyEncrypted && config.encryptionKey !== false) {
       // Auto-generate encryption key if not provided
-      const encryptionKey = typeof config.encryptionKey === 'string'
-        ? config.encryptionKey
-        : this.generateSigningKey();
+      const encryptionKey =
+        typeof config.encryptionKey === "string"
+          ? config.encryptionKey
+          : this.generateSigningKey();
 
       storage = new EncryptedTokenStorage(storage, encryptionKey);
     }
@@ -87,9 +92,10 @@ export class OAuthProxy {
     }
 
     // Initialize claims extractor (enabled by default)
-    const claimsConfig = config.customClaimsPassthrough !== undefined
-      ? config.customClaimsPassthrough
-      : true; // Default: enabled
+    const claimsConfig =
+      config.customClaimsPassthrough !== undefined
+        ? config.customClaimsPassthrough
+        : true; // Default: enabled
 
     if (claimsConfig !== false) {
       this.claimsExtractor = new ClaimsExtractor(claimsConfig);
@@ -440,6 +446,41 @@ export class OAuthProxy {
   }
 
   /**
+   * Load upstream tokens from a FastMCP JWT
+   */
+  async loadUpstreamTokens(
+    fastmcpToken: string,
+  ): Promise<null | UpstreamTokenSet> {
+    if (!this.jwtIssuer) {
+      return null;
+    }
+
+    // Verify FastMCP JWT
+    const result = await this.jwtIssuer.verify(fastmcpToken);
+    if (!result.valid || !result.claims?.jti) {
+      return null;
+    }
+
+    // Look up token mapping
+    const mapping = (await this.tokenStorage.get(
+      `mapping:${result.claims.jti}`,
+    )) as {
+      upstreamTokenKey: string;
+    } | null;
+
+    if (!mapping) {
+      return null;
+    }
+
+    // Retrieve upstream tokens
+    const upstreamTokens = (await this.tokenStorage.get(
+      `upstream:${mapping.upstreamTokenKey}`,
+    )) as null | UpstreamTokenSet;
+
+    return upstreamTokens;
+  }
+
+  /**
    * RFC 7591 Dynamic Client Registration
    */
   async registerClient(request: DCRRequest): Promise<DCRResponse> {
@@ -624,6 +665,63 @@ export class OAuthProxy {
   }
 
   /**
+   * Extract JTI from a JWT token
+   */
+  private async extractJti(token: string): Promise<string> {
+    if (!this.jwtIssuer) {
+      throw new Error("JWT issuer not initialized");
+    }
+
+    const result = await this.jwtIssuer.verify(token);
+    if (!result.valid || !result.claims?.jti) {
+      throw new Error("Failed to extract JTI from token");
+    }
+
+    return result.claims.jti;
+  }
+
+  /**
+   * Extract custom claims from upstream tokens
+   * Combines claims from access token and ID token (if present)
+   */
+  private async extractUpstreamClaims(
+    upstreamTokens: UpstreamTokenSet,
+  ): Promise<null | Record<string, unknown>> {
+    if (!this.claimsExtractor) {
+      return null;
+    }
+
+    const allClaims: Record<string, unknown> = {};
+
+    // Extract from access token (if JWT format)
+    const accessClaims = await this.claimsExtractor.extract(
+      upstreamTokens.accessToken,
+      "access",
+    );
+    if (accessClaims) {
+      Object.assign(allClaims, accessClaims);
+    }
+
+    // Extract from ID token (if present and JWT format)
+    if (upstreamTokens.idToken) {
+      const idClaims = await this.claimsExtractor.extract(
+        upstreamTokens.idToken,
+        "id",
+      );
+      if (idClaims) {
+        // Access token claims take precedence over ID token claims
+        for (const [key, value] of Object.entries(idClaims)) {
+          if (!(key in allClaims)) {
+            allClaims[key] = value;
+          }
+        }
+      }
+    }
+
+    return Object.keys(allClaims).length > 0 ? allClaims : null;
+  }
+
+  /**
    * Generate authorization code for client
    */
   private generateAuthorizationCode(
@@ -670,126 +768,6 @@ export class OAuthProxy {
   private getProviderName(): string {
     const url = new URL(this.config.upstreamAuthorizationEndpoint);
     return url.hostname;
-  }
-
-  /**
-   * Match URI against pattern (supports wildcards)
-   */
-  private matchesPattern(uri: string, pattern: string): boolean {
-    const regex = new RegExp(
-      "^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$",
-    );
-    return regex.test(uri);
-  }
-
-  /**
-   * Redirect to upstream OAuth provider
-   */
-  private redirectToUpstream(transaction: OAuthTransaction): Response {
-    const authUrl = new URL(this.config.upstreamAuthorizationEndpoint);
-
-    authUrl.searchParams.set("client_id", this.config.upstreamClientId);
-    authUrl.searchParams.set(
-      "redirect_uri",
-      `${this.config.baseUrl}${this.config.redirectPath}`,
-    );
-    authUrl.searchParams.set("response_type", "code");
-    authUrl.searchParams.set("state", transaction.id);
-
-    if (transaction.scope.length > 0) {
-      authUrl.searchParams.set("scope", transaction.scope.join(" "));
-    }
-
-    // Add PKCE if not forwarding client PKCE
-    if (!this.config.forwardPkce) {
-      authUrl.searchParams.set(
-        "code_challenge",
-        transaction.proxyCodeChallenge,
-      );
-      authUrl.searchParams.set("code_challenge_method", "S256");
-    }
-
-    return new Response(null, {
-      headers: {
-        Location: authUrl.toString(),
-      },
-      status: 302,
-    });
-  }
-
-  /**
-   * Start periodic cleanup of expired transactions and codes
-   */
-  private startCleanup(): void {
-    this.cleanupInterval = setInterval(() => {
-      this.cleanup();
-    }, 60000); // Run every minute
-  }
-
-  /**
-   * Validate redirect URI against allowed patterns
-   */
-  private validateRedirectUri(uri: string): boolean {
-    try {
-      const url = new URL(uri);
-      const patterns = this.config.allowedRedirectUriPatterns || [];
-
-      for (const pattern of patterns) {
-        if (this.matchesPattern(uri, pattern)) {
-          return true;
-        }
-      }
-
-      // Default: allow https and localhost
-      return (
-        url.protocol === "https:" ||
-        url.hostname === "localhost" ||
-        url.hostname === "127.0.0.1"
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Extract custom claims from upstream tokens
-   * Combines claims from access token and ID token (if present)
-   */
-  private async extractUpstreamClaims(
-    upstreamTokens: UpstreamTokenSet,
-  ): Promise<Record<string, unknown> | null> {
-    if (!this.claimsExtractor) {
-      return null;
-    }
-
-    const allClaims: Record<string, unknown> = {};
-
-    // Extract from access token (if JWT format)
-    const accessClaims = await this.claimsExtractor.extract(
-      upstreamTokens.accessToken,
-      "access",
-    );
-    if (accessClaims) {
-      Object.assign(allClaims, accessClaims);
-    }
-
-    // Extract from ID token (if present and JWT format)
-    if (upstreamTokens.idToken) {
-      const idClaims = await this.claimsExtractor.extract(
-        upstreamTokens.idToken,
-        "id",
-      );
-      if (idClaims) {
-        // Access token claims take precedence over ID token claims
-        for (const [key, value] of Object.entries(idClaims)) {
-          if (!(key in allClaims)) {
-            allClaims[key] = value;
-          }
-        }
-      }
-    }
-
-    return Object.keys(allClaims).length > 0 ? allClaims : null;
   }
 
   /**
@@ -876,54 +854,82 @@ export class OAuthProxy {
   }
 
   /**
-   * Extract JTI from a JWT token
+   * Match URI against pattern (supports wildcards)
    */
-  private async extractJti(token: string): Promise<string> {
-    if (!this.jwtIssuer) {
-      throw new Error("JWT issuer not initialized");
-    }
-
-    const result = await this.jwtIssuer.verify(token);
-    if (!result.valid || !result.claims?.jti) {
-      throw new Error("Failed to extract JTI from token");
-    }
-
-    return result.claims.jti;
+  private matchesPattern(uri: string, pattern: string): boolean {
+    const regex = new RegExp(
+      "^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$",
+    );
+    return regex.test(uri);
   }
 
   /**
-   * Load upstream tokens from a FastMCP JWT
+   * Redirect to upstream OAuth provider
    */
-  async loadUpstreamTokens(
-    fastmcpToken: string,
-  ): Promise<UpstreamTokenSet | null> {
-    if (!this.jwtIssuer) {
-      return null;
+  private redirectToUpstream(transaction: OAuthTransaction): Response {
+    const authUrl = new URL(this.config.upstreamAuthorizationEndpoint);
+
+    authUrl.searchParams.set("client_id", this.config.upstreamClientId);
+    authUrl.searchParams.set(
+      "redirect_uri",
+      `${this.config.baseUrl}${this.config.redirectPath}`,
+    );
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("state", transaction.id);
+
+    if (transaction.scope.length > 0) {
+      authUrl.searchParams.set("scope", transaction.scope.join(" "));
     }
 
-    // Verify FastMCP JWT
-    const result = await this.jwtIssuer.verify(fastmcpToken);
-    if (!result.valid || !result.claims?.jti) {
-      return null;
+    // Add PKCE if not forwarding client PKCE
+    if (!this.config.forwardPkce) {
+      authUrl.searchParams.set(
+        "code_challenge",
+        transaction.proxyCodeChallenge,
+      );
+      authUrl.searchParams.set("code_challenge_method", "S256");
     }
 
-    // Look up token mapping
-    const mapping = (await this.tokenStorage.get(
-      `mapping:${result.claims.jti}`,
-    )) as {
-      upstreamTokenKey: string;
-    } | null;
+    return new Response(null, {
+      headers: {
+        Location: authUrl.toString(),
+      },
+      status: 302,
+    });
+  }
 
-    if (!mapping) {
-      return null;
+  /**
+   * Start periodic cleanup of expired transactions and codes
+   */
+  private startCleanup(): void {
+    this.cleanupInterval = setInterval(() => {
+      this.cleanup();
+    }, 60000); // Run every minute
+  }
+
+  /**
+   * Validate redirect URI against allowed patterns
+   */
+  private validateRedirectUri(uri: string): boolean {
+    try {
+      const url = new URL(uri);
+      const patterns = this.config.allowedRedirectUriPatterns || [];
+
+      for (const pattern of patterns) {
+        if (this.matchesPattern(uri, pattern)) {
+          return true;
+        }
+      }
+
+      // Default: allow https and localhost
+      return (
+        url.protocol === "https:" ||
+        url.hostname === "localhost" ||
+        url.hostname === "127.0.0.1"
+      );
+    } catch {
+      return false;
     }
-
-    // Retrieve upstream tokens
-    const upstreamTokens = (await this.tokenStorage.get(
-      `upstream:${mapping.upstreamTokenKey}`,
-    )) as UpstreamTokenSet | null;
-
-    return upstreamTokens;
   }
 }
 

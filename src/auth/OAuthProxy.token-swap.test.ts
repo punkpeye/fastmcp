@@ -1,7 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from "vitest";
 
-import { OAuthProxy } from "./OAuthProxy.js";
 import type { TokenRequest, UpstreamTokenSet } from "./types.js";
+
+import { OAuthProxy } from "./OAuthProxy.js";
 import { JWTIssuer } from "./utils/jwtIssuer.js";
 import { PKCEUtils } from "./utils/pkce.js";
 import { MemoryTokenStorage } from "./utils/tokenStore.js";
@@ -161,9 +163,9 @@ describe("OAuthProxy - Token Swap Pattern", () => {
       const proxy = new OAuthProxy({
         ...baseConfig,
         enableTokenSwap: true,
+        encryptionKey: false, // Disable encryption for easier testing
         jwtSigningKey: "test-signing-key",
         tokenStorage,
-        encryptionKey: false, // Disable encryption for easier testing
       });
 
       const upstreamTokens: UpstreamTokenSet = {

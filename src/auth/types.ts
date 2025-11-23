@@ -53,6 +53,32 @@ export interface ConsentData {
 }
 
 /**
+ * Custom claims passthrough configuration
+ */
+export interface CustomClaimsPassthroughConfig {
+  /** Allow nested objects/arrays in claims. Default: false (only primitives) */
+  allowComplexClaims?: boolean;
+
+  /** Only passthrough these specific claims (allowlist). Default: undefined (allow all non-protected) */
+  allowedClaims?: string[];
+
+  /** Never passthrough these claims (blocklist, in addition to protected claims). Default: [] */
+  blockedClaims?: string[];
+
+  /** Prefix upstream claims to prevent collisions. Default: false (no prefix) */
+  claimPrefix?: false | string;
+
+  /** Enable passthrough from upstream access token (if JWT format). Default: true */
+  fromAccessToken?: boolean;
+
+  /** Enable passthrough from upstream ID token. Default: true */
+  fromIdToken?: boolean;
+
+  /** Maximum length for claim values. Default: 2000 */
+  maxClaimValueSize?: number;
+}
+
+/**
  * Client metadata for storage
  */
 export interface DCRClientMetadata {
@@ -160,32 +186,6 @@ export interface OAuthProviderConfig {
 }
 
 /**
- * Custom claims passthrough configuration
- */
-export interface CustomClaimsPassthroughConfig {
-  /** Enable passthrough from upstream access token (if JWT format). Default: true */
-  fromAccessToken?: boolean;
-
-  /** Enable passthrough from upstream ID token. Default: true */
-  fromIdToken?: boolean;
-
-  /** Prefix upstream claims to prevent collisions. Default: false (no prefix) */
-  claimPrefix?: string | false;
-
-  /** Only passthrough these specific claims (allowlist). Default: undefined (allow all non-protected) */
-  allowedClaims?: string[];
-
-  /** Never passthrough these claims (blocklist, in addition to protected claims). Default: [] */
-  blockedClaims?: string[];
-
-  /** Maximum length for claim values. Default: 2000 */
-  maxClaimValueSize?: number;
-
-  /** Allow nested objects/arrays in claims. Default: false (only primitives) */
-  allowComplexClaims?: boolean;
-}
-
-/**
  * Configuration for the OAuth Proxy
  */
 export interface OAuthProxyConfig {
@@ -207,11 +207,11 @@ export interface OAuthProxyConfig {
    * Set to false to disable claims passthrough entirely.
    * Default: true (enabled with default settings)
    */
-  customClaimsPassthrough?: CustomClaimsPassthroughConfig | boolean;
+  customClaimsPassthrough?: boolean | CustomClaimsPassthroughConfig;
   /** Enable token swap pattern (default: true) - issues short-lived JWTs instead of passing through upstream tokens */
   enableTokenSwap?: boolean;
   /** Encryption key for token storage (default: auto-generated). Set to false to disable encryption. */
-  encryptionKey?: string | false;
+  encryptionKey?: false | string;
   /** Forward client's PKCE to upstream (default: false) */
   forwardPkce?: boolean;
   /** Secret key for signing JWTs when token swap is enabled */
@@ -304,6 +304,25 @@ export interface RefreshRequest {
 }
 
 /**
+ * Token mapping for JWT swap pattern
+ * Maps JTI to upstream token reference
+ */
+export interface TokenMapping {
+  /** Client ID */
+  clientId: string;
+  /** Creation timestamp */
+  createdAt: Date;
+  /** Expiration timestamp */
+  expiresAt: Date;
+  /** JTI from FastMCP JWT */
+  jti: string;
+  /** Scopes */
+  scope: string[];
+  /** Reference to upstream token set */
+  upstreamTokenKey: string;
+}
+
+/**
  * OAuth token request
  */
 export interface TokenRequest {
@@ -355,25 +374,6 @@ export interface TokenVerificationResult {
  */
 export interface TokenVerifier {
   verify(token: string): Promise<TokenVerificationResult>;
-}
-
-/**
- * Token mapping for JWT swap pattern
- * Maps JTI to upstream token reference
- */
-export interface TokenMapping {
-  /** Client ID */
-  clientId: string;
-  /** Creation timestamp */
-  createdAt: Date;
-  /** Expiration timestamp */
-  expiresAt: Date;
-  /** JTI from FastMCP JWT */
-  jti: string;
-  /** Scopes */
-  scope: string[];
-  /** Reference to upstream token set */
-  upstreamTokenKey: string;
 }
 
 /**

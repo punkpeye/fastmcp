@@ -13,10 +13,7 @@ describe("JWTIssuer", () => {
 
   describe("issueAccessToken", () => {
     it("should issue a valid access token", async () => {
-      const token = issuer.issueAccessToken("client-123", [
-        "read",
-        "write",
-      ]);
+      const token = issuer.issueAccessToken("client-123", ["read", "write"]);
 
       expect(token).toBeTruthy();
       expect(token.split(".")).toHaveLength(3);

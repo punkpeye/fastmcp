@@ -70,7 +70,7 @@ import { DiskStore, EncryptedTokenStorage } from "fastmcp/auth";
 const diskStore = new DiskStore({ directory: "/var/lib/fastmcp/oauth" });
 const encryptedStorage = new EncryptedTokenStorage(
   diskStore,
-  "your-encryption-key"
+  "your-encryption-key",
 );
 
 const proxy = new OAuthProxy({
@@ -118,7 +118,7 @@ import { JWTIssuer } from "fastmcp/auth";
 
 const signingKey = await JWTIssuer.deriveKey(
   process.env.CLIENT_SECRET,
-  100000 // PBKDF2 iterations
+  100000, // PBKDF2 iterations
 );
 
 const issuer = new JWTIssuer({
@@ -194,7 +194,9 @@ When you need to use the upstream provider tokens (e.g., to make API calls):
 
 ```typescript
 // Client presents their FastMCP JWT
-const fastmcpToken = request.headers.get("Authorization")?.replace("Bearer ", "");
+const fastmcpToken = request.headers
+  .get("Authorization")
+  ?.replace("Bearer ", "");
 
 // Load the upstream tokens
 const upstreamTokens = await proxy.loadUpstreamTokens(fastmcpToken);
@@ -217,6 +219,7 @@ The token swap pattern stores:
 2. **Token Mappings**: Relationships between JTIs and upstream token keys
 
 Both are automatically cleaned up based on TTL:
+
 - Access token mappings: Same as upstream token expiration
 - Refresh token mappings: 30 days default
 
@@ -290,20 +293,17 @@ const upstreamTokens = await proxy.loadUpstreamTokens(response.access_token);
 
 ```typescript
 // Good: Derive key from secret
-const jwtSigningKey = await JWTIssuer.deriveKey(
-  process.env.JWT_SECRET,
-  100000
-);
+const jwtSigningKey = await JWTIssuer.deriveKey(process.env.JWT_SECRET, 100000);
 
 // Better: Use different keys for different purposes
 const jwtSigningKey = await JWTIssuer.deriveKey(
   process.env.JWT_SECRET + ":jwt",
-  100000
+  100000,
 );
 
 const encryptionKey = await JWTIssuer.deriveKey(
   process.env.JWT_SECRET + ":encryption",
-  100000
+  100000,
 );
 ```
 

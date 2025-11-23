@@ -11,15 +11,15 @@ export class ClaimsExtractor {
   // Claims that MUST NOT be copied from upstream (protect proxy's JWT integrity)
   private readonly PROTECTED_CLAIMS = new Set([
     "aud",
-    "iss",
+    "client_id",
     "exp",
     "iat",
-    "nbf",
+    "iss",
     "jti",
-    "client_id",
+    "nbf",
   ]);
 
-  constructor(config: CustomClaimsPassthroughConfig | boolean) {
+  constructor(config: boolean | CustomClaimsPassthroughConfig) {
     // Handle boolean shorthand: true = default config, false = disabled
     if (typeof config === "boolean") {
       config = config ? {} : { fromAccessToken: false, fromIdToken: false };
@@ -27,14 +27,14 @@ export class ClaimsExtractor {
 
     // Apply defaults
     this.config = {
-      fromAccessToken: config.fromAccessToken !== false, // Default: true
-      fromIdToken: config.fromIdToken !== false, // Default: true
-      claimPrefix:
-        config.claimPrefix !== undefined ? config.claimPrefix : false, // Default: no prefix
+      allowComplexClaims: config.allowComplexClaims || false,
       allowedClaims: config.allowedClaims,
       blockedClaims: config.blockedClaims || [],
+      claimPrefix:
+        config.claimPrefix !== undefined ? config.claimPrefix : false, // Default: no prefix
+      fromAccessToken: config.fromAccessToken !== false, // Default: true
+      fromIdToken: config.fromIdToken !== false, // Default: true
       maxClaimValueSize: config.maxClaimValueSize || 2000,
-      allowComplexClaims: config.allowComplexClaims || false,
     };
   }
 
@@ -44,7 +44,7 @@ export class ClaimsExtractor {
   async extract(
     token: string,
     tokenType: "access" | "id",
-  ): Promise<Record<string, unknown> | null> {
+  ): Promise<null | Record<string, unknown>> {
     // Check if this token type is enabled
     if (tokenType === "access" && !this.config.fromAccessToken) {
       return null;
@@ -74,17 +74,32 @@ export class ClaimsExtractor {
   }
 
   /**
-   * Check if a token is in JWT format
+   * Apply prefix to claim names (if configured)
    */
-  private isJWT(token: string): boolean {
-    return token.split(".").length === 3;
+  private applyPrefix(
+    claims: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const prefix = this.config.claimPrefix;
+
+    // No prefix configured or explicitly disabled
+    if (prefix === false || prefix === "" || prefix === undefined) {
+      return claims;
+    }
+
+    // Apply prefix to all claim names
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(claims)) {
+      result[`${prefix}${key}`] = value;
+    }
+
+    return result;
   }
 
   /**
    * Decode JWT payload without signature verification
    * Safe because token came from trusted upstream via server-to-server exchange
    */
-  private decodeJWTPayload(token: string): Record<string, unknown> | null {
+  private decodeJWTPayload(token: string): null | Record<string, unknown> {
     try {
       const parts = token.split(".");
       if (parts.length !== 3) {
@@ -141,6 +156,13 @@ export class ClaimsExtractor {
   }
 
   /**
+   * Check if a token is in JWT format
+   */
+  private isJWT(token: string): boolean {
+    return token.split(".").length === 3;
+  }
+
+  /**
    * Validate a claim value (type and size checks)
    */
   private isValidClaimValue(value: unknown): boolean {
@@ -180,25 +202,5 @@ export class ClaimsExtractor {
 
     // Unknown type - reject
     return false;
-  }
-
-  /**
-   * Apply prefix to claim names (if configured)
-   */
-  private applyPrefix(claims: Record<string, unknown>): Record<string, unknown> {
-    const prefix = this.config.claimPrefix;
-
-    // No prefix configured or explicitly disabled
-    if (prefix === false || prefix === "" || prefix === undefined) {
-      return claims;
-    }
-
-    // Apply prefix to all claim names
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(claims)) {
-      result[`${prefix}${key}`] = value;
-    }
-
-    return result;
   }
 }

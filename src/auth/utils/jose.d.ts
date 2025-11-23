@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Type declarations for optional 'jose' peer dependency
  * This allows TypeScript to compile without jose installed
@@ -16,9 +17,9 @@ declare module "jose" {
     token: string,
     keySet: any,
     options?: {
+      [key: string]: any;
       audience?: string | string[];
       issuer?: string | string[];
-      [key: string]: any;
     },
   ): Promise<{
     payload: {

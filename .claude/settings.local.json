@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/gazza/Local Documents/GitHub/MCP Services/OAuth Proxy/Docs/**)",
+      "Bash(mkdir:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run lint)",
+      "Bash(npm run format:*)",
+      "Bash(npm run prettier:check:*)",
+      "Bash(npm run eslint:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx prettier:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx vitest run:*)",
+      "Bash(del:*)",
+      "Bash(git add:*)",
+      "Bash(git restore:*)",
+      "Bash(git commit:*)",
+      "Bash(node -e \"\nconst fs = require(''fs'');\nconst content = fs.readFileSync(''src/auth/OAuthProxy.ts'', ''utf-8'');\nconst method = fs.readFileSync(''extract-claims-method.txt'', ''utf-8'');\n\n// Find the issueSwappedTokens method\nconst insertPoint = content.indexOf(''  /**\\n   * Issue swapped tokens (JWT pattern)'');\nif (insertPoint === -1) {\n  console.error(''Could not find insertion point'');\n  process.exit(1);\n}\n\n// Insert the new method before issueSwappedTokens\nconst before = content.substring(0, insertPoint);\nconst after = content.substring(insertPoint);\nconst newContent = before + method + after;\n\nfs.writeFileSync(''src/auth/OAuthProxy.ts'', newContent, ''utf-8'');\nconsole.log(''Method inserted successfully'');\n\")",
+      "Bash(node:*)",
+      "Bash(git rm:*)",
+      "Bash(npm run format:check:*)",
+      "Bash(npm run:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

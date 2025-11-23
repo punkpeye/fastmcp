@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * JWKS (JSON Web Key Set) Verifier
  * Provides JWT verification using public keys from JWKS endpoints
@@ -6,28 +7,26 @@
  * Install with: npm install jose
  */
 
-
-import type { JWTClaims } from "./jwtIssuer.js";
 import type { TokenVerificationResult, TokenVerifier } from "../types.js";
+import type { JWTClaims } from "./jwtIssuer.js";
+
+/**
+ * Token verification result
+ */
+export interface JWKSVerificationResult {
+  claims?: JWTClaims;
+  error?: string;
+  valid: boolean;
+}
 
 /**
  * JWKS configuration options
  */
 export interface JWKSVerifierConfig {
   /**
-   * JWKS endpoint URL (e.g., https://provider.com/.well-known/jwks.json)
-   */
-  jwksUri: string;
-
-  /**
    * Expected token audience
    */
   audience?: string;
-
-  /**
-   * Expected token issuer
-   */
-  issuer?: string;
 
   /**
    * Cache duration for JWKS keys in milliseconds
@@ -40,15 +39,16 @@ export interface JWKSVerifierConfig {
    * @default 30000 (30 seconds)
    */
   cooldownDuration?: number;
-}
 
-/**
- * Token verification result
- */
-export interface JWKSVerificationResult {
-  valid: boolean;
-  claims?: JWTClaims;
-  error?: string;
+  /**
+   * Expected token issuer
+   */
+  issuer?: string;
+
+  /**
+   * JWKS endpoint URL (e.g., https://provider.com/.well-known/jwks.json)
+   */
+  jwksUri: string;
 }
 
 /**
@@ -91,34 +91,27 @@ export class JWKSVerifier implements TokenVerifier {
   }
 
   /**
-   * Lazy load the jose library
-   * Only loads when verification is first attempted
+   * Get the JWKS URI being used
    */
-  private async loadJose(): Promise<void> {
-    if (this.joseLoaded) {
-      return;
-    }
+  getJwksUri(): string {
+    return this.config.jwksUri;
+  }
 
-    try {
-      this.jose = await import("jose");
-      this.joseLoaded = true;
+  /**
+   * Refresh the JWKS cache
+   * Useful if you need to force a key refresh
+   */
+  async refreshKeys(): Promise<void> {
+    await this.loadJose();
 
-      // Create the JWKS cache with the configured URI
-      this.jwksCache = this.jose.createRemoteJWKSet(
-        new URL(this.config.jwksUri),
-        {
-          cacheMaxAge: this.config.cacheDuration,
-          cooldownDuration: this.config.cooldownDuration,
-        },
-      );
-    } catch (error: any) {
-      throw new Error(
-        `JWKS verification requires the 'jose' package.\n` +
-          `Install it with: npm install jose\n\n` +
-          `If you don't need JWKS support, use HS256 signing instead (default).\n\n` +
-          `Original error: ${error.message}`,
-      );
-    }
+    // Recreate the JWKS cache to force a refresh
+    this.jwksCache = this.jose.createRemoteJWKSet(
+      new URL(this.config.jwksUri),
+      {
+        cacheMaxAge: this.config.cacheDuration,
+        cooldownDuration: this.config.cooldownDuration,
+      },
+    );
   }
 
   /**
@@ -173,14 +166,45 @@ export class JWKSVerifier implements TokenVerifier {
       };
 
       return {
-        valid: true,
         claims,
+        valid: true,
       };
     } catch (error: any) {
       return {
-        valid: false,
         error: error.message || "Token verification failed",
+        valid: false,
       };
+    }
+  }
+
+  /**
+   * Lazy load the jose library
+   * Only loads when verification is first attempted
+   */
+  private async loadJose(): Promise<void> {
+    if (this.joseLoaded) {
+      return;
+    }
+
+    try {
+      this.jose = await import("jose");
+      this.joseLoaded = true;
+
+      // Create the JWKS cache with the configured URI
+      this.jwksCache = this.jose.createRemoteJWKSet(
+        new URL(this.config.jwksUri),
+        {
+          cacheMaxAge: this.config.cacheDuration,
+          cooldownDuration: this.config.cooldownDuration,
+        },
+      );
+    } catch (error: any) {
+      throw new Error(
+        `JWKS verification requires the 'jose' package.\n` +
+          `Install it with: npm install jose\n\n` +
+          `If you don't need JWKS support, use HS256 signing instead (default).\n\n` +
+          `Original error: ${error.message}`,
+      );
     }
   }
 
@@ -202,29 +226,5 @@ export class JWKSVerifier implements TokenVerifier {
     }
 
     return [];
-  }
-
-  /**
-   * Refresh the JWKS cache
-   * Useful if you need to force a key refresh
-   */
-  async refreshKeys(): Promise<void> {
-    await this.loadJose();
-
-    // Recreate the JWKS cache to force a refresh
-    this.jwksCache = this.jose.createRemoteJWKSet(
-      new URL(this.config.jwksUri),
-      {
-        cacheMaxAge: this.config.cacheDuration,
-        cooldownDuration: this.config.cooldownDuration,
-      },
-    );
-  }
-
-  /**
-   * Get the JWKS URI being used
-   */
-  getJwksUri(): string {
-    return this.config.jwksUri;
   }
 }

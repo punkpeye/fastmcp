@@ -44,6 +44,7 @@ await server.start({
 ```
 
 **That's it!** All OAuth endpoints are automatically available:
+
 - `/oauth/register` - Dynamic Client Registration
 - `/oauth/authorize` - Authorization endpoint
 - `/oauth/callback` - OAuth callback handler
@@ -87,12 +88,14 @@ await server.start({
 ### Google OAuth
 
 **1. Create OAuth 2.0 Credentials**
+
 - Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
 - Create OAuth 2.0 Client ID
 - Application type: "Web application"
 - Add authorized redirect URI: `https://your-server.com/oauth/callback`
 
 **2. Implementation**
+
 ```typescript
 import { GoogleProvider } from "fastmcp/auth";
 
@@ -105,6 +108,7 @@ const authProxy = new GoogleProvider({
 ```
 
 **Common Scopes:**
+
 - `openid` - OpenID Connect authentication
 - `profile` - Basic profile information
 - `email` - Email address
@@ -114,11 +118,13 @@ const authProxy = new GoogleProvider({
 ### GitHub OAuth
 
 **1. Create OAuth App**
+
 - Go to [GitHub Developer Settings](https://github.com/settings/developers)
 - Click "New OAuth App"
 - Set Authorization callback URL: `https://your-server.com/oauth/callback`
 
 **2. Implementation**
+
 ```typescript
 import { GitHubProvider } from "fastmcp/auth";
 
@@ -131,6 +137,7 @@ const authProxy = new GitHubProvider({
 ```
 
 **Common Scopes:**
+
 - `read:user` - Read user profile data
 - `user:email` - Access email addresses
 - `repo` - Access repositories
@@ -139,12 +146,14 @@ const authProxy = new GitHubProvider({
 ### Azure/Entra ID
 
 **1. Register Application**
+
 - Go to [Azure Portal](https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
 - Click "New registration"
 - Add redirect URI: `https://your-server.com/oauth/callback`
 - Create a client secret under "Certificates & secrets"
 
 **2. Implementation**
+
 ```typescript
 import { AzureProvider } from "fastmcp/auth";
 
@@ -158,12 +167,14 @@ const authProxy = new AzureProvider({
 ```
 
 **Tenant Options:**
+
 - `common` - Multi-tenant, allows any Azure AD account
 - `organizations` - Any organizational account
 - `consumers` - Personal Microsoft accounts only
 - `<tenant-id>` - Specific tenant only
 
 **Common Scopes:**
+
 - `openid` - OpenID Connect
 - `profile` - User profile
 - `email` - Email address
@@ -186,24 +197,24 @@ interface OAuthProxyConfig {
   baseUrl: string;
 
   // OPTIONAL: OAuth behavior
-  redirectPath?: string;              // default: "/oauth/callback"
-  scopes?: string[];                  // provider-specific defaults
-  forwardPkce?: boolean;              // default: false
-  consentRequired?: boolean;          // default: true
-  consentSigningKey?: string;         // auto-generated if not provided
+  redirectPath?: string; // default: "/oauth/callback"
+  scopes?: string[]; // provider-specific defaults
+  forwardPkce?: boolean; // default: false
+  consentRequired?: boolean; // default: true
+  consentSigningKey?: string; // auto-generated if not provided
   allowedRedirectUriPatterns?: string[];
-  transactionTtl?: number;            // seconds, default: 600
-  authorizationCodeTtl?: number;      // seconds, default: 300
+  transactionTtl?: number; // seconds, default: 600
+  authorizationCodeTtl?: number; // seconds, default: 300
 
   // OPTIONAL: Token swap pattern (enabled by default)
-  enableTokenSwap?: boolean;          // default: true
-  jwtSigningKey?: string;             // optional (auto-generated if not provided)
-  accessTokenTtl?: number;            // seconds, default: 3600
-  refreshTokenTtl?: number;           // seconds, default: 2592000
+  enableTokenSwap?: boolean; // default: true
+  jwtSigningKey?: string; // optional (auto-generated if not provided)
+  accessTokenTtl?: number; // seconds, default: 3600
+  refreshTokenTtl?: number; // seconds, default: 2592000
 
   // OPTIONAL: Storage
-  tokenStorage?: TokenStorage;        // default: MemoryTokenStorage
-  tokenVerifier?: TokenVerifier;      // custom JWT verification
+  tokenStorage?: TokenStorage; // default: MemoryTokenStorage
+  tokenVerifier?: TokenVerifier; // custom JWT verification
 }
 ```
 
@@ -215,8 +226,8 @@ Control which callback URIs clients can register:
 const authProxy = new OAuthProxy({
   // ... other config
   allowedRedirectUriPatterns: [
-    "https://*.example.com/*",        // Wildcard subdomain
-    "http://localhost:*",              // Any localhost port
+    "https://*.example.com/*", // Wildcard subdomain
+    "http://localhost:*", // Any localhost port
     "https://app.example.com/callback", // Exact match
   ],
 });
@@ -229,10 +240,10 @@ Adjust timeouts for your security requirements:
 ```typescript
 const authProxy = new OAuthProxy({
   // ... other config
-  transactionTtl: 600,          // 10 minutes for authorization flow
-  authorizationCodeTtl: 300,    // 5 minutes for code exchange
-  accessTokenTtl: 3600,         // 1 hour for access tokens
-  refreshTokenTtl: 2592000,     // 30 days for refresh tokens
+  transactionTtl: 600, // 10 minutes for authorization flow
+  authorizationCodeTtl: 300, // 5 minutes for code exchange
+  accessTokenTtl: 3600, // 1 hour for access tokens
+  refreshTokenTtl: 2592000, // 30 days for refresh tokens
 });
 ```
 
@@ -272,7 +283,10 @@ server.addTool({
   name: "call-api",
   description: "Call upstream API with user's token",
   execute: async (args, { session }) => {
-    const clientToken = session?.headers?.["authorization"]?.replace("Bearer ", "");
+    const clientToken = session?.headers?.["authorization"]?.replace(
+      "Bearer ",
+      "",
+    );
 
     // Load the upstream tokens
     const upstreamTokens = await authProxy.loadUpstreamTokens(clientToken);
@@ -304,7 +318,7 @@ import { DiskStore } from "fastmcp/auth";
 
 const storage = new DiskStore({
   directory: "/var/lib/fastmcp/oauth",
-  cleanupIntervalMs: 60000,  // Cleanup every minute
+  cleanupIntervalMs: 60000, // Cleanup every minute
   fileExtension: ".json",
 });
 
@@ -315,6 +329,7 @@ const authProxy = new OAuthProxy({
 ```
 
 **Benefits:**
+
 - Tokens persist across server restarts
 - Automatic cleanup of expired entries
 - Thread-safe concurrent operations
@@ -355,10 +370,10 @@ const authProxy = new OAuthProxy({
     claimPrefix: false,
 
     // Optional: Only allow specific claims
-    allowedClaims: ['role', 'roles', 'permissions', 'email', 'groups'],
+    allowedClaims: ["role", "roles", "permissions", "email", "groups"],
 
     // Optional: Block specific claims
-    blockedClaims: ['internal_id', 'debug_info'],
+    blockedClaims: ["internal_id", "debug_info"],
 
     // Maximum claim value size (default: 2000 chars)
     maxClaimValueSize: 2000,
@@ -388,7 +403,7 @@ server.addTool({
 
     // Decode the proxy JWT
     const payload = JSON.parse(
-      Buffer.from(token.split(".")[1], "base64url").toString()
+      Buffer.from(token.split(".")[1], "base64url").toString(),
     );
 
     // Check role claim from upstream IDP
@@ -410,7 +425,7 @@ server.addTool({
     if (!token) return false;
 
     const payload = JSON.parse(
-      Buffer.from(token.split(".")[1], "base64url").toString()
+      Buffer.from(token.split(".")[1], "base64url").toString(),
     );
 
     // Check fine-grained permissions
@@ -426,13 +441,13 @@ server.addTool({
 ```
 
 **Key features:**
+
 - Extracts from both access tokens and ID tokens
 - Protected claims (aud, iss, exp, iat, nbf, jti, client_id) never copied
 - Access token claims take precedence over ID token claims
 - Size limits and type validation for security
 - Supports allowlist/blocklist filtering
 - Optional prefix for claim names
-
 
 ### Encrypted Token Storage (Enabled by Default)
 
@@ -449,12 +464,13 @@ const authProxy = new OAuthProxy({
   // Optional: Provide custom encryption key (recommended for production)
   encryptionKey: await JWTIssuer.deriveKey(
     process.env.ENCRYPTION_SECRET + ":storage",
-    100000
+    100000,
   ),
 });
 ```
 
 **To disable encryption** (only for development/testing):
+
 ```typescript
 const authProxy = new OAuthProxy({
   // ... other config
@@ -464,6 +480,7 @@ const authProxy = new OAuthProxy({
 ```
 
 **Encryption details:**
+
 - AES-256-GCM encryption (enabled by default)
 - Scrypt key derivation
 - Authentication tag verification
@@ -637,12 +654,14 @@ async function verifyToken(token: string, provider: string) {
 #### When to Use JWKS
 
 Use JWKS verification when:
+
 - ✅ You need to verify tokens in multiple services (distributed systems)
 - ✅ You want to use asymmetric keys (RS256/ES256)
 - ✅ Your upstream provider uses JWKS for token validation
 - ✅ You need public key verification without shared secrets
 
 Use default HS256 (JWTIssuer) when:
+
 - ✅ You have a single server verifying tokens
 - ✅ You want simpler setup without additional dependencies
 - ✅ You prefer symmetric key signing (faster)
@@ -665,9 +684,7 @@ server.addTool({
     // Use token to access protected resources
 
     return {
-      content: [
-        { type: "text", text: "Access granted!" },
-      ],
+      content: [{ type: "text", text: "Access granted!" }],
     };
   },
 });
@@ -693,6 +710,7 @@ const authProxy = new GoogleProvider({
 ### Production Checklist
 
 1. **Use HTTPS**
+
 ```typescript
 const authProxy = new OAuthProxy({
   baseUrl: "https://your-server.com", // Not http://
@@ -701,39 +719,39 @@ const authProxy = new OAuthProxy({
 ```
 
 2. **Derive Keys from Secrets**
+
 ```typescript
 import { JWTIssuer } from "fastmcp/auth";
 
 const jwtSigningKey = await JWTIssuer.deriveKey(
   process.env.JWT_SECRET,
-  100000 // PBKDF2 iterations
+  100000, // PBKDF2 iterations
 );
 
 const encryptionKey = await JWTIssuer.deriveKey(
   process.env.ENCRYPTION_SECRET,
-  100000
+  100000,
 );
 ```
 
 3. **Use Different Keys for Different Purposes**
+
 ```typescript
-const jwtKey = await JWTIssuer.deriveKey(
-  process.env.SECRET + ":jwt",
-  100000
-);
+const jwtKey = await JWTIssuer.deriveKey(process.env.SECRET + ":jwt", 100000);
 
 const storageKey = await JWTIssuer.deriveKey(
   process.env.SECRET + ":storage",
-  100000
+  100000,
 );
 
 const consentKey = await JWTIssuer.deriveKey(
   process.env.SECRET + ":consent",
-  100000
+  100000,
 );
 ```
 
 4. **Enable Consent Screen**
+
 ```typescript
 const authProxy = new OAuthProxy({
   consentRequired: true, // Default, but be explicit
@@ -742,14 +760,16 @@ const authProxy = new OAuthProxy({
 ```
 
 5. **Use Persistent Encrypted Storage**
+
 ```typescript
 const storage = new EncryptedTokenStorage(
   new DiskStore({ directory: "/var/lib/fastmcp/oauth" }),
-  encryptionKey
+  encryptionKey,
 );
 ```
 
 6. **Validate Redirect URIs**
+
 ```typescript
 const authProxy = new OAuthProxy({
   allowedRedirectUriPatterns: [
@@ -761,12 +781,13 @@ const authProxy = new OAuthProxy({
 ```
 
 7. **Set Appropriate TTLs**
+
 ```typescript
 const authProxy = new OAuthProxy({
-  transactionTtl: 600,        // 10 minutes
-  authorizationCodeTtl: 300,  // 5 minutes
-  accessTokenTtl: 900,        // 15 minutes (shorter = more secure)
-  refreshTokenTtl: 604800,    // 7 days
+  transactionTtl: 600, // 10 minutes
+  authorizationCodeTtl: 300, // 5 minutes
+  accessTokenTtl: 900, // 15 minutes (shorter = more secure)
+  refreshTokenTtl: 604800, // 7 days
   // ...
 });
 ```
@@ -809,6 +830,7 @@ console.log(secret);
 ```
 
 Or use command line:
+
 ```bash
 # Generate random secret
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
@@ -821,22 +843,26 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 **Problem:** OAuth provider rejects the redirect URI.
 
 **Solution:** Ensure the redirect URI in provider settings matches exactly:
+
 ```
 {baseUrl}/oauth/callback
 ```
 
 Examples:
+
 - `https://your-server.com/oauth/callback`
 - `http://localhost:3000/oauth/callback`
 
 ### "Invalid state" error
 
 **Causes:**
+
 1. Transaction expired (default 10 minutes)
 2. Server restarted (in-memory storage lost)
 3. Clock skew between client and server
 
 **Solutions:**
+
 - Use persistent storage (DiskStore)
 - Increase `transactionTtl` if needed
 - Check system time synchronization
@@ -846,6 +872,7 @@ Examples:
 **Problem:** Code verifier doesn't match the challenge.
 
 **Solution:** Ensure client is:
+
 1. Storing the code verifier correctly
 2. Sending it in the token request
 3. Using the same verifier that generated the challenge
@@ -855,6 +882,7 @@ Examples:
 **Problem:** Being redirected directly without consent.
 
 **Solutions:**
+
 1. Check `consentRequired` is `true`
 2. Clear browser cookies for the domain
 3. Check consent cookie signing key is consistent
@@ -864,6 +892,7 @@ Examples:
 **Problem:** Using in-memory storage.
 
 **Solution:** Use persistent storage:
+
 ```typescript
 const authProxy = new OAuthProxy({
   tokenStorage: new DiskStore({
@@ -878,10 +907,11 @@ const authProxy = new OAuthProxy({
 **Problem:** TTL configuration issue.
 
 **Solution:** Check your TTL values:
+
 ```typescript
 const authProxy = new OAuthProxy({
-  accessTokenTtl: 3600,      // seconds, not milliseconds
-  refreshTokenTtl: 2592000,  // 30 days
+  accessTokenTtl: 3600, // seconds, not milliseconds
+  refreshTokenTtl: 2592000, // 30 days
   // ...
 });
 ```
@@ -891,6 +921,7 @@ const authProxy = new OAuthProxy({
 **Problem:** Import path issue.
 
 **Solution:** Ensure you're importing from the correct path:
+
 ```typescript
 // Correct
 import { OAuthProxy } from "fastmcp/auth";
@@ -900,6 +931,7 @@ import { OAuthProxy } from "fastmcp";
 ```
 
 Make sure `fastmcp` is properly installed:
+
 ```bash
 npm install fastmcp
 ```
@@ -931,11 +963,13 @@ npm test -- src/auth/OAuthProxy.test.ts
 ### Manual Testing Flow
 
 1. Start your server:
+
 ```bash
 npm run dev
 ```
 
 2. Register a client:
+
 ```bash
 curl -X POST http://localhost:3000/oauth/register \
   -H "Content-Type: application/json" \
@@ -946,6 +980,7 @@ curl -X POST http://localhost:3000/oauth/register \
 ```
 
 3. Visit authorization URL in browser:
+
 ```
 http://localhost:3000/oauth/authorize?client_id=<client_id>&response_type=code&redirect_uri=http://localhost:8080/callback&code_challenge=<challenge>&code_challenge_method=S256
 ```
@@ -953,6 +988,7 @@ http://localhost:3000/oauth/authorize?client_id=<client_id>&response_type=code&r
 4. Complete OAuth flow through consent and provider authentication
 
 5. Exchange authorization code for token:
+
 ```bash
 curl -X POST http://localhost:3000/oauth/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
