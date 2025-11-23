@@ -7,10 +7,22 @@ import { afterAll, beforeAll, describe, expect, it, test } from "vitest";
 import { z } from "zod";
 
 import { FastMCP, FastMCPSession, ServerState } from "./FastMCP.js";
+
 // Suppress AbortError from MCP SDK during test cleanup
-let originalUnhandledRejection: typeof process.listeners;
+const originalUnhandledRejection: Array<
+  (reason: unknown, promise: Promise<unknown>) => void
+> = [];
+
 beforeAll(() => {
-  originalUnhandledRejection = process.listeners("unhandledRejection");
+  // Store existing listeners
+  const listeners = process.listeners("unhandledRejection");
+  originalUnhandledRejection.push(
+    ...(listeners as Array<
+      (reason: unknown, promise: Promise<unknown>) => void
+    >),
+  );
+
+  // Replace with our handler
   process.removeAllListeners("unhandledRejection");
   process.on("unhandledRejection", (reason: unknown) => {
     // Ignore AbortError from SSE client during cleanup
@@ -26,9 +38,10 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  // Restore original listeners
   process.removeAllListeners("unhandledRejection");
   originalUnhandledRejection.forEach((listener) => {
-    process.on("unhandledRejection", listener as never);
+    process.on("unhandledRejection", listener);
   });
 });
 
