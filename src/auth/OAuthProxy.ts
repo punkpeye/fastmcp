@@ -21,6 +21,7 @@ import type {
   UpstreamTokenSet,
 } from "./types.js";
 
+import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
 import { JWTIssuer } from "./utils/jwtIssuer.js";
 import { PKCEUtils } from "./utils/pkce.js";
@@ -31,6 +32,7 @@ import { EncryptedTokenStorage, MemoryTokenStorage } from "./utils/tokenStore.js
  * Acts as transparent intermediary between MCP clients and upstream OAuth providers
  */
 export class OAuthProxy {
+  private claimsExtractor: ClaimsExtractor | null = null;
   private cleanupInterval: NodeJS.Timeout | null = null;
   private clientCodes: Map<string, ClientCode> = new Map();
   private config: OAuthProxyConfig;
@@ -82,6 +84,15 @@ export class OAuthProxy {
         issuer: this.config.baseUrl,
         signingKey: signingKey,
       });
+    }
+
+    // Initialize claims extractor (enabled by default)
+    const claimsConfig = config.customClaimsPassthrough !== undefined
+      ? config.customClaimsPassthrough
+      : true; // Default: enabled
+
+    if (claimsConfig !== false) {
+      this.claimsExtractor = new ClaimsExtractor(claimsConfig);
     }
 
     // Start periodic cleanup
@@ -741,6 +752,47 @@ export class OAuthProxy {
   }
 
   /**
+   * Extract custom claims from upstream tokens
+   * Combines claims from access token and ID token (if present)
+   */
+  private async extractUpstreamClaims(
+    upstreamTokens: UpstreamTokenSet,
+  ): Promise<Record<string, unknown> | null> {
+    if (!this.claimsExtractor) {
+      return null;
+    }
+
+    const allClaims: Record<string, unknown> = {};
+
+    // Extract from access token (if JWT format)
+    const accessClaims = await this.claimsExtractor.extract(
+      upstreamTokens.accessToken,
+      "access",
+    );
+    if (accessClaims) {
+      Object.assign(allClaims, accessClaims);
+    }
+
+    // Extract from ID token (if present and JWT format)
+    if (upstreamTokens.idToken) {
+      const idClaims = await this.claimsExtractor.extract(
+        upstreamTokens.idToken,
+        "id",
+      );
+      if (idClaims) {
+        // Access token claims take precedence over ID token claims
+        for (const [key, value] of Object.entries(idClaims)) {
+          if (!(key in allClaims)) {
+            allClaims[key] = value;
+          }
+        }
+      }
+    }
+
+    return Object.keys(allClaims).length > 0 ? allClaims : null;
+  }
+
+  /**
    * Issue swapped tokens (JWT pattern)
    * Issues short-lived FastMCP JWTs and stores upstream tokens securely
    */
@@ -752,6 +804,9 @@ export class OAuthProxy {
       throw new Error("JWT issuer not initialized");
     }
 
+    // Extract custom claims from upstream tokens
+    const customClaims = await this.extractUpstreamClaims(upstreamTokens);
+
     // Store upstream tokens
     const upstreamTokenKey = this.generateId();
     await this.tokenStorage.save(
@@ -760,10 +815,11 @@ export class OAuthProxy {
       upstreamTokens.expiresIn,
     );
 
-    // Issue FastMCP access token
+    // Issue FastMCP access token with custom claims
     const accessToken = this.jwtIssuer.issueAccessToken(
       clientId,
       upstreamTokens.scope,
+      customClaims || undefined,
     );
 
     // Decode JWT to get JTI
@@ -795,6 +851,7 @@ export class OAuthProxy {
       const refreshToken = this.jwtIssuer.issueRefreshToken(
         clientId,
         upstreamTokens.scope,
+        customClaims || undefined,
       );
       const refreshJti = await this.extractJti(refreshToken);
 
