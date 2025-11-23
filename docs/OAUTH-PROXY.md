@@ -176,6 +176,7 @@ const authProxy = new OAuthProxy({
 - ✅ **Two-Tier PKCE** - Client-to-proxy and proxy-to-upstream
 - ✅ **User Consent Flow** - Prevents confused deputy attacks
 - ✅ **Token Swap Pattern** - Enhanced security mode
+- ✅ **Custom Claims Passthrough** - RBAC & authorization support (enabled by default)
 - ✅ **Flexible Storage** - Memory, disk, encrypted, custom
 - ✅ **OAuth 2.1 Compliance** - Modern security standards
 - ✅ **Automatic Cleanup** - TTL-based expiration
@@ -244,6 +245,7 @@ server.addTool({
 - [ ] Configure allowed redirect URI patterns
 - [ ] Use strong secrets (minimum 32 bytes)
 - [ ] Set appropriate TTL values
+- [ ] Configure custom claims passthrough (enabled by default)
 - [ ] Implement rate limiting
 - [ ] Monitor cleanup operations
 

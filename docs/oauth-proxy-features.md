@@ -70,6 +70,96 @@ Built-in JWT issuer for token swap pattern:
 - PBKDF2 key derivation from secrets
 - Issuer/audience validation
 - Automatic expiration checking
+- Custom claims passthrough from upstream tokens (enabled by default)
+
+### 6a. Custom Claims Passthrough
+
+**Enabled by default** - Essential for authorization and RBAC:
+- Extracts custom claims from upstream access tokens and ID tokens
+- Includes claims in proxy-issued JWTs for downstream authorization
+- Supports roles, permissions, groups, email, and other custom claims
+- Compatible with RBAC libraries and authorization frameworks
+
+#### Security Features
+- **Protected claims filtering**: Standard JWT claims (aud, iss, exp, iat, nbf, jti, client_id) are never copied
+- **JWT detection**: Only extracts from JWT-format tokens (3-part base64url)
+- **Graceful handling**: Silently skips opaque tokens without errors
+- **Size limits**: Configurable claim value size limits (default: 2000 chars)
+- **Type validation**: Validates claim values before inclusion
+
+#### Configuration Options
+```typescript
+const authProxy = new OAuthProxy({
+  // ... other config ...
+  customClaimsPassthrough: {
+    // Extract from access token (default: true)
+    fromAccessToken: true,
+
+    // Extract from ID token (default: true)
+    fromIdToken: true,
+
+    // Add prefix to claim names (default: false/no prefix)
+    // Example: 'upstream_' → claims become 'upstream_role', 'upstream_email'
+    claimPrefix: false,
+
+    // Only include specific claims (optional allowlist)
+    allowedClaims: ['role', 'permissions', 'email', 'groups'],
+
+    // Block specific claims (optional blocklist)
+    blockedClaims: ['internal_id'],
+
+    // Maximum size for claim values in characters (default: 2000)
+    maxClaimValueSize: 2000,
+
+    // Allow complex objects/arrays (default: false, primitives only)
+    allowComplexClaims: false,
+  },
+});
+
+// Shorthand: boolean enables/disables with defaults
+customClaimsPassthrough: true,  // Enable with defaults
+customClaimsPassthrough: false, // Disable feature
+```
+
+#### Token Precedence
+When both access token and ID token contain claims:
+- Access token claims take precedence
+- ID token claims are merged (non-overlapping only)
+- This ensures the most authoritative claims are used
+
+#### Use Cases
+- **RBAC Authorization**: Pass user roles from Entra ID/Auth0 to MCP tools
+- **Permission Checks**: Use fine-grained permissions from upstream provider
+- **User Context**: Include email, name, groups for audit logging
+- **Multi-tenancy**: Pass tenant/organization claims for data isolation
+- **Custom Attributes**: Forward any custom claims from your identity provider
+
+#### Example: Authorization with Custom Claims
+```typescript
+// Tool with role-based access control
+server.addTool({
+  name: "admin-action",
+  description: "Perform admin action",
+  canAccess: async ({ session }) => {
+    const token = session?.headers?.["authorization"]?.replace("Bearer ", "");
+    if (!token) return false;
+
+    // Decode proxy JWT (contains custom claims from upstream)
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString()
+    );
+
+    // Check role claim passed through from upstream IDP
+    return payload.role === "admin" || payload.roles?.includes("admin");
+  },
+  execute: async (args) => {
+    // Execute admin action
+    return { content: [{ type: "text", text: "Admin action completed" }] };
+  },
+});
+```
+
+
 
 ### 7. Pre-configured Providers
 

@@ -319,6 +319,121 @@ const authProxy = new OAuthProxy({
 - Automatic cleanup of expired entries
 - Thread-safe concurrent operations
 
+### Custom Claims Passthrough (Enabled by Default)
+
+Pass custom claims from upstream tokens (roles, permissions, etc.) to your proxy-issued JWTs for authorization in MCP tools.
+
+**Enabled by default** - Claims are automatically passed through with secure defaults:
+
+```typescript
+import { OAuthProxy } from "fastmcp/auth";
+
+// Default behavior - claims passthrough enabled
+const authProxy = new OAuthProxy({
+  upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
+  upstreamTokenEndpoint: "https://provider.com/oauth/token",
+  upstreamClientId: process.env.OAUTH_CLIENT_ID,
+  upstreamClientSecret: process.env.OAUTH_CLIENT_SECRET,
+  baseUrl: "https://your-server.com",
+  // customClaimsPassthrough is enabled by default
+});
+```
+
+**Custom configuration:**
+
+```typescript
+const authProxy = new OAuthProxy({
+  // ... other config ...
+  customClaimsPassthrough: {
+    // Extract from access token (default: true)
+    fromAccessToken: true,
+
+    // Extract from ID token (default: true)
+    fromIdToken: true,
+
+    // No prefix by default for RBAC compatibility
+    claimPrefix: false,
+
+    // Optional: Only allow specific claims
+    allowedClaims: ['role', 'roles', 'permissions', 'email', 'groups'],
+
+    // Optional: Block specific claims
+    blockedClaims: ['internal_id', 'debug_info'],
+
+    // Maximum claim value size (default: 2000 chars)
+    maxClaimValueSize: 2000,
+
+    // Allow complex objects/arrays (default: false)
+    allowComplexClaims: false,
+  },
+});
+
+// Or disable if not needed
+const authProxyNoClaims = new OAuthProxy({
+  // ... other config ...
+  customClaimsPassthrough: false,
+});
+```
+
+**Using claims for authorization:**
+
+```typescript
+// Example: Role-based access control
+server.addTool({
+  name: "admin-dashboard",
+  description: "Access admin dashboard",
+  canAccess: async ({ session }) => {
+    const token = session?.headers?.["authorization"]?.replace("Bearer ", "");
+    if (!token) return false;
+
+    // Decode the proxy JWT
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString()
+    );
+
+    // Check role claim from upstream IDP
+    return payload.role === "admin" || payload.roles?.includes("admin");
+  },
+  execute: async () => {
+    return {
+      content: [{ type: "text", text: "Admin dashboard data..." }],
+    };
+  },
+});
+
+// Example: Permission-based access
+server.addTool({
+  name: "delete-resource",
+  description: "Delete a resource",
+  canAccess: async ({ session }) => {
+    const token = session?.headers?.["authorization"]?.replace("Bearer ", "");
+    if (!token) return false;
+
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString()
+    );
+
+    // Check fine-grained permissions
+    return payload.permissions?.includes("resource:delete");
+  },
+  execute: async (args) => {
+    // Delete logic here
+    return {
+      content: [{ type: "text", text: "Resource deleted" }],
+    };
+  },
+});
+```
+
+**Key features:**
+- Extracts from both access tokens and ID tokens
+- Protected claims (aud, iss, exp, iat, nbf, jti, client_id) never copied
+- Access token claims take precedence over ID token claims
+- Size limits and type validation for security
+- Supports allowlist/blocklist filtering
+- Optional prefix for claim names
+
+
 ### Encrypted Token Storage (Enabled by Default)
 
 **Storage is automatically encrypted** with AES-256-GCM. You don't need to manually wrap with `EncryptedTokenStorage`:
