@@ -21,7 +21,9 @@
       "Bash(node:*)",
       "Bash(git rm:*)",
       "Bash(npm run format:check:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(pnpm run:*)",
+      "Bash(pnpm test:*)"
     ],
     "deny": [],
     "ask": []
