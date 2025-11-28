@@ -1311,9 +1311,50 @@ server.addTool({
 
 In this example, only clients authenticating with the `admin` role will be able to list or call the `admin-dashboard` tool. The `public-info` tool will be available to all authenticated users.
 
-#### OAuth Support
+#### OAuth Proxy
 
-FastMCP includes built-in support for OAuth discovery endpoints, supporting both **MCP Specification 2025-03-26** and **MCP Specification 2025-06-18** for OAuth integration. This makes it easy to integrate with OAuth authorization flows by providing standard discovery endpoints that comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9470 (OAuth 2.0 Protected Resource Metadata):
+FastMCP includes a built-in **OAuth Proxy** that acts as a secure intermediary between MCP clients and upstream OAuth providers. The proxy handles the complete OAuth 2.1 authorization flow, including Dynamic Client Registration (DCR), PKCE, consent management, and token management with encryption and token swap patterns enabled by default.
+
+**Key Features:**
+
+- 🔐 **Secure by Default**: Automatic encryption (AES-256-GCM) and token swap pattern
+- 🚀 **Zero Configuration**: Auto-generates keys and handles OAuth flows automatically
+- 🔌 **Pre-configured Providers**: Built-in support for Google, GitHub, and Azure
+- 🎯 **RFC Compliant**: Implements DCR (RFC 7591), PKCE, and OAuth 2.1
+- 🔑 **Optional JWKS**: Support for RS256/ES256 token verification (via optional `jose` dependency)
+
+**Quick Start:**
+
+```ts
+import { FastMCP } from "fastmcp";
+import { GoogleProvider } from "fastmcp/auth";
+
+const authProxy = new GoogleProvider({
+  clientId: process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  baseUrl: "https://your-server.com",
+  scopes: ["openid", "profile", "email"],
+});
+
+const server = new FastMCP({
+  name: "My Server",
+  oauth: {
+    enabled: true,
+    authorizationServer: authProxy.getAuthorizationServerMetadata(),
+    proxy: authProxy, // Routes automatically registered!
+  },
+});
+```
+
+**Documentation:**
+
+- [OAuth Proxy Features](docs/oauth-proxy-features.md) - Complete feature list and capabilities
+- [OAuth Proxy Implementation Guide](docs/oauth-proxy-guide.md) - Setup and configuration
+- [Python vs TypeScript Comparison](docs/oauth-python-typescript.md) - Feature comparison
+
+#### OAuth Discovery Endpoints
+
+FastMCP also supports OAuth discovery endpoints for direct integration with OAuth providers, supporting both **MCP Specification 2025-03-26** and **MCP Specification 2025-06-18**. This provides standard discovery endpoints that comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9470 (OAuth 2.0 Protected Resource Metadata):
 
 ```ts
 import { FastMCP, DiscoveryDocumentCache } from "fastmcp";

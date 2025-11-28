@@ -38,6 +38,8 @@ import parseURITemplate from "uri-templates";
 import { toJsonSchema } from "xsschema";
 import { z } from "zod";
 
+import type { OAuthProxy } from "./auth/OAuthProxy.js";
+
 export interface Logger {
   debug(...args: unknown[]): void;
   error(...args: unknown[]): void;
@@ -809,6 +811,17 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
        */
       tlsClientCertificateBoundAccessTokens?: boolean;
     };
+
+    /**
+     * OAuth Proxy instance for automatic OAuth flow handling.
+     * When provided, FastMCP will automatically register OAuth endpoints:
+     * - /oauth/register (DCR)
+     * - /oauth/authorize
+     * - /oauth/token
+     * - /oauth/callback
+     * - /oauth/consent
+     */
+    proxy?: OAuthProxy;
   };
 
   ping?: {
@@ -2663,6 +2676,196 @@ export class FastMCP<
             "Content-Type": "application/json",
           })
           .end(JSON.stringify(metadata));
+        return;
+      }
+    }
+
+    // Handle OAuth Proxy endpoints
+    const oauthProxy = oauthConfig?.proxy;
+    if (oauthProxy && oauthConfig?.enabled) {
+      const url = new URL(req.url || "", `http://${host}`);
+
+      try {
+        // DCR endpoint - POST /oauth/register
+        if (req.method === "POST" && url.pathname === "/oauth/register") {
+          let body = "";
+          req.on("data", (chunk) => (body += chunk));
+          req.on("end", async () => {
+            try {
+              const request = JSON.parse(body);
+              const response = await oauthProxy.registerClient(request);
+              res
+                .writeHead(201, { "Content-Type": "application/json" })
+                .end(JSON.stringify(response));
+            } catch (error) {
+              const statusCode =
+                (error as { statusCode?: number }).statusCode || 400;
+              res
+                .writeHead(statusCode, { "Content-Type": "application/json" })
+                .end(
+                  JSON.stringify(
+                    (error as { toJSON?: () => unknown }).toJSON?.() || {
+                      error: "invalid_request",
+                    },
+                  ),
+                );
+            }
+          });
+          return;
+        }
+
+        // Authorization endpoint - GET /oauth/authorize
+        if (req.method === "GET" && url.pathname === "/oauth/authorize") {
+          try {
+            const params = Object.fromEntries(url.searchParams.entries());
+            const response = await oauthProxy.authorize(
+              params as {
+                [key: string]: unknown;
+                client_id: string;
+                redirect_uri: string;
+                response_type: string;
+              },
+            );
+
+            // Response is a redirect
+            const location = response.headers.get("Location");
+            if (location) {
+              res.writeHead(response.status, { Location: location }).end();
+            } else {
+              // HTML consent screen
+              const html = await response.text();
+              res
+                .writeHead(response.status, { "Content-Type": "text/html" })
+                .end(html);
+            }
+          } catch (error) {
+            res.writeHead(400, { "Content-Type": "application/json" }).end(
+              JSON.stringify(
+                (error as { toJSON?: () => unknown }).toJSON?.() || {
+                  error: "invalid_request",
+                },
+              ),
+            );
+          }
+          return;
+        }
+
+        // Callback endpoint - GET /oauth/callback
+        if (req.method === "GET" && url.pathname === "/oauth/callback") {
+          try {
+            const mockRequest = new Request(`http://${host}${req.url}`);
+            const response = await oauthProxy.handleCallback(mockRequest);
+
+            const location = response.headers.get("Location");
+            if (location) {
+              res.writeHead(response.status, { Location: location }).end();
+            } else {
+              const text = await response.text();
+              res.writeHead(response.status).end(text);
+            }
+          } catch (error) {
+            res.writeHead(400, { "Content-Type": "application/json" }).end(
+              JSON.stringify(
+                (error as { toJSON?: () => unknown }).toJSON?.() || {
+                  error: "server_error",
+                },
+              ),
+            );
+          }
+          return;
+        }
+
+        // Consent endpoint - POST /oauth/consent
+        if (req.method === "POST" && url.pathname === "/oauth/consent") {
+          let body = "";
+          req.on("data", (chunk) => (body += chunk));
+          req.on("end", async () => {
+            try {
+              const mockRequest = new Request(`http://${host}/oauth/consent`, {
+                body,
+                headers: {
+                  "Content-Type": "application/x-www-form-urlencoded",
+                },
+                method: "POST",
+              });
+              const response = await oauthProxy.handleConsent(mockRequest);
+
+              const location = response.headers.get("Location");
+              if (location) {
+                res.writeHead(response.status, { Location: location }).end();
+              } else {
+                const text = await response.text();
+                res.writeHead(response.status).end(text);
+              }
+            } catch (error) {
+              res.writeHead(400, { "Content-Type": "application/json" }).end(
+                JSON.stringify(
+                  (error as { toJSON?: () => unknown }).toJSON?.() || {
+                    error: "server_error",
+                  },
+                ),
+              );
+            }
+          });
+          return;
+        }
+
+        // Token endpoint - POST /oauth/token
+        if (req.method === "POST" && url.pathname === "/oauth/token") {
+          let body = "";
+          req.on("data", (chunk) => (body += chunk));
+          req.on("end", async () => {
+            try {
+              const params = new URLSearchParams(body);
+              const grantType = params.get("grant_type");
+
+              let response;
+              if (grantType === "authorization_code") {
+                response = await oauthProxy.exchangeAuthorizationCode({
+                  client_id: params.get("client_id") || "",
+                  client_secret: params.get("client_secret") || undefined,
+                  code: params.get("code") || "",
+                  code_verifier: params.get("code_verifier") || undefined,
+                  grant_type: "authorization_code",
+                  redirect_uri: params.get("redirect_uri") || "",
+                });
+              } else if (grantType === "refresh_token") {
+                response = await oauthProxy.exchangeRefreshToken({
+                  client_id: params.get("client_id") || "",
+                  client_secret: params.get("client_secret") || undefined,
+                  grant_type: "refresh_token",
+                  refresh_token: params.get("refresh_token") || "",
+                  scope: params.get("scope") || undefined,
+                });
+              } else {
+                throw {
+                  statusCode: 400,
+                  toJSON: () => ({ error: "unsupported_grant_type" }),
+                };
+              }
+
+              res
+                .writeHead(200, { "Content-Type": "application/json" })
+                .end(JSON.stringify(response));
+            } catch (error) {
+              const statusCode =
+                (error as { statusCode?: number }).statusCode || 400;
+              res
+                .writeHead(statusCode, { "Content-Type": "application/json" })
+                .end(
+                  JSON.stringify(
+                    (error as { toJSON?: () => unknown }).toJSON?.() || {
+                      error: "invalid_request",
+                    },
+                  ),
+                );
+            }
+          });
+          return;
+        }
+      } catch (error) {
+        this.#logger.error("[FastMCP error] OAuth Proxy endpoint error", error);
+        res.writeHead(500).end();
         return;
       }
     }

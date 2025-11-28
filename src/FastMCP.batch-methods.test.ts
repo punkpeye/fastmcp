@@ -3,10 +3,47 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getRandomPort } from "get-port-please";
-import { describe, expect, it, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, test } from "vitest";
 import { z } from "zod";
 
 import { FastMCP, FastMCPSession, ServerState } from "./FastMCP.js";
+
+// Suppress AbortError from MCP SDK during test cleanup
+const originalUnhandledRejection: Array<
+  (reason: unknown, promise: Promise<unknown>) => void
+> = [];
+
+beforeAll(() => {
+  // Store existing listeners
+  const listeners = process.listeners("unhandledRejection");
+  originalUnhandledRejection.push(
+    ...(listeners as Array<
+      (reason: unknown, promise: Promise<unknown>) => void
+    >),
+  );
+
+  // Replace with our handler
+  process.removeAllListeners("unhandledRejection");
+  process.on("unhandledRejection", (reason: unknown) => {
+    // Ignore AbortError from SSE client during cleanup
+    if (
+      reason instanceof Error &&
+      (reason.name === "AbortError" || reason.message?.includes("aborted"))
+    ) {
+      return;
+    }
+    // Re-throw other errors
+    throw reason;
+  });
+});
+
+afterAll(() => {
+  // Restore original listeners
+  process.removeAllListeners("unhandledRejection");
+  originalUnhandledRejection.forEach((listener) => {
+    process.on("unhandledRejection", listener);
+  });
+});
 
 const runWithTestServer = async ({
   client: createClient,
@@ -40,19 +77,19 @@ const runWithTestServer = async ({
     transportType: "httpStream",
   });
 
-  try {
-    const client = createClient
-      ? await createClient()
-      : new Client(
-          {
-            name: "example-client",
-            version: "1.0.0",
-          },
-          {
-            capabilities: {},
-          },
-        );
+  const client = createClient
+    ? await createClient()
+    : new Client(
+        {
+          name: "example-client",
+          version: "1.0.0",
+        },
+        {
+          capabilities: {},
+        },
+      );
 
+  try {
     const transport = new SSEClientTransport(
       new URL(`http://localhost:${port}/sse`),
     );
@@ -69,6 +106,11 @@ const runWithTestServer = async ({
 
     await run({ client, server, session });
   } finally {
+    try {
+      await client.close();
+    } catch {
+      // Ignore errors during client cleanup
+    }
     await server.stop();
   }
 
