@@ -2435,7 +2435,13 @@ export class FastMCP<
             );
           },
           onUnhandledRequest: async (req, res) => {
-            await this.#handleUnhandledRequest(req, res, true, httpConfig.host);
+            await this.#handleUnhandledRequest(
+              req,
+              res,
+              true,
+              httpConfig.host,
+              httpConfig.endpoint,
+            );
           },
           port: httpConfig.port,
           stateless: true,
@@ -2497,6 +2503,7 @@ export class FastMCP<
               res,
               false,
               httpConfig.host,
+              httpConfig.endpoint,
             );
           },
           port: httpConfig.port,
@@ -2575,6 +2582,7 @@ export class FastMCP<
     res: http.ServerResponse,
     isStateless = false,
     host: string,
+    streamEndpoint?: string,
   ) => {
     const healthConfig = this.#options.health ?? {};
 
@@ -2664,19 +2672,38 @@ export class FastMCP<
         return;
       }
 
-      if (
-        url.pathname === "/.well-known/oauth-protected-resource" &&
-        oauthConfig.protectedResource
-      ) {
-        const metadata = convertObjectToSnakeCase(
-          oauthConfig.protectedResource,
-        );
-        res
-          .writeHead(200, {
-            "Content-Type": "application/json",
-          })
-          .end(JSON.stringify(metadata));
-        return;
+      // Handle Protected Resource Metadata with MCP 2025-11-25 compliant discovery
+      // Per spec, clients should search in order:
+      // 1. WWW-Authenticate header (handled by mcp-proxy)
+      // 2. /.well-known/oauth-protected-resource<sub-path> (e.g., /mcp)
+      // 3. /.well-known/oauth-protected-resource (root)
+      if (oauthConfig.protectedResource) {
+        const wellKnownBase = "/.well-known/oauth-protected-resource";
+        let shouldServeMetadata = false;
+
+        // Check for sub-path variant first (higher priority per MCP spec)
+        if (
+          streamEndpoint &&
+          url.pathname === `${wellKnownBase}${streamEndpoint}`
+        ) {
+          shouldServeMetadata = true;
+        }
+        // Fall back to root path
+        else if (url.pathname === wellKnownBase) {
+          shouldServeMetadata = true;
+        }
+
+        if (shouldServeMetadata) {
+          const metadata = convertObjectToSnakeCase(
+            oauthConfig.protectedResource,
+          );
+          res
+            .writeHead(200, {
+              "Content-Type": "application/json",
+            })
+            .end(JSON.stringify(metadata));
+          return;
+        }
       }
     }
 

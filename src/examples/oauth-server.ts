@@ -78,12 +78,14 @@ server.addTool({
         {
           text: `This is an OAuth-enabled FastMCP server!
 
-OAuth Discovery Endpoints:
+OAuth Discovery Endpoints (MCP 2025-11-25):
 - Authorization Server: /.well-known/oauth-authorization-server
-- Protected Resource: /.well-known/oauth-protected-resource
+- Protected Resource (root): /.well-known/oauth-protected-resource
+- Protected Resource (sub-path): /.well-known/oauth-protected-resource/mcp
 
 The server demonstrates how to configure OAuth metadata for MCP servers
-that need to integrate with OAuth 2.0 authorization flows.`,
+that need to integrate with OAuth 2.0 authorization flows. Clients can
+discover metadata using either the root or sub-path endpoints.`,
           type: "text",
         },
       ],
@@ -105,9 +107,13 @@ Try these endpoints:
 - MCP (HTTP Stream): http://localhost:4111/mcp
 - MCP (SSE): http://localhost:4111/sse
 - Health: http://localhost:4111/health
-- OAuth Authorization Server: http://localhost:4111/.well-known/oauth-authorization-server
-- OAuth Protected Resource: http://localhost:4111/.well-known/oauth-protected-resource
+
+OAuth Discovery Endpoints (MCP Specification 2025-11-25):
+- Authorization Server: http://localhost:4111/.well-known/oauth-authorization-server
+- Protected Resource (root): http://localhost:4111/.well-known/oauth-protected-resource
+- Protected Resource (sub-path): http://localhost:4111/.well-known/oauth-protected-resource/mcp
 
 The OAuth endpoints work with both SSE and HTTP Stream transports and return
-JSON metadata following RFC 8414 standards.
+JSON metadata following RFC 8414 (Authorization Server) and RFC 9728 (Protected Resource).
+Both PRM endpoints return identical metadata for client compatibility.
 `);
