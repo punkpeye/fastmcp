@@ -222,4 +222,146 @@ describe("FastMCP OAuth Support", () => {
       await server.stop();
     }
   });
+
+  it("should serve OAuth protected resource metadata at sub-path (MCP 2025-11-25 compliance)", async () => {
+    const port = await getRandomPort();
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        enabled: true,
+        protectedResource: {
+          authorizationServers: ["https://auth.example.com"],
+          resource: "mcp://test-server",
+        },
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { endpoint: "/mcp", port },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Test sub-path variant (higher priority per MCP spec)
+      const subPathResponse = await fetch(
+        `http://localhost:${port}/.well-known/oauth-protected-resource/mcp`,
+      );
+      expect(subPathResponse.status).toBe(200);
+      expect(subPathResponse.headers.get("content-type")).toBe(
+        "application/json",
+      );
+
+      const subPathMetadata = (await subPathResponse.json()) as Record<
+        string,
+        unknown
+      >;
+      expect(subPathMetadata.resource).toBe("mcp://test-server");
+      expect(subPathMetadata.authorization_servers).toEqual([
+        "https://auth.example.com",
+      ]);
+
+      // Test root variant (fallback)
+      const rootResponse = await fetch(
+        `http://localhost:${port}/.well-known/oauth-protected-resource`,
+      );
+      expect(rootResponse.status).toBe(200);
+      expect(rootResponse.headers.get("content-type")).toBe("application/json");
+
+      const rootMetadata = (await rootResponse.json()) as Record<
+        string,
+        unknown
+      >;
+      expect(rootMetadata.resource).toBe("mcp://test-server");
+      expect(rootMetadata.authorization_servers).toEqual([
+        "https://auth.example.com",
+      ]);
+
+      // Both endpoints should return identical metadata
+      expect(subPathMetadata).toEqual(rootMetadata);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("should serve OAuth protected resource metadata at custom sub-path", async () => {
+    const port = await getRandomPort();
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        enabled: true,
+        protectedResource: {
+          authorizationServers: ["https://auth.example.com"],
+          resource: "mcp://test-server",
+        },
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { endpoint: "/api/v1/mcp", port },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Test custom sub-path variant
+      const subPathResponse = await fetch(
+        `http://localhost:${port}/.well-known/oauth-protected-resource/api/v1/mcp`,
+      );
+      expect(subPathResponse.status).toBe(200);
+
+      const metadata = (await subPathResponse.json()) as Record<
+        string,
+        unknown
+      >;
+      expect(metadata.resource).toBe("mcp://test-server");
+
+      // Root variant should also work
+      const rootResponse = await fetch(
+        `http://localhost:${port}/.well-known/oauth-protected-resource`,
+      );
+      expect(rootResponse.status).toBe(200);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("should return 404 for non-matching sub-paths", async () => {
+    const port = await getRandomPort();
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        enabled: true,
+        protectedResource: {
+          authorizationServers: ["https://auth.example.com"],
+          resource: "mcp://test-server",
+        },
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { endpoint: "/mcp", port },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Wrong sub-path should return 404
+      const wrongPathResponse = await fetch(
+        `http://localhost:${port}/.well-known/oauth-protected-resource/wrong`,
+      );
+      expect(wrongPathResponse.status).toBe(404);
+
+      // Partial match should return 404
+      const partialPathResponse = await fetch(
+        `http://localhost:${port}/.well-known/oauth-protected-resource/mc`,
+      );
+      expect(partialPathResponse.status).toBe(404);
+    } finally {
+      await server.stop();
+    }
+  });
 });

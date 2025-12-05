@@ -1454,7 +1454,18 @@ const server = new FastMCP({
 This configuration automatically exposes OAuth discovery endpoints:
 
 - `/.well-known/oauth-authorization-server` - Authorization server metadata (RFC 8414)
-- `/.well-known/oauth-protected-resource` - Protected resource metadata (RFC 9470)
+- `/.well-known/oauth-protected-resource` - Protected resource metadata (RFC 9728)
+- `/.well-known/oauth-protected-resource<endpoint>` - Protected resource metadata at sub-path (MCP 2025-11-25)
+
+**Discovery Mechanism (MCP Specification 2025-11-25):**
+
+Clients discover protected resource metadata using the following search order:
+
+1. **WWW-Authenticate header** - Primary method (handled automatically by mcp-proxy)
+2. **Sub-path well-known** - `/.well-known/oauth-protected-resource<endpoint>` (e.g., `/.well-known/oauth-protected-resource/mcp`)
+3. **Root well-known** - `/.well-known/oauth-protected-resource` (fallback)
+
+Both the sub-path and root endpoints return identical metadata, ensuring compatibility with all MCP client implementations.
 
 For JWT token validation, you can use libraries like [`get-jwks`](https://github.com/nearform/get-jwks) and [`@fastify/jwt`](https://github.com/fastify/fastify-jwt) for OAuth JWT tokens.
 
