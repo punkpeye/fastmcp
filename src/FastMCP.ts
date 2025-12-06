@@ -433,8 +433,8 @@ type InputPromptArgument<T extends FastMCPSessionAuth = FastMCPSessionAuth> =
 
 type InputResourceTemplate<
   T extends FastMCPSessionAuth,
-  Arguments extends
-    InputResourceTemplateArgument<T>[] = InputResourceTemplateArgument<T>[],
+  Arguments extends InputResourceTemplateArgument<T>[] =
+    InputResourceTemplateArgument<T>[],
 > = {
   arguments: Arguments;
   description?: string;
@@ -522,8 +522,8 @@ type ResourceResult =
 
 type ResourceTemplate<
   T extends FastMCPSessionAuth,
-  Arguments extends
-    ResourceTemplateArgument<T>[] = ResourceTemplateArgument<T>[],
+  Arguments extends ResourceTemplateArgument<T>[] =
+    ResourceTemplateArgument<T>[],
 > = {
   arguments: Arguments;
   complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
