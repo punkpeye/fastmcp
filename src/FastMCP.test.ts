@@ -726,7 +726,10 @@ test("sends logging messages to the client", async () => {
       client.setNotificationHandler(
         LoggingMessageNotificationSchema,
         (message) => {
-          if (message.method === "notifications/message" && typeof message.params.data === "object") {
+          if (
+            message.method === "notifications/message" &&
+            typeof message.params.data === "object"
+          ) {
             onLog({
               level: message.params.level,
               ...(message.params.data ?? {}),

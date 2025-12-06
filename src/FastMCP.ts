@@ -1416,9 +1416,9 @@ export class FastMCPSession<
         const ref = request.params.ref;
 
         // TODO add tests
-        const prompt = 'name' in ref && this.#prompts.find(
-          (prompt) => prompt.name === ref.type,
-        );
+        const prompt =
+          "name" in ref &&
+          this.#prompts.find((prompt) => prompt.name === ref.type);
 
         if (!prompt) {
           throw new UnexpectedStateError("Unknown prompt", {
@@ -1449,9 +1449,11 @@ export class FastMCPSession<
         const ref = request.params.ref;
 
         // TODO add tests
-        const resource = 'uri' in ref && this.#resourceTemplates.find(
-          (resource) => resource.uriTemplate === ref.uri,
-        );
+        const resource =
+          "uri" in ref &&
+          this.#resourceTemplates.find(
+            (resource) => resource.uriTemplate === ref.uri,
+          );
 
         if (!resource) {
           throw new UnexpectedStateError("Unknown resource", {
