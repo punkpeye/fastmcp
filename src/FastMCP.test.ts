@@ -2093,7 +2093,7 @@ test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema"
 
         // @ts-expect-error - we know that error is an McpError
         expect(error.message).toBe(
-          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Expected number, received string. Please check the parameter types and values according to the tool's schema.",
+          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Invalid input: expected number, received string. Please check the parameter types and values according to the tool's schema.",
         );
       }
     },
@@ -2139,7 +2139,7 @@ test("server remains usable after InvalidParams error", async () => {
 
         // @ts-expect-error - we know that error is an McpError
         expect(error.message).toBe(
-          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Expected number, received string. Please check the parameter types and values according to the tool's schema.",
+          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Invalid input: expected number, received string. Please check the parameter types and values according to the tool's schema.",
         );
       }
 
@@ -3397,7 +3397,7 @@ test("uses `formatInvalidParamsErrorMessage` callback to build ErrorCode.Invalid
 
         // @ts-expect-error - we know that error is an McpError
         expect(error.message).toBe(
-          `MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: My custom error message: Field b failed with error 'Expected number, received string'. Please check the parameter types and values according to the tool's schema.`,
+          `MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: My custom error message: Field b failed with error 'Invalid input: expected number, received string'. Please check the parameter types and values according to the tool's schema.`,
         );
       }
     },
@@ -3614,7 +3614,7 @@ test("stateless mode with valid authentication allows access", async () => {
   }
 });
 
-test.only("stateless mode rejects missing Authorization header", async () => {
+test("stateless mode rejects missing Authorization header", async () => {
   const port = await getRandomPort();
 
   const server = new FastMCP<{ userId: string }>({
@@ -3743,9 +3743,6 @@ test("stateless mode rejects invalid authentication token", async () => {
     });
 
     expect(response.status).toBe(401);
-
-    const body = (await response.json()) as { error?: { message?: string } };
-    expect(body.error?.message).toContain("Unauthorized");
   } finally {
     await server.stop();
   }

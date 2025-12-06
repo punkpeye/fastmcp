@@ -1418,7 +1418,7 @@ export class FastMCPSession<
         // TODO add tests
         const prompt =
           "name" in ref &&
-          this.#prompts.find((prompt) => prompt.name === ref.type);
+          this.#prompts.find((prompt) => prompt.name === ref.name);
 
         if (!prompt) {
           throw new UnexpectedStateError("Unknown prompt", {
