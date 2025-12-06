@@ -1413,8 +1413,11 @@ export class FastMCPSession<
   private setupCompleteHandlers() {
     this.#server.setRequestHandler(CompleteRequestSchema, async (request) => {
       if (request.params.ref.type === "ref/prompt") {
-        const prompt = this.#prompts.find(
-          (prompt) => prompt.name === request.params.ref.name,
+        const ref = request.params.ref;
+
+        // TODO add tests
+        const prompt = 'name' in ref && this.#prompts.find(
+          (prompt) => prompt.name === ref.type,
         );
 
         if (!prompt) {
@@ -1443,8 +1446,11 @@ export class FastMCPSession<
       }
 
       if (request.params.ref.type === "ref/resource") {
-        const resource = this.#resourceTemplates.find(
-          (resource) => resource.uriTemplate === request.params.ref.uri,
+        const ref = request.params.ref;
+
+        // TODO add tests
+        const resource = 'uri' in ref && this.#resourceTemplates.find(
+          (resource) => resource.uriTemplate === ref.uri,
         );
 
         if (!resource) {
