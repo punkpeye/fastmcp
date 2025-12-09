@@ -185,3 +185,166 @@ describe("FastMCP OAuth Proxy Integration", () => {
     }
   });
 });
+
+describe("OAuth Token Endpoint Basic Auth", () => {
+  it("should accept Basic auth header for client credentials", async () => {
+    const port = await getRandomPort();
+    const authProxy = new OAuthProxy({
+      baseUrl: `http://localhost:${port}`,
+      scopes: ["openid"],
+      upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
+      upstreamClientId: "test-client-id",
+      upstreamClientSecret: "test-client-secret",
+      upstreamTokenEndpoint: "https://example.com/oauth/token",
+    });
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        authorizationServer: authProxy.getAuthorizationServerMetadata(),
+        enabled: true,
+        proxy: authProxy,
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { port },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Encode Basic auth header (RFC 6749 Section 2.3.1)
+      const credentials = Buffer.from("test-client:test-secret").toString(
+        "base64",
+      );
+
+      const response = await fetch(`http://localhost:${port}/oauth/token`, {
+        body: new URLSearchParams({
+          code: "invalid-code",
+          grant_type: "authorization_code",
+          redirect_uri: "https://client.example.com/callback",
+        }).toString(),
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(400);
+      const data = (await response.json()) as { error: string };
+      // Should fail with invalid_grant (code not found), not invalid_client
+      // This proves Basic auth credentials were successfully parsed
+      expect(data.error).toBe("invalid_grant");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("should fall back to POST body credentials when no Basic auth header", async () => {
+    const port = await getRandomPort();
+    const authProxy = new OAuthProxy({
+      baseUrl: `http://localhost:${port}`,
+      scopes: ["openid"],
+      upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
+      upstreamClientId: "test-client-id",
+      upstreamClientSecret: "test-client-secret",
+      upstreamTokenEndpoint: "https://example.com/oauth/token",
+    });
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        authorizationServer: authProxy.getAuthorizationServerMetadata(),
+        enabled: true,
+        proxy: authProxy,
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { port },
+      transportType: "httpStream",
+    });
+
+    try {
+      // No Authorization header - credentials in POST body
+      const response = await fetch(`http://localhost:${port}/oauth/token`, {
+        body: new URLSearchParams({
+          client_id: "test-client",
+          client_secret: "test-secret",
+          code: "invalid-code",
+          grant_type: "authorization_code",
+          redirect_uri: "https://client.example.com/callback",
+        }).toString(),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(400);
+      const data = (await response.json()) as { error: string };
+      // Should fail with invalid_grant (code not found), not invalid_client
+      // This proves POST body credentials were successfully parsed
+      expect(data.error).toBe("invalid_grant");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("should accept Basic auth with empty client_secret", async () => {
+    const port = await getRandomPort();
+    const authProxy = new OAuthProxy({
+      baseUrl: `http://localhost:${port}`,
+      scopes: ["openid"],
+      upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
+      upstreamClientId: "test-client-id",
+      upstreamClientSecret: "test-client-secret",
+      upstreamTokenEndpoint: "https://example.com/oauth/token",
+    });
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        authorizationServer: authProxy.getAuthorizationServerMetadata(),
+        enabled: true,
+        proxy: authProxy,
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { port },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Per RFC 6749, client_secret can be empty (public clients)
+      // Format: "client_id:" (note the colon with empty secret)
+      const credentials = Buffer.from("test-client:").toString("base64");
+
+      const response = await fetch(`http://localhost:${port}/oauth/token`, {
+        body: new URLSearchParams({
+          code: "invalid-code",
+          grant_type: "authorization_code",
+          redirect_uri: "https://client.example.com/callback",
+        }).toString(),
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(400);
+      const data = (await response.json()) as { error: string };
+      // Should fail with invalid_grant (code not found), not invalid_client
+      // This proves empty client_secret is handled correctly
+      expect(data.error).toBe("invalid_grant");
+    } finally {
+      await server.stop();
+    }
+  });
+});
