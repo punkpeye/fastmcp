@@ -4,7 +4,7 @@
  */
 
 import { getRandomPort } from "get-port-please";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OAuthProxy } from "./auth/OAuthProxy.js";
 import { FastMCP } from "./FastMCP.js";
@@ -198,6 +198,9 @@ describe("OAuth Token Endpoint Basic Auth", () => {
       upstreamTokenEndpoint: "https://example.com/oauth/token",
     });
 
+    // Spy on exchangeAuthorizationCode to capture the parameters
+    const spy = vi.spyOn(authProxy, "exchangeAuthorizationCode");
+
     const server = new FastMCP({
       name: "Test Server",
       oauth: {
@@ -219,9 +222,10 @@ describe("OAuth Token Endpoint Basic Auth", () => {
         "base64",
       );
 
-      const response = await fetch(`http://localhost:${port}/oauth/token`, {
+      // Note: NO client_id or client_secret in body - only in Authorization header
+      await fetch(`http://localhost:${port}/oauth/token`, {
         body: new URLSearchParams({
-          code: "invalid-code",
+          code: "any-code",
           grant_type: "authorization_code",
           redirect_uri: "https://client.example.com/callback",
         }).toString(),
@@ -232,12 +236,15 @@ describe("OAuth Token Endpoint Basic Auth", () => {
         method: "POST",
       });
 
-      expect(response.status).toBe(400);
-      const data = (await response.json()) as { error: string };
-      // Should fail with invalid_grant (code not found), not invalid_client
-      // This proves Basic auth credentials were successfully parsed
-      expect(data.error).toBe("invalid_grant");
+      // Verify spy was called with credentials from Basic auth header
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_id: "test-client",
+          client_secret: "test-secret",
+        }),
+      );
     } finally {
+      spy.mockRestore();
       await server.stop();
     }
   });
@@ -252,6 +259,9 @@ describe("OAuth Token Endpoint Basic Auth", () => {
       upstreamClientSecret: "test-client-secret",
       upstreamTokenEndpoint: "https://example.com/oauth/token",
     });
+
+    // Spy on exchangeAuthorizationCode to capture the parameters
+    const spy = vi.spyOn(authProxy, "exchangeAuthorizationCode");
 
     const server = new FastMCP({
       name: "Test Server",
@@ -270,11 +280,11 @@ describe("OAuth Token Endpoint Basic Auth", () => {
 
     try {
       // No Authorization header - credentials in POST body
-      const response = await fetch(`http://localhost:${port}/oauth/token`, {
+      await fetch(`http://localhost:${port}/oauth/token`, {
         body: new URLSearchParams({
-          client_id: "test-client",
-          client_secret: "test-secret",
-          code: "invalid-code",
+          client_id: "body-client",
+          client_secret: "body-secret",
+          code: "any-code",
           grant_type: "authorization_code",
           redirect_uri: "https://client.example.com/callback",
         }).toString(),
@@ -284,12 +294,15 @@ describe("OAuth Token Endpoint Basic Auth", () => {
         method: "POST",
       });
 
-      expect(response.status).toBe(400);
-      const data = (await response.json()) as { error: string };
-      // Should fail with invalid_grant (code not found), not invalid_client
-      // This proves POST body credentials were successfully parsed
-      expect(data.error).toBe("invalid_grant");
+      // Verify spy was called with credentials from POST body
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_id: "body-client",
+          client_secret: "body-secret",
+        }),
+      );
     } finally {
+      spy.mockRestore();
       await server.stop();
     }
   });
@@ -304,6 +317,9 @@ describe("OAuth Token Endpoint Basic Auth", () => {
       upstreamClientSecret: "test-client-secret",
       upstreamTokenEndpoint: "https://example.com/oauth/token",
     });
+
+    // Spy on exchangeAuthorizationCode to capture the parameters
+    const spy = vi.spyOn(authProxy, "exchangeAuthorizationCode");
 
     const server = new FastMCP({
       name: "Test Server",
@@ -323,11 +339,12 @@ describe("OAuth Token Endpoint Basic Auth", () => {
     try {
       // Per RFC 6749, client_secret can be empty (public clients)
       // Format: "client_id:" (note the colon with empty secret)
-      const credentials = Buffer.from("test-client:").toString("base64");
+      const credentials = Buffer.from("public-client:").toString("base64");
 
-      const response = await fetch(`http://localhost:${port}/oauth/token`, {
+      // Note: NO client_id or client_secret in body - only in Authorization header
+      await fetch(`http://localhost:${port}/oauth/token`, {
         body: new URLSearchParams({
-          code: "invalid-code",
+          code: "any-code",
           grant_type: "authorization_code",
           redirect_uri: "https://client.example.com/callback",
         }).toString(),
@@ -338,12 +355,16 @@ describe("OAuth Token Endpoint Basic Auth", () => {
         method: "POST",
       });
 
-      expect(response.status).toBe(400);
-      const data = (await response.json()) as { error: string };
-      // Should fail with invalid_grant (code not found), not invalid_client
-      // This proves empty client_secret is handled correctly
-      expect(data.error).toBe("invalid_grant");
+      // Verify spy was called with credentials from Basic auth header
+      // Empty client_secret should be passed as empty string
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_id: "public-client",
+          client_secret: "",
+        }),
+      );
     } finally {
+      spy.mockRestore();
       await server.stop();
     }
   });
