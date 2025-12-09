@@ -2004,6 +2004,26 @@ function convertObjectToSnakeCase(
   return result;
 }
 
+/**
+ * Parses Basic auth header (RFC 6749 Section 2.3.1)
+ */
+function parseBasicAuthHeader(
+  authHeader: string | undefined,
+): { clientId: string; clientSecret: string } | null {
+  const basicMatch = authHeader?.match(/^Basic\s+(.+)$/);
+  if (!basicMatch) return null;
+
+  try {
+    const credentials = Buffer.from(basicMatch[1], "base64").toString("utf-8");
+    const credMatch = credentials.match(/^([^:]+):(.*)$/);
+    if (!credMatch) return null;
+
+    return { clientId: credMatch[1], clientSecret: credMatch[2] };
+  } catch {
+    return null;
+  }
+}
+
 const FastMCPEventEmitterBase: {
   new (): StrictEventEmitter<EventEmitter, FastMCPEvents<FastMCPSessionAuth>>;
 } = EventEmitter;
@@ -2854,11 +2874,22 @@ export class FastMCP<
               const params = new URLSearchParams(body);
               const grantType = params.get("grant_type");
 
+              // Parse Basic auth header (RFC 6749 Section 2.3.1)
+              const basicAuth = parseBasicAuthHeader(req.headers.authorization);
+
+              // Use Basic auth credentials if present, otherwise fall back to POST body
+              const clientId =
+                basicAuth?.clientId || params.get("client_id") || "";
+              const clientSecret =
+                basicAuth?.clientSecret ??
+                params.get("client_secret") ??
+                undefined;
+
               let response;
               if (grantType === "authorization_code") {
                 response = await oauthProxy.exchangeAuthorizationCode({
-                  client_id: params.get("client_id") || "",
-                  client_secret: params.get("client_secret") || undefined,
+                  client_id: clientId,
+                  client_secret: clientSecret,
                   code: params.get("code") || "",
                   code_verifier: params.get("code_verifier") || undefined,
                   grant_type: "authorization_code",
@@ -2866,8 +2897,8 @@ export class FastMCP<
                 });
               } else if (grantType === "refresh_token") {
                 response = await oauthProxy.exchangeRefreshToken({
-                  client_id: params.get("client_id") || "",
-                  client_secret: params.get("client_secret") || undefined,
+                  client_id: clientId,
+                  client_secret: clientSecret,
                   grant_type: "refresh_token",
                   refresh_token: params.get("refresh_token") || "",
                   scope: params.get("scope") || undefined,

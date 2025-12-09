@@ -4,7 +4,7 @@
  */
 
 import { getRandomPort } from "get-port-please";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OAuthProxy } from "./auth/OAuthProxy.js";
 import { FastMCP } from "./FastMCP.js";
@@ -181,6 +181,190 @@ describe("FastMCP OAuth Proxy Integration", () => {
       expect([302, 303]).toContain(authResponse.status);
       expect(authResponse.headers.get("Location")).toBeTruthy();
     } finally {
+      await server.stop();
+    }
+  });
+});
+
+describe("OAuth Token Endpoint Basic Auth", () => {
+  it("should accept Basic auth header for client credentials", async () => {
+    const port = await getRandomPort();
+    const authProxy = new OAuthProxy({
+      baseUrl: `http://localhost:${port}`,
+      scopes: ["openid"],
+      upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
+      upstreamClientId: "test-client-id",
+      upstreamClientSecret: "test-client-secret",
+      upstreamTokenEndpoint: "https://example.com/oauth/token",
+    });
+
+    // Spy on exchangeAuthorizationCode to capture the parameters
+    const spy = vi.spyOn(authProxy, "exchangeAuthorizationCode");
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        authorizationServer: authProxy.getAuthorizationServerMetadata(),
+        enabled: true,
+        proxy: authProxy,
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { port },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Encode Basic auth header (RFC 6749 Section 2.3.1)
+      const credentials = Buffer.from("test-client:test-secret").toString(
+        "base64",
+      );
+
+      // Note: NO client_id or client_secret in body - only in Authorization header
+      await fetch(`http://localhost:${port}/oauth/token`, {
+        body: new URLSearchParams({
+          code: "any-code",
+          grant_type: "authorization_code",
+          redirect_uri: "https://client.example.com/callback",
+        }).toString(),
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method: "POST",
+      });
+
+      // Verify spy was called with credentials from Basic auth header
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_id: "test-client",
+          client_secret: "test-secret",
+        }),
+      );
+    } finally {
+      spy.mockRestore();
+      await server.stop();
+    }
+  });
+
+  it("should fall back to POST body credentials when no Basic auth header", async () => {
+    const port = await getRandomPort();
+    const authProxy = new OAuthProxy({
+      baseUrl: `http://localhost:${port}`,
+      scopes: ["openid"],
+      upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
+      upstreamClientId: "test-client-id",
+      upstreamClientSecret: "test-client-secret",
+      upstreamTokenEndpoint: "https://example.com/oauth/token",
+    });
+
+    // Spy on exchangeAuthorizationCode to capture the parameters
+    const spy = vi.spyOn(authProxy, "exchangeAuthorizationCode");
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        authorizationServer: authProxy.getAuthorizationServerMetadata(),
+        enabled: true,
+        proxy: authProxy,
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { port },
+      transportType: "httpStream",
+    });
+
+    try {
+      // No Authorization header - credentials in POST body
+      await fetch(`http://localhost:${port}/oauth/token`, {
+        body: new URLSearchParams({
+          client_id: "body-client",
+          client_secret: "body-secret",
+          code: "any-code",
+          grant_type: "authorization_code",
+          redirect_uri: "https://client.example.com/callback",
+        }).toString(),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method: "POST",
+      });
+
+      // Verify spy was called with credentials from POST body
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_id: "body-client",
+          client_secret: "body-secret",
+        }),
+      );
+    } finally {
+      spy.mockRestore();
+      await server.stop();
+    }
+  });
+
+  it("should accept Basic auth with empty client_secret", async () => {
+    const port = await getRandomPort();
+    const authProxy = new OAuthProxy({
+      baseUrl: `http://localhost:${port}`,
+      scopes: ["openid"],
+      upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
+      upstreamClientId: "test-client-id",
+      upstreamClientSecret: "test-client-secret",
+      upstreamTokenEndpoint: "https://example.com/oauth/token",
+    });
+
+    // Spy on exchangeAuthorizationCode to capture the parameters
+    const spy = vi.spyOn(authProxy, "exchangeAuthorizationCode");
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        authorizationServer: authProxy.getAuthorizationServerMetadata(),
+        enabled: true,
+        proxy: authProxy,
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { port },
+      transportType: "httpStream",
+    });
+
+    try {
+      // Per RFC 6749, client_secret can be empty (public clients)
+      // Format: "client_id:" (note the colon with empty secret)
+      const credentials = Buffer.from("public-client:").toString("base64");
+
+      // Note: NO client_id or client_secret in body - only in Authorization header
+      await fetch(`http://localhost:${port}/oauth/token`, {
+        body: new URLSearchParams({
+          code: "any-code",
+          grant_type: "authorization_code",
+          redirect_uri: "https://client.example.com/callback",
+        }).toString(),
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method: "POST",
+      });
+
+      // Verify spy was called with credentials from Basic auth header
+      // Empty client_secret should be passed as empty string
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_id: "public-client",
+          client_secret: "",
+        }),
+      );
+    } finally {
+      spy.mockRestore();
       await server.stop();
     }
   });
