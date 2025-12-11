@@ -4,6 +4,7 @@
  */
 
 import { randomBytes } from "crypto";
+import { z } from "zod";
 
 import type {
   AuthorizationParams,
@@ -861,14 +862,24 @@ export class OAuthProxy {
     scope?: string;
     token_type?: string;
   }> {
-    const contentType = response.headers.get("content-type") || "";
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+
+    // Define Zod schema for token response validation
+    const tokenResponseSchema = z.object({
+      access_token: z.string().min(1, "access_token cannot be empty"),
+      expires_in: z.number().int().positive().optional(),
+      id_token: z.string().optional(),
+      refresh_token: z.string().optional(),
+      scope: z.string().optional(),
+      token_type: z.string().optional(),
+    });
 
     // Check if response is URL-encoded (e.g., GitHub Apps)
     if (contentType.includes("application/x-www-form-urlencoded")) {
       const text = await response.text();
       const params = new URLSearchParams(text);
 
-      return {
+      const rawData = {
         access_token: params.get("access_token") || "",
         expires_in: params.get("expires_in")
           ? parseInt(params.get("expires_in")!)
@@ -878,17 +889,13 @@ export class OAuthProxy {
         scope: params.get("scope") || undefined,
         token_type: params.get("token_type") || undefined,
       };
+
+      return tokenResponseSchema.parse(rawData);
     }
 
     // Default to JSON parsing
-    return (await response.json()) as {
-      access_token: string;
-      expires_in?: number;
-      id_token?: string;
-      refresh_token?: string;
-      scope?: string;
-      token_type?: string;
-    };
+    const rawJson = await response.json();
+    return tokenResponseSchema.parse(rawJson);
   }
 
   /**

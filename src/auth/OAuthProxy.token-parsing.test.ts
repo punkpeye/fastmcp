@@ -203,5 +203,215 @@ describe("OAuthProxy - Token Response Parsing", () => {
 
       proxy.destroy();
     });
+
+    it("should throw validation error for missing access_token in JSON", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        JSON.stringify({
+          expires_in: 3600,
+          token_type: "Bearer",
+          // missing access_token
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+
+      await expect(
+        (proxy as any).parseTokenResponse(mockResponse),
+      ).rejects.toThrow();
+
+      proxy.destroy();
+    });
+
+    it("should throw validation error for invalid expires_in type in URL-encoded", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        "access_token=test&expires_in=invalid&token_type=bearer",
+        {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          status: 200,
+        },
+      );
+
+      await expect(
+        (proxy as any).parseTokenResponse(mockResponse),
+      ).rejects.toThrow();
+
+      proxy.destroy();
+    });
+
+    it("should throw validation error for negative expires_in", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        JSON.stringify({
+          access_token: "test",
+          expires_in: -100,
+          token_type: "Bearer",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+
+      await expect(
+        (proxy as any).parseTokenResponse(mockResponse),
+      ).rejects.toThrow();
+
+      proxy.destroy();
+    });
+
+    it("should throw validation error for missing access_token in URL-encoded", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response("expires_in=3600&token_type=bearer", {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        status: 200,
+      });
+
+      await expect(
+        (proxy as any).parseTokenResponse(mockResponse),
+      ).rejects.toThrow();
+
+      proxy.destroy();
+    });
+
+    it("should throw validation error for non-integer expires_in", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        JSON.stringify({
+          access_token: "test",
+          expires_in: 3600.5, // float instead of integer
+          token_type: "Bearer",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+
+      await expect(
+        (proxy as any).parseTokenResponse(mockResponse),
+      ).rejects.toThrow();
+
+      proxy.destroy();
+    });
+
+    it("should throw validation error for zero expires_in", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        JSON.stringify({
+          access_token: "test",
+          expires_in: 0, // zero is not positive
+          token_type: "Bearer",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+
+      await expect(
+        (proxy as any).parseTokenResponse(mockResponse),
+      ).rejects.toThrow();
+
+      proxy.destroy();
+    });
+
+    it("should handle URL-encoded response with id_token", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        "access_token=test&id_token=eyJhbGc&expires_in=3600&token_type=bearer",
+        {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          status: 200,
+        },
+      );
+
+      const tokens = await (proxy as any).parseTokenResponse(mockResponse);
+
+      expect(tokens.access_token).toBe("test");
+      expect(tokens.id_token).toBe("eyJhbGc");
+      expect(tokens.expires_in).toBe(3600);
+      expect(tokens.token_type).toBe("bearer");
+
+      proxy.destroy();
+    });
+
+    it("should handle JSON response with only required field", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        JSON.stringify({
+          access_token: "minimal_token",
+          // all other fields optional
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+
+      const tokens = await (proxy as any).parseTokenResponse(mockResponse);
+
+      expect(tokens.access_token).toBe("minimal_token");
+      expect(tokens.expires_in).toBeUndefined();
+      expect(tokens.id_token).toBeUndefined();
+      expect(tokens.refresh_token).toBeUndefined();
+      expect(tokens.scope).toBeUndefined();
+      expect(tokens.token_type).toBeUndefined();
+
+      proxy.destroy();
+    });
+
+    it("should throw validation error for wrong type of access_token", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        JSON.stringify({
+          access_token: 12345, // number instead of string
+          token_type: "Bearer",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+
+      await expect(
+        (proxy as any).parseTokenResponse(mockResponse),
+      ).rejects.toThrow();
+
+      proxy.destroy();
+    });
+
+    it("should handle mixed case Content-Type header", async () => {
+      const proxy = new OAuthProxy(baseConfig);
+
+      const mockResponse = new Response(
+        "access_token=test&expires_in=3600&token_type=bearer",
+        {
+          headers: {
+            "Content-Type": "Application/X-Www-Form-Urlencoded",
+          },
+          status: 200,
+        },
+      );
+
+      const tokens = await (proxy as any).parseTokenResponse(mockResponse);
+
+      expect(tokens.access_token).toBe("test");
+      expect(tokens.expires_in).toBe(3600);
+
+      proxy.destroy();
+    });
   });
 });
