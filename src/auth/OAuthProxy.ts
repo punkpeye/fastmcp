@@ -575,46 +575,6 @@ export class OAuthProxy {
   }
 
   /**
-   * Parse token response that can be either JSON or URL-encoded
-   * GitHub Apps return URL-encoded format, most providers return JSON
-   */
-  private async parseTokenResponse(response: Response): Promise<{
-    access_token: string;
-    expires_in?: number;
-    id_token?: string;
-    refresh_token?: string;
-    scope?: string;
-    token_type?: string;
-  }> {
-    const contentType = response.headers.get("content-type") || "";
-    
-    // Check if response is URL-encoded (e.g., GitHub Apps)
-    if (contentType.includes("application/x-www-form-urlencoded")) {
-      const text = await response.text();
-      const params = new URLSearchParams(text);
-      
-      return {
-        access_token: params.get("access_token") || "",
-        expires_in: params.get("expires_in") ? parseInt(params.get("expires_in")!) : undefined,
-        id_token: params.get("id_token") || undefined,
-        refresh_token: params.get("refresh_token") || undefined,
-        scope: params.get("scope") || undefined,
-        token_type: params.get("token_type") || undefined,
-      };
-    }
-    
-    // Default to JSON parsing
-    return await response.json() as {
-      access_token: string;
-      expires_in?: number;
-      id_token?: string;
-      refresh_token?: string;
-      scope?: string;
-      token_type?: string;
-    };
-  }
-
-  /**
    * Create a new OAuth transaction
    */
   private async createTransaction(
@@ -887,6 +847,48 @@ export class OAuthProxy {
       "^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$",
     );
     return regex.test(uri);
+  }
+
+  /**
+   * Parse token response that can be either JSON or URL-encoded
+   * GitHub Apps return URL-encoded format, most providers return JSON
+   */
+  private async parseTokenResponse(response: Response): Promise<{
+    access_token: string;
+    expires_in?: number;
+    id_token?: string;
+    refresh_token?: string;
+    scope?: string;
+    token_type?: string;
+  }> {
+    const contentType = response.headers.get("content-type") || "";
+
+    // Check if response is URL-encoded (e.g., GitHub Apps)
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+      const text = await response.text();
+      const params = new URLSearchParams(text);
+
+      return {
+        access_token: params.get("access_token") || "",
+        expires_in: params.get("expires_in")
+          ? parseInt(params.get("expires_in")!)
+          : undefined,
+        id_token: params.get("id_token") || undefined,
+        refresh_token: params.get("refresh_token") || undefined,
+        scope: params.get("scope") || undefined,
+        token_type: params.get("token_type") || undefined,
+      };
+    }
+
+    // Default to JSON parsing
+    return (await response.json()) as {
+      access_token: string;
+      expires_in?: number;
+      id_token?: string;
+      refresh_token?: string;
+      scope?: string;
+      token_type?: string;
+    };
   }
 
   /**
