@@ -862,7 +862,9 @@ export class OAuthProxy {
     scope?: string;
     token_type?: string;
   }> {
-    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    const contentType = (
+      response.headers.get("content-type") || ""
+    ).toLowerCase();
 
     // Define Zod schema for token response validation
     const tokenResponseSchema = z.object({
