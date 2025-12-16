@@ -4,6 +4,7 @@
  */
 
 import { randomBytes } from "crypto";
+import { z } from "zod";
 
 import type {
   AuthorizationParams,
@@ -287,18 +288,11 @@ export class OAuthProxy {
       );
     }
 
-    const tokens = (await tokenResponse.json()) as {
-      access_token: string;
-      expires_in: number;
-      id_token?: string;
-      refresh_token?: string;
-      scope?: string;
-      token_type?: string;
-    };
+    const tokens = await this.parseTokenResponse(tokenResponse);
 
     return {
       access_token: tokens.access_token,
-      expires_in: tokens.expires_in,
+      expires_in: tokens.expires_in || 3600,
       id_token: tokens.id_token,
       refresh_token: tokens.refresh_token,
       scope: tokens.scope,
@@ -644,14 +638,7 @@ export class OAuthProxy {
       );
     }
 
-    const tokens = (await tokenResponse.json()) as {
-      access_token: string;
-      expires_in?: number;
-      id_token?: string;
-      refresh_token?: string;
-      scope?: string;
-      token_type?: string;
-    };
+    const tokens = await this.parseTokenResponse(tokenResponse);
 
     return {
       accessToken: tokens.access_token,
@@ -861,6 +848,56 @@ export class OAuthProxy {
       "^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$",
     );
     return regex.test(uri);
+  }
+
+  /**
+   * Parse token response that can be either JSON or URL-encoded
+   * GitHub Apps return URL-encoded format, most providers return JSON
+   */
+  private async parseTokenResponse(response: Response): Promise<{
+    access_token: string;
+    expires_in?: number;
+    id_token?: string;
+    refresh_token?: string;
+    scope?: string;
+    token_type?: string;
+  }> {
+    const contentType = (
+      response.headers.get("content-type") || ""
+    ).toLowerCase();
+
+    // Define Zod schema for token response validation
+    const tokenResponseSchema = z.object({
+      access_token: z.string().min(1, "access_token cannot be empty"),
+      expires_in: z.number().int().positive().optional(),
+      id_token: z.string().optional(),
+      refresh_token: z.string().optional(),
+      scope: z.string().optional(),
+      token_type: z.string().optional(),
+    });
+
+    // Check if response is URL-encoded (e.g., GitHub Apps)
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+      const text = await response.text();
+      const params = new URLSearchParams(text);
+
+      const rawData = {
+        access_token: params.get("access_token") || "",
+        expires_in: params.get("expires_in")
+          ? parseInt(params.get("expires_in")!)
+          : undefined,
+        id_token: params.get("id_token") || undefined,
+        refresh_token: params.get("refresh_token") || undefined,
+        scope: params.get("scope") || undefined,
+        token_type: params.get("token_type") || undefined,
+      };
+
+      return tokenResponseSchema.parse(rawData);
+    }
+
+    // Default to JSON parsing
+    const rawJson = await response.json();
+    return tokenResponseSchema.parse(rawJson);
   }
 
   /**
