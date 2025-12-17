@@ -24,11 +24,13 @@
   "exports": {
     ".": {
       "import": "./dist/FastMCP.js",
-      "types": "./dist/FastMCP.d.ts"
+      "types": "./dist/FastMCP.d.ts",
+      "require": "./dist/FastMCP.cjs"
     },
     "./auth": {
       "import": "./dist/auth/index.js",
-      "types": "./dist/auth/index.d.ts"
+      "types": "./dist/auth/index.d.ts",
+      "require": "./dist/auth/index.cjs"
     }
   },
   "dependencies": {
@@ -107,7 +109,8 @@
       "src/auth/index.ts"
     ],
     "format": [
-      "esm"
+      "esm",
+      "cjs"
     ],
     "dts": true,
     "splitting": true,
