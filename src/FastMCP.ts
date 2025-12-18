@@ -417,6 +417,7 @@ type InputPrompt<
   Args = PromptArgumentsToObject<Arguments>,
 > = {
   arguments?: InputPromptArgument<T>[];
+  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
   load: (args: Args, auth?: T) => Promise<PromptResult>;
   name: string;
@@ -437,6 +438,7 @@ type InputResourceTemplate<
     InputResourceTemplateArgument<T>[],
 > = {
   arguments: Arguments;
+  complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
@@ -1363,6 +1365,10 @@ export class FastMCPSession<
           return await completers[name](value, auth);
         }
 
+        if (inputPrompt.complete) {
+          return await inputPrompt.complete(name, value, auth);
+        }
+
         if (fuseInstances[name]) {
           const result = fuseInstances[name].search(value);
 
@@ -1401,6 +1407,10 @@ export class FastMCPSession<
           return await completers[name](value, auth);
         }
 
+        if (inputResourceTemplate.complete) {
+          return await inputResourceTemplate.complete(name, value, auth);
+        }
+
         return {
           values: [],
         };
@@ -1415,7 +1425,6 @@ export class FastMCPSession<
       if (request.params.ref.type === "ref/prompt") {
         const ref = request.params.ref;
 
-        // TODO add tests
         const prompt =
           "name" in ref &&
           this.#prompts.find((prompt) => prompt.name === ref.name);
@@ -1448,7 +1457,6 @@ export class FastMCPSession<
       if (request.params.ref.type === "ref/resource") {
         const ref = request.params.ref;
 
-        // TODO add tests
         const resource =
           "uri" in ref &&
           this.#resourceTemplates.find(
