@@ -3,6 +3,11 @@ on:
   push:
     branches:
       - main
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
 jobs:
   test:
     environment: release
