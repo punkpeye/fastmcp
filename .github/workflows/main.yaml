@@ -3,11 +3,6 @@ on:
   push:
     branches:
       - main
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  id-token: write
 jobs:
   test:
     environment: release
@@ -20,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      issues: write
+      pull-requests: write
       id-token: write
     steps:
       - name: setup repository
