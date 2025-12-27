@@ -7,11 +7,6 @@ jobs:
   test:
     environment: release
     name: Test
-    strategy:
-      fail-fast: true
-      matrix:
-        node:
-          - 24
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -30,11 +25,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           cache: "pnpm"
-          node-version: ${{ matrix.node }}
-      - name: Setup NodeJS ${{ matrix.node }}
+          node-version: 24
+      - name: Setup NodeJS 24
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 24
           cache: "pnpm"
           cache-dependency-path: "**/pnpm-lock.yaml"
       - name: Install dependencies
