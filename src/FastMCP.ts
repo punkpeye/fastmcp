@@ -12,16 +12,19 @@ import {
   GetPromptRequestSchema,
   GetPromptResult,
   ListPromptsRequestSchema,
+  ListPromptsResult,
   ListResourcesRequestSchema,
   ListResourcesResult,
   ListResourceTemplatesRequestSchema,
   ListResourceTemplatesResult,
   ListToolsRequestSchema,
+  ListToolsResult,
   McpError,
   ReadResourceRequestSchema,
   ResourceLink,
   Root,
   RootsListChangedNotificationSchema,
+  Tool as SDKTool,
   ServerCapabilities,
   SetLevelRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -1515,16 +1518,26 @@ export class FastMCPSession<
     });
   }
   private setupPromptHandlers(prompts: Prompt<T>[]) {
+    let cachedPromptsList: ListPromptsResult["prompts"] | null = null;
+
     this.#server.setRequestHandler(ListPromptsRequestSchema, async () => {
+      if (cachedPromptsList) {
+        return {
+          prompts: cachedPromptsList,
+        };
+      }
+
+      cachedPromptsList = prompts.map((prompt) => {
+        return {
+          arguments: prompt.arguments,
+          complete: prompt.complete,
+          description: prompt.description,
+          name: prompt.name,
+        };
+      });
+
       return {
-        prompts: prompts.map((prompt) => {
-          return {
-            arguments: prompt.arguments,
-            complete: prompt.complete,
-            description: prompt.description,
-            name: prompt.name,
-          };
-        }),
+        prompts: cachedPromptsList,
       };
     });
 
@@ -1588,15 +1601,25 @@ export class FastMCPSession<
     });
   }
   private setupResourceHandlers(resources: Resource<T>[]) {
+    let cachedResourcesList: ListResourcesResult["resources"] | null = null;
+
     this.#server.setRequestHandler(ListResourcesRequestSchema, async () => {
+      if (cachedResourcesList) {
+        return {
+          resources: cachedResourcesList,
+        };
+      }
+
+      cachedResourcesList = resources.map((resource) => ({
+        description: resource.description,
+        mimeType: resource.mimeType,
+        name: resource.name,
+        uri: resource.uri,
+      }));
+
       return {
-        resources: resources.map((resource) => ({
-          description: resource.description,
-          mimeType: resource.mimeType,
-          name: resource.name,
-          uri: resource.uri,
-        })),
-      } satisfies ListResourcesResult;
+        resources: cachedResourcesList,
+      };
     });
 
     this.#server.setRequestHandler(
@@ -1687,17 +1710,31 @@ export class FastMCPSession<
   private setupResourceTemplateHandlers(
     resourceTemplates: ResourceTemplate<T>[],
   ) {
+    let cachedResourceTemplatesList:
+      | ListResourceTemplatesResult["resourceTemplates"]
+      | null = null;
+
     this.#server.setRequestHandler(
       ListResourceTemplatesRequestSchema,
       async () => {
-        return {
-          resourceTemplates: resourceTemplates.map((resourceTemplate) => ({
+        if (cachedResourceTemplatesList) {
+          return {
+            resourceTemplates: cachedResourceTemplatesList,
+          };
+        }
+
+        cachedResourceTemplatesList = resourceTemplates.map(
+          (resourceTemplate) => ({
             description: resourceTemplate.description,
             mimeType: resourceTemplate.mimeType,
             name: resourceTemplate.name,
             uriTemplate: resourceTemplate.uriTemplate,
-          })),
-        } satisfies ListResourceTemplatesResult;
+          }),
+        );
+
+        return {
+          resourceTemplates: cachedResourceTemplatesList,
+        };
       },
     );
   }
@@ -1748,24 +1785,33 @@ export class FastMCPSession<
     }
   }
   private setupToolHandlers(tools: Tool<T>[]) {
+    let cachedToolsList: ListToolsResult["tools"] | null = null;
+
     this.#server.setRequestHandler(ListToolsRequestSchema, async () => {
+      if (cachedToolsList) {
+        return {
+          tools: cachedToolsList,
+        };
+      }
+      cachedToolsList = await Promise.all(
+        tools.map(async (tool) => {
+          return {
+            annotations: tool.annotations,
+            description: tool.description,
+            inputSchema: (tool.parameters
+              ? await toJsonSchema(tool.parameters)
+              : {
+                  additionalProperties: false,
+                  properties: {},
+                  type: "object",
+                }) as SDKTool["inputSchema"],
+            name: tool.name,
+          };
+        }),
+      );
+
       return {
-        tools: await Promise.all(
-          tools.map(async (tool) => {
-            return {
-              annotations: tool.annotations,
-              description: tool.description,
-              inputSchema: tool.parameters
-                ? await toJsonSchema(tool.parameters)
-                : {
-                    additionalProperties: false,
-                    properties: {},
-                    type: "object",
-                  }, // More complete schema for Cursor compatibility
-              name: tool.name,
-            };
-          }),
-        ),
+        tools: cachedToolsList,
       };
     });
 
