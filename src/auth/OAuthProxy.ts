@@ -54,6 +54,7 @@ export class OAuthProxy {
       enableTokenSwap: true, // Enabled by default for security
       redirectPath: "/oauth/callback",
       transactionTtl: 600, // 10 minutes
+      upstreamTokenEndpointAuthMethod: "client_secret_basic",
       ...config,
     };
 
@@ -262,18 +263,42 @@ export class OAuthProxy {
       );
     }
 
+    const useBasicAuth =
+      this.config.upstreamTokenEndpointAuthMethod === "client_secret_basic";
+
+    const bodyParams: Record<string, string> = {
+      grant_type: "refresh_token",
+      refresh_token: request.refresh_token,
+      ...(request.scope && { scope: request.scope }),
+    };
+
+    // Include client credentials in body only for client_secret_post
+    if (!useBasicAuth) {
+      bodyParams.client_id = this.config.upstreamClientId;
+      bodyParams.client_secret = this.config.upstreamClientSecret;
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/x-www-form-urlencoded",
+    };
+
+    // Add Basic Auth header for client_secret_basic
+    // Per RFC 6749 Section 2.3.1, credentials must be URL-encoded before base64 encoding
+    if (useBasicAuth) {
+      const encodedClientId = encodeURIComponent(this.config.upstreamClientId);
+      const encodedClientSecret = encodeURIComponent(
+        this.config.upstreamClientSecret,
+      );
+      const credentials = Buffer.from(
+        `${encodedClientId}:${encodedClientSecret}`,
+      ).toString("base64");
+      headers["Authorization"] = `Basic ${credentials}`;
+    }
+
     // Exchange refresh token with upstream provider
     const tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
-      body: new URLSearchParams({
-        client_id: this.config.upstreamClientId,
-        client_secret: this.config.upstreamClientSecret,
-        grant_type: "refresh_token",
-        refresh_token: request.refresh_token,
-        ...(request.scope && { scope: request.scope }),
-      }),
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
+      body: new URLSearchParams(bodyParams),
+      headers,
       method: "POST",
     });
 
@@ -612,18 +637,42 @@ export class OAuthProxy {
     code: string,
     transaction: OAuthTransaction,
   ): Promise<UpstreamTokenSet> {
+    const useBasicAuth =
+      this.config.upstreamTokenEndpointAuthMethod === "client_secret_basic";
+
+    const bodyParams: Record<string, string> = {
+      code,
+      code_verifier: transaction.proxyCodeVerifier,
+      grant_type: "authorization_code",
+      redirect_uri: `${this.config.baseUrl}${this.config.redirectPath}`,
+    };
+
+    // Include client credentials in body only for client_secret_post
+    if (!useBasicAuth) {
+      bodyParams.client_id = this.config.upstreamClientId;
+      bodyParams.client_secret = this.config.upstreamClientSecret;
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/x-www-form-urlencoded",
+    };
+
+    // Add Basic Auth header for client_secret_basic
+    // Per RFC 6749 Section 2.3.1, credentials must be URL-encoded before base64 encoding
+    if (useBasicAuth) {
+      const encodedClientId = encodeURIComponent(this.config.upstreamClientId);
+      const encodedClientSecret = encodeURIComponent(
+        this.config.upstreamClientSecret,
+      );
+      const credentials = Buffer.from(
+        `${encodedClientId}:${encodedClientSecret}`,
+      ).toString("base64");
+      headers["Authorization"] = `Basic ${credentials}`;
+    }
+
     const tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
-      body: new URLSearchParams({
-        client_id: this.config.upstreamClientId,
-        client_secret: this.config.upstreamClientSecret,
-        code,
-        code_verifier: transaction.proxyCodeVerifier,
-        grant_type: "authorization_code",
-        redirect_uri: `${this.config.baseUrl}${this.config.redirectPath}`,
-      }),
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
+      body: new URLSearchParams(bodyParams),
+      headers,
       method: "POST",
     });
 
