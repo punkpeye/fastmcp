@@ -283,16 +283,8 @@ export class OAuthProxy {
     };
 
     // Add Basic Auth header for client_secret_basic
-    // Per RFC 6749 Section 2.3.1, credentials must be URL-encoded before base64 encoding
     if (useBasicAuth) {
-      const encodedClientId = encodeURIComponent(this.config.upstreamClientId);
-      const encodedClientSecret = encodeURIComponent(
-        this.config.upstreamClientSecret,
-      );
-      const credentials = Buffer.from(
-        `${encodedClientId}:${encodedClientSecret}`,
-      ).toString("base64");
-      headers["Authorization"] = `Basic ${credentials}`;
+      headers["Authorization"] = this.getBasicAuthHeader();
     }
 
     // Exchange refresh token with upstream provider
@@ -658,16 +650,8 @@ export class OAuthProxy {
     };
 
     // Add Basic Auth header for client_secret_basic
-    // Per RFC 6749 Section 2.3.1, credentials must be URL-encoded before base64 encoding
     if (useBasicAuth) {
-      const encodedClientId = encodeURIComponent(this.config.upstreamClientId);
-      const encodedClientSecret = encodeURIComponent(
-        this.config.upstreamClientSecret,
-      );
-      const credentials = Buffer.from(
-        `${encodedClientId}:${encodedClientSecret}`,
-      ).toString("base64");
-      headers["Authorization"] = `Basic ${credentials}`;
+      headers["Authorization"] = this.getBasicAuthHeader();
     }
 
     const tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
@@ -796,6 +780,18 @@ export class OAuthProxy {
    */
   private generateSigningKey(): string {
     return randomBytes(32).toString("hex");
+  }
+
+  /**
+   * Generate Basic auth header value for upstream token endpoint
+   * Per RFC 6749 Section 2.3.1, credentials must be URL-encoded before base64 encoding
+   */
+  private getBasicAuthHeader(): string {
+    const encodedClientId = encodeURIComponent(this.config.upstreamClientId);
+    const encodedClientSecret = encodeURIComponent(
+      this.config.upstreamClientSecret,
+    );
+    return `Basic ${Buffer.from(`${encodedClientId}:${encodedClientSecret}`).toString("base64")}`;
   }
 
   /**
