@@ -988,11 +988,11 @@ export class FastMCPSession<
 
   #pingInterval: null | ReturnType<typeof setInterval> = null;
 
-  #prompts: Prompt<T>[] = [];
+  #prompts: Map<string, Prompt<T>> = new Map();
 
-  #resources: Resource<T>[] = [];
+  #resources: Map<string, Resource<T>> = new Map();
 
-  #resourceTemplates: ResourceTemplate<T>[] = [];
+  #resourceTemplates: Map<string, ResourceTemplate<T>> = new Map();
 
   #roots: Root[] = [];
 
@@ -1089,19 +1089,19 @@ export class FastMCPSession<
         this.addResource(resource);
       }
 
-      this.setupResourceHandlers(resources);
+      this.setupResourceHandlers();
 
       if (resourcesTemplates.length) {
         for (const resourceTemplate of resourcesTemplates) {
           this.addResourceTemplate(resourceTemplate);
         }
 
-        this.setupResourceTemplateHandlers(resourcesTemplates);
+        this.setupResourceTemplateHandlers();
       }
     }
 
     if (prompts.length) {
-      this.setupPromptHandlers(prompts);
+      this.setupPromptHandlers();
     }
   }
 
@@ -1228,11 +1228,11 @@ export class FastMCPSession<
   }
 
   promptsListChanged(prompts: Prompt<T>[]) {
-    this.#prompts = [];
+    this.#prompts.clear();
     for (const prompt of prompts) {
       this.addPrompt(prompt);
     }
-    this.setupPromptHandlers(prompts);
+    this.setupPromptHandlers();
     this.triggerListChangedNotification("notifications/prompts/list_changed");
   }
 
@@ -1244,20 +1244,20 @@ export class FastMCPSession<
   }
 
   resourcesListChanged(resources: Resource<T>[]) {
-    this.#resources = [];
+    this.#resources.clear();
     for (const resource of resources) {
       this.addResource(resource);
     }
-    this.setupResourceHandlers(resources);
+    this.setupResourceHandlers();
     this.triggerListChangedNotification("notifications/resources/list_changed");
   }
 
   resourceTemplatesListChanged(resourceTemplates: ResourceTemplate<T>[]) {
-    this.#resourceTemplates = [];
+    this.#resourceTemplates.clear();
     for (const resourceTemplate of resourceTemplates) {
       this.addResourceTemplate(resourceTemplate);
     }
-    this.setupResourceTemplateHandlers(resourceTemplates);
+    this.setupResourceTemplateHandlers();
     this.triggerListChangedNotification("notifications/resources/list_changed");
   }
 
@@ -1387,11 +1387,11 @@ export class FastMCPSession<
       },
     };
 
-    this.#prompts.push(prompt);
+    this.#prompts.set(prompt.name, prompt);
   }
 
   private addResource(inputResource: Resource<T>) {
-    this.#resources.push(inputResource);
+    this.#resources.set(inputResource.uri, inputResource);
   }
 
   private addResourceTemplate(inputResourceTemplate: InputResourceTemplate<T>) {
@@ -1420,7 +1420,7 @@ export class FastMCPSession<
       },
     };
 
-    this.#resourceTemplates.push(resourceTemplate);
+    this.#resourceTemplates.set(resourceTemplate.name, resourceTemplate);
   }
 
   private setupCompleteHandlers() {
@@ -1428,9 +1428,7 @@ export class FastMCPSession<
       if (request.params.ref.type === "ref/prompt") {
         const ref = request.params.ref;
 
-        const prompt =
-          "name" in ref &&
-          this.#prompts.find((prompt) => prompt.name === ref.name);
+        const prompt = "name" in ref && this.#prompts.get(ref.name);
 
         if (!prompt) {
           throw new UnexpectedStateError("Unknown prompt", {
@@ -1462,7 +1460,7 @@ export class FastMCPSession<
 
         const resource =
           "uri" in ref &&
-          this.#resourceTemplates.find(
+          Array.from(this.#resourceTemplates.values()).find(
             (resource) => resource.uriTemplate === ref.uri,
           );
 
@@ -1517,7 +1515,7 @@ export class FastMCPSession<
       return {};
     });
   }
-  private setupPromptHandlers(prompts: Prompt<T>[]) {
+  private setupPromptHandlers() {
     let cachedPromptsList: ListPromptsResult["prompts"] | null = null;
 
     this.#server.setRequestHandler(ListPromptsRequestSchema, async () => {
@@ -1527,7 +1525,7 @@ export class FastMCPSession<
         };
       }
 
-      cachedPromptsList = prompts.map((prompt) => {
+      cachedPromptsList = Array.from(this.#prompts.values()).map((prompt) => {
         return {
           arguments: prompt.arguments,
           complete: prompt.complete,
@@ -1542,9 +1540,7 @@ export class FastMCPSession<
     });
 
     this.#server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-      const prompt = prompts.find(
-        (prompt) => prompt.name === request.params.name,
-      );
+      const prompt = this.#prompts.get(request.params.name);
 
       if (!prompt) {
         throw new McpError(
@@ -1600,7 +1596,7 @@ export class FastMCPSession<
       }
     });
   }
-  private setupResourceHandlers(resources: Resource<T>[]) {
+  private setupResourceHandlers() {
     let cachedResourcesList: ListResourcesResult["resources"] | null = null;
 
     this.#server.setRequestHandler(ListResourcesRequestSchema, async () => {
@@ -1610,12 +1606,14 @@ export class FastMCPSession<
         };
       }
 
-      cachedResourcesList = resources.map((resource) => ({
-        description: resource.description,
-        mimeType: resource.mimeType,
-        name: resource.name,
-        uri: resource.uri,
-      }));
+      cachedResourcesList = Array.from(this.#resources.values()).map(
+        (resource) => ({
+          description: resource.description,
+          mimeType: resource.mimeType,
+          name: resource.name,
+          uri: resource.uri,
+        }),
+      );
 
       return {
         resources: cachedResourcesList,
@@ -1626,13 +1624,10 @@ export class FastMCPSession<
       ReadResourceRequestSchema,
       async (request) => {
         if ("uri" in request.params) {
-          const resource = resources.find(
-            (resource) =>
-              "uri" in resource && resource.uri === request.params.uri,
-          );
+          const resource = this.#resources.get(request.params.uri);
 
           if (!resource) {
-            for (const resourceTemplate of this.#resourceTemplates) {
+            for (const resourceTemplate of this.#resourceTemplates.values()) {
               const uriTemplate = parseURITemplate(
                 resourceTemplate.uriTemplate,
               );
@@ -1662,7 +1657,9 @@ export class FastMCPSession<
             throw new McpError(
               ErrorCode.MethodNotFound,
               `Resource not found: '${request.params.uri}'. Available resources: ${
-                resources.map((r) => r.uri).join(", ") || "none"
+                Array.from(this.#resources.values())
+                  .map((r) => r.uri)
+                  .join(", ") || "none"
               }`,
             );
           }
@@ -1707,9 +1704,7 @@ export class FastMCPSession<
       },
     );
   }
-  private setupResourceTemplateHandlers(
-    resourceTemplates: ResourceTemplate<T>[],
-  ) {
+  private setupResourceTemplateHandlers() {
     let cachedResourceTemplatesList:
       | ListResourceTemplatesResult["resourceTemplates"]
       | null = null;
@@ -1723,14 +1718,14 @@ export class FastMCPSession<
           };
         }
 
-        cachedResourceTemplatesList = resourceTemplates.map(
-          (resourceTemplate) => ({
-            description: resourceTemplate.description,
-            mimeType: resourceTemplate.mimeType,
-            name: resourceTemplate.name,
-            uriTemplate: resourceTemplate.uriTemplate,
-          }),
-        );
+        cachedResourceTemplatesList = Array.from(
+          this.#resourceTemplates.values(),
+        ).map((resourceTemplate) => ({
+          description: resourceTemplate.description,
+          mimeType: resourceTemplate.mimeType,
+          name: resourceTemplate.name,
+          uriTemplate: resourceTemplate.uriTemplate,
+        }));
 
         return {
           resourceTemplates: cachedResourceTemplatesList,
@@ -1785,6 +1780,7 @@ export class FastMCPSession<
     }
   }
   private setupToolHandlers(tools: Tool<T>[]) {
+    const toolsMap = new Map(tools.map((tool) => [tool.name, tool]));
     let cachedToolsList: ListToolsResult["tools"] | null = null;
 
     this.#server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -1816,7 +1812,7 @@ export class FastMCPSession<
     });
 
     this.#server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const tool = tools.find((tool) => tool.name === request.params.name);
+      const tool = toolsMap.get(request.params.name);
 
       if (!tool) {
         throw new McpError(
