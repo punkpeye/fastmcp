@@ -718,6 +718,60 @@ test("handles tool timeout", async () => {
   });
 });
 
+test("handles UserError with timeoutMs", async () => {
+  const unhandledRejections: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => {
+    unhandledRejections.push(reason);
+  };
+
+  process.on("unhandledRejection", onUnhandledRejection);
+
+  try {
+    await runWithTestServer({
+      run: async ({ client }) => {
+        const result = await client.callTool({
+          arguments: {
+            a: 1,
+            b: 2,
+          },
+          name: "add",
+        });
+
+        expect(result).toEqual({
+          content: [{ text: "Something went wrong", type: "text" }],
+          isError: true,
+        });
+      },
+      server: async () => {
+        const server = new FastMCP({
+          name: "Test",
+          version: "1.0.0",
+        });
+
+        server.addTool({
+          description: "Throws UserError with timeoutMs configured",
+          execute: async () => {
+            throw new UserError("Something went wrong");
+          },
+          name: "add",
+          parameters: z.object({
+            a: z.number(),
+            b: z.number(),
+          }),
+          timeoutMs: 1000,
+        });
+
+        return server;
+      },
+    });
+
+    await delay(0);
+    expect(unhandledRejections).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", onUnhandledRejection);
+  }
+});
+
 test("sends logging messages to the client", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
