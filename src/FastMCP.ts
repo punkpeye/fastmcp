@@ -1971,7 +1971,10 @@ export class FastMCPSession<
                 }, tool.timeoutMs);
 
                 // If promise resolves first
-                executeToolPromise.finally(() => clearTimeout(timeoutId));
+            executeToolPromise.then(
+              () => clearTimeout(timeoutId),
+              () => clearTimeout(timeoutId),
+            );
               }),
             ])
           : executeToolPromise)) as
