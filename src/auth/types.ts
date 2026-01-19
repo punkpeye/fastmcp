@@ -234,6 +234,10 @@ export interface OAuthProxyConfig {
   upstreamClientSecret: string;
   /** Upstream provider's token endpoint URL */
   upstreamTokenEndpoint: string;
+  /** Upstream token endpoint authentication method (default: "client_secret_basic") */
+  upstreamTokenEndpointAuthMethod?:
+    | "client_secret_basic"
+    | "client_secret_post";
 }
 
 /**

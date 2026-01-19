@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TokenRequest, UpstreamTokenSet } from "./types.js";
 
@@ -324,5 +324,147 @@ describe("OAuthProxy - Token Swap Pattern", () => {
 
       proxy.destroy();
     });
+  });
+});
+
+describe("OAuthProxy - Upstream Token Endpoint Authentication", () => {
+  const baseConfig = {
+    baseUrl: "https://proxy.example.com",
+    consentRequired: false,
+    upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
+    upstreamTokenEndpoint: "https://provider.com/oauth/token",
+  };
+
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: "test-access-token",
+          expires_in: 3600,
+          refresh_token: "test-refresh-token",
+          token_type: "Bearer",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  it("should default to client_secret_basic auth method", () => {
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      upstreamClientId: "test-client",
+      upstreamClientSecret: "test-secret",
+    });
+
+    // Access the private config to verify default
+    expect((proxy as any).config.upstreamTokenEndpointAuthMethod).toBe(
+      "client_secret_basic",
+    );
+
+    proxy.destroy();
+  });
+
+  it("should URL-encode credentials in Basic auth header per RFC 6749", async () => {
+    // Use credentials with special characters that need encoding
+    const clientId = "client:with@special/chars";
+    const clientSecret = "secret%with:special&chars";
+
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      upstreamClientId: clientId,
+      upstreamClientSecret: clientSecret,
+      upstreamTokenEndpointAuthMethod: "client_secret_basic",
+    });
+
+    // Create a transaction to test upstream code exchange
+    const pkce = PKCEUtils.generatePair("S256");
+    const transaction = await (proxy as any).createTransaction({
+      client_id: clientId,
+      code_challenge: pkce.challenge,
+      code_challenge_method: "S256",
+      redirect_uri: "https://client.example.com/callback",
+      response_type: "code",
+      scope: "openid",
+    });
+
+    // Call the private method that makes the upstream request
+    await (proxy as any).exchangeUpstreamCode("test-code", transaction);
+
+    // Verify fetch was called with properly encoded Basic auth header
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://provider.com/oauth/token",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Basic /),
+        }),
+        method: "POST",
+      }),
+    );
+
+    // Extract and decode the Authorization header
+    const call = fetchSpy.mock.calls[0];
+    const headers = call[1]?.headers as Record<string, string>;
+    const authHeader = headers["Authorization"];
+    const base64Credentials = authHeader.replace("Basic ", "");
+    const decodedCredentials = Buffer.from(
+      base64Credentials,
+      "base64",
+    ).toString("utf-8");
+
+    // Per RFC 6749 Section 2.3.1, credentials should be URL-encoded before base64
+    const expectedEncoded = `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`;
+    expect(decodedCredentials).toBe(expectedEncoded);
+
+    // Verify body does NOT contain client credentials
+    const body = call[1]?.body as URLSearchParams;
+    expect(body.has("client_id")).toBe(false);
+    expect(body.has("client_secret")).toBe(false);
+
+    proxy.destroy();
+  });
+
+  it("should include credentials in body for client_secret_post", async () => {
+    const clientId = "test-client";
+    const clientSecret = "test-secret";
+
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      upstreamClientId: clientId,
+      upstreamClientSecret: clientSecret,
+      upstreamTokenEndpointAuthMethod: "client_secret_post",
+    });
+
+    const pkce = PKCEUtils.generatePair("S256");
+    const transaction = await (proxy as any).createTransaction({
+      client_id: clientId,
+      code_challenge: pkce.challenge,
+      code_challenge_method: "S256",
+      redirect_uri: "https://client.example.com/callback",
+      response_type: "code",
+      scope: "openid",
+    });
+
+    await (proxy as any).exchangeUpstreamCode("test-code", transaction);
+
+    // Verify fetch was called without Authorization header
+    const call = fetchSpy.mock.calls[0];
+    const headers = call[1]?.headers as Record<string, string>;
+    expect(headers["Authorization"]).toBeUndefined();
+
+    // Verify body contains client credentials
+    const body = call[1]?.body as URLSearchParams;
+    expect(body.get("client_id")).toBe(clientId);
+    expect(body.get("client_secret")).toBe(clientSecret);
+
+    proxy.destroy();
   });
 });
