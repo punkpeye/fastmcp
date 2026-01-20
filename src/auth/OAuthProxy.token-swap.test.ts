@@ -5,7 +5,6 @@ import type { TokenRequest, TokenStorage, UpstreamTokenSet } from "./types.js";
 
 import { OAuthProxy } from "./OAuthProxy.js";
 import {
-  DEFAULT_ACCESS_TOKEN_TTL,
   DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH,
   DEFAULT_REFRESH_TOKEN_TTL,
 } from "./types.js";
