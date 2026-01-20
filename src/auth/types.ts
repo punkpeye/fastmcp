@@ -4,6 +4,15 @@
  */
 
 /**
+ * Default TTL values for token expiration (in seconds)
+ */
+export const DEFAULT_ACCESS_TOKEN_TTL = 3600; // 1 hour
+export const DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH = 31536000; // 1 year
+export const DEFAULT_REFRESH_TOKEN_TTL = 2592000; // 30 days
+export const DEFAULT_AUTHORIZATION_CODE_TTL = 300; // 5 minutes
+export const DEFAULT_TRANSACTION_TTL = 600; // 10 minutes
+
+/**
  * OAuth authorization request parameters
  */
 export interface AuthorizationParams {
@@ -189,6 +198,8 @@ export interface OAuthProviderConfig {
  * Configuration for the OAuth Proxy
  */
 export interface OAuthProxyConfig {
+  /** Access token TTL in seconds (default: 3600) */
+  accessTokenTtl?: number;
   /** Allowed redirect URI patterns for client registration */
   allowedRedirectUriPatterns?: string[];
   /** Authorization code TTL in seconds (default: 300) */
@@ -218,6 +229,8 @@ export interface OAuthProxyConfig {
   jwtSigningKey?: string;
   /** OAuth callback path (default: /oauth/callback) */
   redirectPath?: string;
+  /** Refresh token TTL in seconds (default: 2592000) */
+  refreshTokenTtl?: number;
   /** Scopes to request from upstream provider */
   scopes?: string[];
   /** Custom token storage backend */
@@ -392,6 +405,8 @@ export interface UpstreamTokenSet {
   idToken?: string;
   /** Token issuance timestamp */
   issuedAt: Date;
+  /** Refresh token expiration in seconds (if provided by upstream) */
+  refreshExpiresIn?: number;
   /** Refresh token (if provided) */
   refreshToken?: string;
   /** Granted scopes */

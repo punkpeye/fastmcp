@@ -5,6 +5,13 @@
 
 export { OAuthProxy, OAuthProxyError } from "./OAuthProxy.js";
 export * from "./providers/index.js";
+export {
+  DEFAULT_ACCESS_TOKEN_TTL,
+  DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH,
+  DEFAULT_AUTHORIZATION_CODE_TTL,
+  DEFAULT_REFRESH_TOKEN_TTL,
+  DEFAULT_TRANSACTION_TTL,
+} from "./types.js";
 export type {
   AuthorizationParams,
   ClientCode,

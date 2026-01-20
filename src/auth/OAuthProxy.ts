@@ -22,6 +22,13 @@ import type {
   UpstreamTokenSet,
 } from "./types.js";
 
+import {
+  DEFAULT_ACCESS_TOKEN_TTL,
+  DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH,
+  DEFAULT_AUTHORIZATION_CODE_TTL,
+  DEFAULT_REFRESH_TOKEN_TTL,
+  DEFAULT_TRANSACTION_TTL,
+} from "./types.js";
 import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
 import { JWTIssuer } from "./utils/jwtIssuer.js";
@@ -49,11 +56,11 @@ export class OAuthProxy {
   constructor(config: OAuthProxyConfig) {
     this.config = {
       allowedRedirectUriPatterns: ["https://*", "http://localhost:*"],
-      authorizationCodeTtl: 300, // 5 minutes
+      authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
       consentRequired: true,
       enableTokenSwap: true, // Enabled by default for security
       redirectPath: "/oauth/callback",
-      transactionTtl: 600, // 10 minutes
+      transactionTtl: DEFAULT_TRANSACTION_TTL,
       upstreamTokenEndpointAuthMethod: "client_secret_basic",
       ...config,
     };
@@ -678,6 +685,7 @@ export class OAuthProxy {
       expiresIn: tokens.expires_in || 3600,
       idToken: tokens.id_token,
       issuedAt: new Date(),
+      refreshExpiresIn: tokens.refresh_expires_in,
       refreshToken: tokens.refresh_token,
       scope: tokens.scope ? tokens.scope.split(" ") : transaction.scope,
       tokenType: tokens.token_type || "Bearer",
@@ -817,12 +825,33 @@ export class OAuthProxy {
     // Extract custom claims from upstream tokens
     const customClaims = await this.extractUpstreamClaims(upstreamTokens);
 
-    // Store upstream tokens
+    // Determine access token TTL (hierarchical: upstream → config → default)
+    let accessTokenTtl: number;
+    if (upstreamTokens.expiresIn > 0) {
+      accessTokenTtl = upstreamTokens.expiresIn;
+    } else if (this.config.accessTokenTtl) {
+      accessTokenTtl = this.config.accessTokenTtl;
+    } else if (upstreamTokens.refreshToken) {
+      accessTokenTtl = DEFAULT_ACCESS_TOKEN_TTL;
+    } else {
+      accessTokenTtl = DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH;
+    }
+
+    // Determine refresh token TTL early (needed for upstream storage TTL)
+    // Use upstream's refresh_expires_in if provided, otherwise fall back to config/default
+    const refreshTokenTtl = upstreamTokens.refreshToken
+      ? (upstreamTokens.refreshExpiresIn ??
+        this.config.refreshTokenTtl ??
+        DEFAULT_REFRESH_TOKEN_TTL)
+      : 0;
+
+    // Store upstream tokens with longest-lived token TTL (min 1s for safety)
+    const upstreamStorageTtl = Math.max(accessTokenTtl, refreshTokenTtl, 1);
     const upstreamTokenKey = this.generateId();
     await this.tokenStorage.save(
       `upstream:${upstreamTokenKey}`,
       upstreamTokens,
-      upstreamTokens.expiresIn,
+      upstreamStorageTtl,
     );
 
     // Issue FastMCP access token with custom claims
@@ -830,6 +859,7 @@ export class OAuthProxy {
       clientId,
       upstreamTokens.scope,
       customClaims || undefined,
+      accessTokenTtl,
     );
 
     // Decode JWT to get JTI
@@ -841,17 +871,17 @@ export class OAuthProxy {
       {
         clientId,
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + upstreamTokens.expiresIn * 1000),
+        expiresAt: new Date(Date.now() + accessTokenTtl * 1000),
         jti: accessJti,
         scope: upstreamTokens.scope,
         upstreamTokenKey,
       },
-      upstreamTokens.expiresIn,
+      accessTokenTtl,
     );
 
     const response: TokenResponse = {
       access_token: accessToken,
-      expires_in: 3600, // FastMCP JWT expiration (1 hour)
+      expires_in: accessTokenTtl,
       scope: upstreamTokens.scope.join(" "),
       token_type: "Bearer",
     };
@@ -862,6 +892,7 @@ export class OAuthProxy {
         clientId,
         upstreamTokens.scope,
         customClaims || undefined,
+        refreshTokenTtl,
       );
       const refreshJti = await this.extractJti(refreshToken);
 
@@ -871,12 +902,12 @@ export class OAuthProxy {
         {
           clientId,
           createdAt: new Date(),
-          expiresAt: new Date(Date.now() + 2592000 * 1000), // 30 days
+          expiresAt: new Date(Date.now() + refreshTokenTtl * 1000),
           jti: refreshJti,
           scope: upstreamTokens.scope,
           upstreamTokenKey,
         },
-        2592000, // 30 days
+        refreshTokenTtl,
       );
 
       response.refresh_token = refreshToken;
@@ -903,6 +934,7 @@ export class OAuthProxy {
     access_token: string;
     expires_in?: number;
     id_token?: string;
+    refresh_expires_in?: number;
     refresh_token?: string;
     scope?: string;
     token_type?: string;
@@ -916,6 +948,7 @@ export class OAuthProxy {
       access_token: z.string().min(1, "access_token cannot be empty"),
       expires_in: z.number().int().positive().optional(),
       id_token: z.string().optional(),
+      refresh_expires_in: z.number().int().positive().optional(),
       refresh_token: z.string().optional(),
       scope: z.string().optional(),
       token_type: z.string().optional(),
@@ -932,6 +965,9 @@ export class OAuthProxy {
           ? parseInt(params.get("expires_in")!)
           : undefined,
         id_token: params.get("id_token") || undefined,
+        refresh_expires_in: params.get("refresh_expires_in")
+          ? parseInt(params.get("refresh_expires_in")!)
+          : undefined,
         refresh_token: params.get("refresh_token") || undefined,
         scope: params.get("scope") || undefined,
         token_type: params.get("token_type") || undefined,
