@@ -836,12 +836,18 @@ export class OAuthProxy {
       accessTokenTtl = DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH;
     }
 
-    // Store upstream tokens
+    // Determine refresh token TTL early (needed for upstream storage TTL)
+    const refreshTokenTtl = upstreamTokens.refreshToken
+      ? (this.config.refreshTokenTtl ?? DEFAULT_REFRESH_TOKEN_TTL)
+      : 0;
+
+    // Store upstream tokens with longest-lived token TTL (min 1s for safety)
+    const upstreamStorageTtl = Math.max(accessTokenTtl, refreshTokenTtl, 1);
     const upstreamTokenKey = this.generateId();
     await this.tokenStorage.save(
       `upstream:${upstreamTokenKey}`,
       upstreamTokens,
-      accessTokenTtl,
+      upstreamStorageTtl,
     );
 
     // Issue FastMCP access token with custom claims
@@ -878,10 +884,6 @@ export class OAuthProxy {
 
     // Issue refresh token if upstream provided one
     if (upstreamTokens.refreshToken) {
-      // Determine refresh token TTL (config → default)
-      const refreshTokenTtl =
-        this.config.refreshTokenTtl ?? DEFAULT_REFRESH_TOKEN_TTL;
-
       const refreshToken = this.jwtIssuer.issueRefreshToken(
         clientId,
         upstreamTokens.scope,
