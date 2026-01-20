@@ -21,6 +21,7 @@ import type {
   TokenStorage,
   UpstreamTokenSet,
 } from "./types.js";
+
 import {
   DEFAULT_ACCESS_TOKEN_TTL,
   DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH,
@@ -28,7 +29,6 @@ import {
   DEFAULT_REFRESH_TOKEN_TTL,
   DEFAULT_TRANSACTION_TTL,
 } from "./types.js";
-
 import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
 import { JWTIssuer } from "./utils/jwtIssuer.js";
@@ -824,7 +824,7 @@ export class OAuthProxy {
     // Extract custom claims from upstream tokens
     const customClaims = await this.extractUpstreamClaims(upstreamTokens);
 
-    // Determine access token TTL (hierarchical: upstream → config → smart default)
+    // Determine access token TTL (hierarchical: upstream → config → default)
     let accessTokenTtl: number;
     if (upstreamTokens.expiresIn > 0) {
       accessTokenTtl = upstreamTokens.expiresIn;

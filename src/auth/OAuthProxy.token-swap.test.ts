@@ -17,8 +17,8 @@ import { MemoryTokenStorage } from "./utils/tokenStore.js";
  * Test storage that tracks TTLs passed to save()
  */
 class TTLTrackingStorage implements TokenStorage {
-  private backend = new MemoryTokenStorage();
   public savedTTLs: Map<string, number | undefined> = new Map();
+  private backend = new MemoryTokenStorage();
 
   async cleanup(): Promise<void> {
     await this.backend.cleanup();
@@ -36,15 +36,6 @@ class TTLTrackingStorage implements TokenStorage {
     return this.backend.get(key);
   }
 
-  async save(key: string, value: unknown, ttl?: number): Promise<void> {
-    this.savedTTLs.set(key, ttl);
-    await this.backend.save(key, value, ttl);
-  }
-
-  size(): number {
-    return this.backend.size();
-  }
-
   /**
    * Get the TTL used for a specific key pattern (e.g., "upstream:")
    */
@@ -55,6 +46,15 @@ class TTLTrackingStorage implements TokenStorage {
       }
     }
     return undefined;
+  }
+
+  async save(key: string, value: unknown, ttl?: number): Promise<void> {
+    this.savedTTLs.set(key, ttl);
+    await this.backend.save(key, value, ttl);
+  }
+
+  size(): number {
+    return this.backend.size();
   }
 }
 
@@ -696,7 +696,9 @@ describe("OAuthProxy - Upstream Token Storage TTL", () => {
     // Verify upstream tokens were stored with max of configured access TTL and refresh TTL
     const upstreamTTL = tokenStorage.getTTLForKeyPattern("upstream:");
     expect(upstreamTTL).toBeDefined();
-    expect(upstreamTTL).toBe(Math.max(customAccessTtl, DEFAULT_REFRESH_TOKEN_TTL));
+    expect(upstreamTTL).toBe(
+      Math.max(customAccessTtl, DEFAULT_REFRESH_TOKEN_TTL),
+    );
 
     proxy.destroy();
     tokenStorage.destroy();
