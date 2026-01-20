@@ -743,4 +743,39 @@ describe("OAuthProxy - Upstream Token Storage TTL", () => {
     expect(Math.max(-1, -1, 1)).toBe(1);
     expect(Math.max(100, 200, 1)).toBe(200);
   });
+
+  it("should use upstream refreshExpiresIn when provided (Keycloak/Azure case)", async () => {
+    /**
+     * Some providers (Keycloak, Azure) return refresh_expires_in in the token response.
+     * When available, we should use it instead of the config/default.
+     */
+    const tokenStorage = new TTLTrackingStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+      // Config has 30 day default, but upstream will provide 2 hours
+    });
+
+    const upstreamRefreshExpiresIn = 7200; // 2 hours from upstream
+    const upstreamTokens: UpstreamTokenSet = {
+      accessToken: "upstream-access-token",
+      expiresIn: 3600, // 1 hour access token
+      issuedAt: new Date(),
+      refreshExpiresIn: upstreamRefreshExpiresIn, // Upstream provides this
+      refreshToken: "upstream-refresh-token",
+      scope: ["read", "write"],
+      tokenType: "Bearer",
+    };
+
+    await exchangeTokens(proxy, upstreamTokens);
+
+    // Should use upstream's refreshExpiresIn (7200) instead of default (30 days)
+    const upstreamTTL = tokenStorage.getTTLForKeyPattern("upstream:");
+    expect(upstreamTTL).toBeDefined();
+    // max(3600, 7200, 1) = 7200
+    expect(upstreamTTL).toBe(upstreamRefreshExpiresIn);
+
+    proxy.destroy();
+    tokenStorage.destroy();
+  });
 });

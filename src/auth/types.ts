@@ -405,6 +405,8 @@ export interface UpstreamTokenSet {
   idToken?: string;
   /** Token issuance timestamp */
   issuedAt: Date;
+  /** Refresh token expiration in seconds (if provided by upstream) */
+  refreshExpiresIn?: number;
   /** Refresh token (if provided) */
   refreshToken?: string;
   /** Granted scopes */

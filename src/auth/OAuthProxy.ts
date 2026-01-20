@@ -685,6 +685,7 @@ export class OAuthProxy {
       expiresIn: tokens.expires_in || 3600,
       idToken: tokens.id_token,
       issuedAt: new Date(),
+      refreshExpiresIn: tokens.refresh_expires_in,
       refreshToken: tokens.refresh_token,
       scope: tokens.scope ? tokens.scope.split(" ") : transaction.scope,
       tokenType: tokens.token_type || "Bearer",
@@ -837,8 +838,11 @@ export class OAuthProxy {
     }
 
     // Determine refresh token TTL early (needed for upstream storage TTL)
+    // Use upstream's refresh_expires_in if provided, otherwise fall back to config/default
     const refreshTokenTtl = upstreamTokens.refreshToken
-      ? (this.config.refreshTokenTtl ?? DEFAULT_REFRESH_TOKEN_TTL)
+      ? (upstreamTokens.refreshExpiresIn ??
+        this.config.refreshTokenTtl ??
+        DEFAULT_REFRESH_TOKEN_TTL)
       : 0;
 
     // Store upstream tokens with longest-lived token TTL (min 1s for safety)
@@ -930,6 +934,7 @@ export class OAuthProxy {
     access_token: string;
     expires_in?: number;
     id_token?: string;
+    refresh_expires_in?: number;
     refresh_token?: string;
     scope?: string;
     token_type?: string;
@@ -943,6 +948,7 @@ export class OAuthProxy {
       access_token: z.string().min(1, "access_token cannot be empty"),
       expires_in: z.number().int().positive().optional(),
       id_token: z.string().optional(),
+      refresh_expires_in: z.number().int().positive().optional(),
       refresh_token: z.string().optional(),
       scope: z.string().optional(),
       token_type: z.string().optional(),
@@ -959,6 +965,9 @@ export class OAuthProxy {
           ? parseInt(params.get("expires_in")!)
           : undefined,
         id_token: params.get("id_token") || undefined,
+        refresh_expires_in: params.get("refresh_expires_in")
+          ? parseInt(params.get("refresh_expires_in")!)
+          : undefined,
         refresh_token: params.get("refresh_token") || undefined,
         scope: params.get("scope") || undefined,
         token_type: params.get("token_type") || undefined,
