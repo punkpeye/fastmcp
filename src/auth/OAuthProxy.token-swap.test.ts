@@ -779,3 +779,595 @@ describe("OAuthProxy - Upstream Token Storage TTL", () => {
     tokenStorage.destroy();
   });
 });
+
+describe("OAuthProxy - Swap Mode Refresh Token", () => {
+  const baseConfig = {
+    baseUrl: "https://proxy.example.com",
+    consentRequired: false,
+    enableTokenSwap: true,
+    jwtSigningKey: "test-signing-key-for-refresh",
+    upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
+    upstreamClientId: "upstream-client-id",
+    upstreamClientSecret: "upstream-client-secret",
+    upstreamTokenEndpoint: "https://provider.com/oauth/token",
+  };
+
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "new-upstream-access-token",
+            expires_in: 3600,
+            refresh_token: "new-upstream-refresh-token",
+            scope: "read write",
+            token_type: "Bearer",
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        ),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  async function getInitialTokens(
+    proxy: OAuthProxy,
+    upstreamTokens?: Partial<UpstreamTokenSet>,
+  ) {
+    const defaultUpstreamTokens: UpstreamTokenSet = {
+      accessToken: "initial-upstream-access-token",
+      expiresIn: 3600,
+      issuedAt: new Date(),
+      refreshToken: "initial-upstream-refresh-token",
+      scope: ["read", "write"],
+      tokenType: "Bearer",
+      ...upstreamTokens,
+    };
+
+    await proxy.registerClient({
+      redirect_uris: ["https://client.example.com/callback"],
+    });
+
+    const pkce = PKCEUtils.generatePair("S256");
+
+    const transaction = await (proxy as any).createTransaction({
+      client_id: "upstream-client-id",
+      code_challenge: pkce.challenge,
+      code_challenge_method: "S256",
+      redirect_uri: "https://client.example.com/callback",
+      response_type: "code",
+      scope: "read write",
+    });
+
+    const authCode = await (proxy as any).generateAuthorizationCode(
+      transaction,
+      defaultUpstreamTokens,
+    );
+
+    return proxy.exchangeAuthorizationCode({
+      client_id: "upstream-client-id",
+      code: authCode,
+      code_verifier: pkce.verifier,
+      grant_type: "authorization_code",
+      redirect_uri: "https://client.example.com/callback",
+    });
+  }
+
+  it("should refresh FastMCP tokens using swap mode flow", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    // Get initial tokens
+    const initialTokens = await getInitialTokens(proxy);
+    expect(initialTokens.refresh_token).toBeDefined();
+
+    // Refresh using the FastMCP refresh token
+    const refreshedTokens = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+    });
+
+    // Verify we got new tokens
+    expect(refreshedTokens.access_token).toBeDefined();
+    expect(refreshedTokens.refresh_token).toBeDefined();
+
+    // Verify new tokens are different from initial (rotation)
+    expect(refreshedTokens.access_token).not.toBe(initialTokens.access_token);
+    expect(refreshedTokens.refresh_token).not.toBe(initialTokens.refresh_token);
+
+    // Verify tokens are valid JWTs
+    expect(refreshedTokens.access_token.split(".")).toHaveLength(3);
+    expect(refreshedTokens.refresh_token!.split(".")).toHaveLength(3);
+
+    // Verify upstream endpoint was called
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://provider.com/oauth/token",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+
+    proxy.destroy();
+  });
+
+  it("should enforce one-time use of refresh tokens", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    // Get initial tokens
+    const initialTokens = await getInitialTokens(proxy);
+
+    // First refresh should succeed
+    const refreshedTokens = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+    });
+    expect(refreshedTokens.access_token).toBeDefined();
+
+    // Second refresh with SAME token should fail (one-time use)
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+      }),
+    ).rejects.toThrow("invalid_grant");
+
+    proxy.destroy();
+  });
+
+  it("should reject invalid refresh token", async () => {
+    const proxy = new OAuthProxy(baseConfig);
+
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: "invalid.jwt.token",
+      }),
+    ).rejects.toThrow("invalid_grant");
+
+    proxy.destroy();
+  });
+
+  it("should reject expired refresh token", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const jwtIssuer = new JWTIssuer({
+      audience: "https://proxy.example.com",
+      issuer: "https://proxy.example.com",
+      signingKey: "test-signing-key-for-refresh",
+    });
+
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    // Create an expired refresh token (TTL of -1 second)
+    const expiredToken = jwtIssuer.issueRefreshToken(
+      "client-123",
+      ["read"],
+      undefined,
+      -1, // Expired
+    );
+
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: expiredToken,
+      }),
+    ).rejects.toThrow("invalid_grant");
+
+    proxy.destroy();
+  });
+
+  it("should reject refresh token with missing mapping", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const jwtIssuer = new JWTIssuer({
+      audience: "https://proxy.example.com",
+      issuer: "https://proxy.example.com",
+      signingKey: "test-signing-key-for-refresh",
+    });
+
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    // Create a valid but unregistered refresh token (no mapping)
+    const orphanToken = jwtIssuer.issueRefreshToken("client-123", ["read"]);
+
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: orphanToken,
+      }),
+    ).rejects.toThrow("invalid_grant");
+
+    proxy.destroy();
+  });
+
+  it("should handle missing upstream refresh token", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    // Get tokens without an upstream refresh token
+    const initialTokens = await getInitialTokens(proxy, {
+      refreshToken: undefined, // No upstream refresh token
+    });
+
+    // Should not have received a refresh token (since upstream didn't provide one)
+    expect(initialTokens.refresh_token).toBeUndefined();
+
+    proxy.destroy();
+  });
+
+  it("should handle upstream refresh failure", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    // Get initial tokens
+    const initialTokens = await getInitialTokens(proxy);
+
+    // Mock upstream to fail refresh
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: "invalid_grant",
+          error_description: "Refresh token has been revoked",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 400,
+        },
+      ),
+    );
+
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+      }),
+    ).rejects.toThrow("invalid_grant");
+
+    proxy.destroy();
+  });
+
+  it("should handle upstream token rotation (new refresh token)", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    // Get initial tokens
+    const initialTokens = await getInitialTokens(proxy);
+
+    // Mock upstream to return rotated refresh token
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          access_token: "rotated-upstream-access",
+          expires_in: 3600,
+          refresh_token: "rotated-upstream-refresh",
+          token_type: "Bearer",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+
+    const refreshedTokens = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+    });
+
+    // Verify refresh succeeded with rotated upstream tokens
+    expect(refreshedTokens.access_token).toBeDefined();
+    expect(refreshedTokens.refresh_token).toBeDefined();
+
+    // Verify the new refresh token works (upstream tokens were updated)
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          access_token: "second-rotated-access",
+          expires_in: 3600,
+          refresh_token: "second-rotated-refresh",
+          token_type: "Bearer",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+
+    const secondRefresh = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: refreshedTokens.refresh_token!,
+    });
+
+    expect(secondRefresh.access_token).toBeDefined();
+
+    proxy.destroy();
+  });
+
+  it("should preserve scope through refresh", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    // Get initial tokens with specific scope
+    const initialTokens = await getInitialTokens(proxy, {
+      scope: ["read", "write", "admin"],
+    });
+
+    // Mock upstream to return tokens without scope (should preserve original)
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          access_token: "new-upstream-access",
+          expires_in: 3600,
+          refresh_token: "new-upstream-refresh",
+          token_type: "Bearer",
+          // Note: no scope returned
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+
+    const refreshedTokens = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+    });
+
+    // Scope should be preserved from original tokens
+    expect(refreshedTokens.scope).toBe("read write admin");
+
+    proxy.destroy();
+  });
+
+  it("should correctly calculate TTL on refresh", async () => {
+    const tokenStorage = new TTLTrackingStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    // Get initial tokens
+    const initialTokens = await getInitialTokens(proxy);
+
+    // Clear TTL tracking to only track refresh
+    tokenStorage.savedTTLs.clear();
+
+    // Mock upstream to return tokens with specific TTLs
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          access_token: "new-upstream-access",
+          expires_in: 7200, // 2 hours
+          refresh_token: "new-upstream-refresh",
+          token_type: "Bearer",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+
+    await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+    });
+
+    // Verify upstream tokens were saved with correct TTL
+    const upstreamTTL = tokenStorage.getTTLForKeyPattern("upstream:");
+    expect(upstreamTTL).toBeDefined();
+    // max(7200 access, DEFAULT_REFRESH_TOKEN_TTL, 1)
+    expect(upstreamTTL).toBe(Math.max(7200, DEFAULT_REFRESH_TOKEN_TTL));
+
+    proxy.destroy();
+    tokenStorage.destroy();
+  });
+
+  it("should still work in passthrough mode", async () => {
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      enableTokenSwap: false, // Passthrough mode
+    });
+
+    // In passthrough mode, refresh token is sent directly to upstream
+    const response = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: "upstream-refresh-token",
+    });
+
+    // Should get upstream tokens directly
+    expect(response.access_token).toBe("new-upstream-access-token");
+    expect(response.refresh_token).toBe("new-upstream-refresh-token");
+
+    proxy.destroy();
+  });
+
+  it("should use client_secret_basic auth method by default", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+      // Default: upstreamTokenEndpointAuthMethod: "client_secret_basic"
+    });
+
+    const initialTokens = await getInitialTokens(proxy);
+
+    await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+    });
+
+    // Verify Basic Auth header was used
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://provider.com/oauth/token",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Basic /),
+        }),
+      }),
+    );
+
+    // Verify body does NOT contain client credentials
+    const call = fetchSpy.mock.calls[0];
+    const body = call[1]?.body as URLSearchParams;
+    expect(body.has("client_id")).toBe(false);
+    expect(body.has("client_secret")).toBe(false);
+
+    proxy.destroy();
+  });
+
+  it("should use client_secret_post auth method when configured", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+      upstreamTokenEndpointAuthMethod: "client_secret_post",
+    });
+
+    const initialTokens = await getInitialTokens(proxy);
+
+    await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+    });
+
+    // Verify no Authorization header
+    const call = fetchSpy.mock.calls[0];
+    const headers = call[1]?.headers as Record<string, string>;
+    expect(headers["Authorization"]).toBeUndefined();
+
+    // Verify body contains client credentials
+    const body = call[1]?.body as URLSearchParams;
+    expect(body.get("client_id")).toBe("upstream-client-id");
+    expect(body.get("client_secret")).toBe("upstream-client-secret");
+
+    proxy.destroy();
+  });
+
+  it("should allow new access token to load upstream tokens after refresh", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      encryptionKey: false, // Disable encryption for easier testing
+      tokenStorage,
+    });
+
+    // Get initial tokens
+    const initialTokens = await getInitialTokens(proxy);
+
+    // Refresh tokens
+    const refreshedTokens = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+    });
+
+    // Verify we can load upstream tokens using the new access token
+    const loadedTokens = await proxy.loadUpstreamTokens(
+      refreshedTokens.access_token,
+    );
+
+    expect(loadedTokens).not.toBeNull();
+    expect(loadedTokens?.accessToken).toBe("new-upstream-access-token");
+    expect(loadedTokens?.refreshToken).toBe("new-upstream-refresh-token");
+
+    proxy.destroy();
+  });
+
+  it("should handle chained refreshes correctly", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    // Get initial tokens
+    const initialTokens = await getInitialTokens(proxy);
+
+    // First refresh
+    let currentRefreshToken = initialTokens.refresh_token!;
+    let refreshResponse = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: currentRefreshToken,
+    });
+
+    // Second refresh with new token
+    currentRefreshToken = refreshResponse.refresh_token!;
+    refreshResponse = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: currentRefreshToken,
+    });
+
+    // Third refresh with newer token
+    currentRefreshToken = refreshResponse.refresh_token!;
+    refreshResponse = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: currentRefreshToken,
+    });
+
+    // Verify final refresh succeeded
+    expect(refreshResponse.access_token).toBeDefined();
+    expect(refreshResponse.refresh_token).toBeDefined();
+
+    // Verify old tokens are rejected (one-time use)
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+      }),
+    ).rejects.toThrow("invalid_grant");
+
+    proxy.destroy();
+  });
+});
