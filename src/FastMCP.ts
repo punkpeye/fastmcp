@@ -1283,6 +1283,14 @@ export class FastMCPSession<
     }
   }
 
+  /**
+   * Update the session's authentication context.
+   * Called by mcp-proxy when a new token is validated on subsequent requests.
+   */
+  public updateAuth(auth: T): void {
+    this.#auth = auth;
+  }
+
   public waitForReady(): Promise<void> {
     if (this.isReady) {
       return Promise.resolve();
