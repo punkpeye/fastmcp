@@ -15,26 +15,37 @@ This guide shows you how to implement OAuth authentication in your FastMCP serve
 
 ### Basic Setup with Pre-configured Provider
 
-The simplest way to add OAuth is using a pre-configured provider:
+The simplest way to add OAuth is using the `auth` option with a pre-configured provider:
 
 ```typescript
-import { FastMCP } from "fastmcp";
-import { GoogleProvider } from "fastmcp/auth";
-
-const authProxy = new GoogleProvider({
-  clientId: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  baseUrl: "https://your-server.com",
-  scopes: ["openid", "profile", "email"],
-});
+import { FastMCP, GoogleProvider, requireAuth } from "fastmcp";
 
 const server = new FastMCP({
+  auth: new GoogleProvider({
+    baseUrl: "https://your-server.com",
+    clientId: process.env.GOOGLE_CLIENT_ID!,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    scopes: ["openid", "profile", "email"],
+  }),
   name: "My Server",
-  oauth: {
-    enabled: true,
-    authorizationServer: authProxy.getAuthorizationServerMetadata(),
-    proxy: authProxy, // Routes automatically registered!
+  version: "1.0.0",
+});
+
+// Add a protected tool
+server.addTool({
+  canAccess: requireAuth,
+  description: "Get user profile from Google",
+  execute: async (_args, { session }) => {
+    // session.accessToken is the upstream Google access token
+    const response = await fetch(
+      "https://www.googleapis.com/oauth2/v2/userinfo",
+      {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      },
+    );
+    return JSON.stringify(await response.json());
   },
+  name: "get-profile",
 });
 
 await server.start({
@@ -53,7 +64,45 @@ await server.start({
 
 ### Custom OAuth Provider
 
-For providers without pre-built support:
+For providers without pre-built support (SAP, Auth0, Okta, etc.), use `OAuthProvider`:
+
+```typescript
+import { FastMCP, OAuthProvider, requireAuth } from "fastmcp";
+
+const server = new FastMCP({
+  auth: new OAuthProvider({
+    authorizationEndpoint: "https://provider.com/oauth/authorize",
+    baseUrl: "https://your-server.com",
+    clientId: process.env.OAUTH_CLIENT_ID!,
+    clientSecret: process.env.OAUTH_CLIENT_SECRET!,
+    scopes: ["openid", "profile"],
+    tokenEndpoint: "https://provider.com/oauth/token",
+  }),
+  name: "My Server",
+  version: "1.0.0",
+});
+
+server.addTool({
+  canAccess: requireAuth,
+  description: "Call protected API",
+  execute: async (_args, { session }) => {
+    const response = await fetch("https://api.provider.com/data", {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+    });
+    return JSON.stringify(await response.json());
+  },
+  name: "get-data",
+});
+
+await server.start({
+  transportType: "httpStream",
+  httpStream: { port: 3000 },
+});
+```
+
+### Advanced Configuration
+
+For more control over OAuth behavior, you can use the `oauth` option directly with an `OAuthProxy`:
 
 ```typescript
 import { FastMCP } from "fastmcp";
@@ -62,8 +111,8 @@ import { OAuthProxy } from "fastmcp/auth";
 const authProxy = new OAuthProxy({
   upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
   upstreamTokenEndpoint: "https://provider.com/oauth/token",
-  upstreamClientId: process.env.OAUTH_CLIENT_ID,
-  upstreamClientSecret: process.env.OAUTH_CLIENT_SECRET,
+  upstreamClientId: process.env.OAUTH_CLIENT_ID!,
+  upstreamClientSecret: process.env.OAUTH_CLIENT_SECRET!,
   baseUrl: "https://your-server.com",
   scopes: ["openid", "profile"],
 });
@@ -97,13 +146,17 @@ await server.start({
 **2. Implementation**
 
 ```typescript
-import { GoogleProvider } from "fastmcp/auth";
+import { FastMCP, GoogleProvider, requireAuth } from "fastmcp";
 
-const authProxy = new GoogleProvider({
-  clientId: "xxx.apps.googleusercontent.com",
-  clientSecret: "your-secret",
-  baseUrl: "https://your-server.com",
-  scopes: ["openid", "profile", "email"],
+const server = new FastMCP({
+  auth: new GoogleProvider({
+    baseUrl: "https://your-server.com",
+    clientId: "xxx.apps.googleusercontent.com",
+    clientSecret: "your-secret",
+    scopes: ["openid", "profile", "email"],
+  }),
+  name: "My Server",
+  version: "1.0.0",
 });
 ```
 
@@ -126,13 +179,17 @@ const authProxy = new GoogleProvider({
 **2. Implementation**
 
 ```typescript
-import { GitHubProvider } from "fastmcp/auth";
+import { FastMCP, GitHubProvider, requireAuth } from "fastmcp";
 
-const authProxy = new GitHubProvider({
-  clientId: "your-github-app-id",
-  clientSecret: "your-github-app-secret",
-  baseUrl: "https://your-server.com",
-  scopes: ["read:user", "user:email"],
+const server = new FastMCP({
+  auth: new GitHubProvider({
+    baseUrl: "https://your-server.com",
+    clientId: "your-github-app-id",
+    clientSecret: "your-github-app-secret",
+    scopes: ["read:user", "user:email"],
+  }),
+  name: "My Server",
+  version: "1.0.0",
 });
 ```
 
@@ -155,14 +212,18 @@ const authProxy = new GitHubProvider({
 **2. Implementation**
 
 ```typescript
-import { AzureProvider } from "fastmcp/auth";
+import { FastMCP, AzureProvider, requireAuth } from "fastmcp";
 
-const authProxy = new AzureProvider({
-  clientId: "your-azure-app-id",
-  clientSecret: "your-azure-app-secret",
-  baseUrl: "https://your-server.com",
-  tenantId: "common", // or specific tenant ID
-  scopes: ["openid", "profile", "email"],
+const server = new FastMCP({
+  auth: new AzureProvider({
+    baseUrl: "https://your-server.com",
+    clientId: "your-azure-app-id",
+    clientSecret: "your-azure-app-secret",
+    scopes: ["openid", "profile", "email"],
+    tenantId: "common", // or specific tenant ID
+  }),
+  name: "My Server",
+  version: "1.0.0",
 });
 ```
 
@@ -669,23 +730,99 @@ Use default HS256 (JWTIssuer) when:
 
 ### Protecting Tools with OAuth
 
-Restrict tool access to authenticated users:
+Use the built-in authorization helpers to restrict tool access:
+
+```typescript
+import {
+  requireAuth,
+  requireScopes,
+  requireRole,
+  requireAll,
+  requireAny,
+  getAuthSession,
+} from "fastmcp";
+
+// Require any authenticated user
+server.addTool({
+  canAccess: requireAuth,
+  description: "Requires authentication",
+  execute: async (_args, { session }) => {
+    // session.accessToken is the upstream OAuth token
+    return `Authenticated! Token: ${session.accessToken.slice(0, 10)}...`;
+  },
+  name: "protected-tool",
+});
+
+// Require specific OAuth scopes
+server.addTool({
+  canAccess: requireScopes("read:user", "write:data"),
+  description: "Requires specific scopes",
+  execute: async () => "Access granted with required scopes!",
+  name: "scoped-tool",
+});
+
+// Require specific role (from session)
+server.addTool({
+  canAccess: requireRole("admin"),
+  description: "Admin only",
+  execute: async () => "Welcome, admin!",
+  name: "admin-tool",
+});
+
+// Combine requirements (AND logic)
+server.addTool({
+  canAccess: requireAll(requireAuth, requireScopes("admin")),
+  description: "Auth AND admin scope required",
+  execute: async () => "Full access granted!",
+  name: "full-access-tool",
+});
+
+// Allow alternatives (OR logic)
+server.addTool({
+  canAccess: requireAny(requireRole("admin"), requireRole("moderator")),
+  description: "Admin or moderator",
+  execute: async () => "Staff access granted!",
+  name: "staff-tool",
+});
+```
+
+**Custom Authorization:**
+
+For complex authorization logic, use a custom function:
 
 ```typescript
 server.addTool({
-  name: "protected-tool",
-  description: "Requires authentication",
-  canAccess: async ({ session }) => {
-    // Check if user has valid authorization header
-    return session?.headers?.["authorization"] !== undefined;
+  canAccess: (auth) => {
+    if (!auth) return false;
+    return auth.role === "admin" || auth.permissions?.includes("special");
   },
-  execute: async (args, { session }) => {
-    const token = session?.headers?.["authorization"];
-    // Use token to access protected resources
+  description: "Custom authorization logic",
+  execute: async () => "Custom access granted!",
+  name: "custom-auth-tool",
+});
+```
 
-    return {
-      content: [{ type: "text", text: "Access granted!" }],
-    };
+**Extracting Session Data:**
+
+Use `getAuthSession` for type-safe access to the OAuth session:
+
+```typescript
+import { getAuthSession, GoogleSession } from "fastmcp";
+
+server.addTool({
+  canAccess: requireAuth,
+  name: "get-profile",
+  execute: async (_args, { session }) => {
+    // Type-safe destructuring (throws if not authenticated)
+    const { accessToken } = getAuthSession(session);
+
+    // Or with provider-specific typing:
+    // const { accessToken } = getAuthSession<GoogleSession>(session);
+
+    const response = await fetch("https://api.example.com/user", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    return JSON.stringify(await response.json());
   },
 });
 ```

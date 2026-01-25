@@ -42,6 +42,10 @@ import { toJsonSchema } from "xsschema";
 import { z } from "zod";
 
 import type { OAuthProxy } from "./auth/OAuthProxy.js";
+import type {
+  AuthProvider,
+  OAuthSession,
+} from "./auth/providers/AuthProvider.js";
 
 export interface Logger {
   debug(...args: unknown[]): void;
@@ -563,6 +567,30 @@ type SamplingResponse = {
 };
 
 type ServerOptions<T extends FastMCPSessionAuth> = {
+  /**
+   * Authentication provider for OAuth flows.
+   * When provided, automatically configures the `authenticate` function
+   * and `oauth` settings.
+   *
+   * For custom authentication logic, use the `authenticate` option instead.
+   * If both are provided, `authenticate` takes precedence.
+   *
+   * @example
+   * ```typescript
+   * import { FastMCP, GitHubProvider } from "fastmcp";
+   *
+   * const server = new FastMCP({
+   *   auth: new GitHubProvider({
+   *     baseUrl: "http://localhost:8000",
+   *     clientId: process.env.GITHUB_CLIENT_ID!,
+   *     clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+   *   }),
+   *   name: "My Server",
+   *   version: "1.0.0",
+   * });
+   * ```
+   */
+  auth?: AuthProvider<T extends OAuthSession ? T : OAuthSession>;
   authenticate?: Authenticate<T>;
   /**
    * Configuration for the health-check endpoint that can be exposed when the
@@ -2118,8 +2146,28 @@ export class FastMCP<
     super();
 
     this.#options = options;
-    this.#authenticate = options.authenticate;
     this.#logger = options.logger || console;
+
+    // If auth provider is specified, use it to configure authenticate and oauth
+    if (options.auth) {
+      // Use auth provider's authenticate if not explicitly overridden
+      if (!options.authenticate) {
+        this.#authenticate = ((request: http.IncomingMessage | undefined) =>
+          options.auth!.authenticate(request)) as Authenticate<T>;
+      } else {
+        this.#authenticate = options.authenticate;
+      }
+
+      // Use auth provider's oauth config if not explicitly overridden
+      if (!options.oauth) {
+        this.#options = {
+          ...options,
+          oauth: options.auth.getOAuthConfig(),
+        };
+      }
+    } else {
+      this.#authenticate = options.authenticate;
+    }
   }
 
   /**
@@ -3126,6 +3174,34 @@ export class FastMCP<
     }
   }
 }
+
+// Re-export commonly used auth utilities for convenience
+// Users can also import from "fastmcp/auth" for the full auth module
+export {
+  // Auth providers
+  AuthProvider,
+  AzureProvider,
+  // Auth helpers for canAccess
+  getAuthSession,
+  GitHubProvider,
+  GoogleProvider,
+  OAuthProvider,
+  requireAll,
+  requireAny,
+  requireAuth,
+  requireRole,
+  requireScopes,
+} from "./auth/index.js";
+
+export type {
+  AuthProviderConfig,
+  AzureProviderConfig,
+  AzureSession,
+  GenericOAuthProviderConfig,
+  GitHubSession,
+  GoogleSession,
+  OAuthSession,
+} from "./auth/index.js";
 
 export { DiscoveryDocumentCache } from "./DiscoveryDocumentCache.js";
 

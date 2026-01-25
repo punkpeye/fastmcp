@@ -334,19 +334,54 @@ RFC 8414 Authorization Server Metadata:
 
 ### FastMCP Server Integration
 
-Automatic route registration when `oauth.proxy` is configured:
+Use the `auth` option for seamless OAuth integration:
+
+```typescript
+import { FastMCP, GoogleProvider, requireAuth } from "fastmcp";
+
+const server = new FastMCP({
+  auth: new GoogleProvider({
+    baseUrl: "https://your-server.com",
+    clientId: process.env.GOOGLE_CLIENT_ID!,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+  }),
+  name: "My Server",
+  version: "1.0.0",
+});
+```
 
 - No manual route setup required
 - Seamless Python-style API
-- Just pass the proxy instance
+- Automatic endpoint registration
 
 ### Session Integration
 
-OAuth tokens available in tool execution context:
+OAuth tokens available in tool execution context via `session.accessToken`:
 
-- Extract tokens from session headers
-- Use `canAccess` for authorization checks
-- Access user identity information
+```typescript
+import {
+  requireAuth,
+  requireScopes,
+  requireRole,
+  getAuthSession,
+} from "fastmcp";
+
+server.addTool({
+  canAccess: requireAuth, // Or: requireScopes("read"), requireRole("admin")
+  execute: async (_args, { session }) => {
+    // session.accessToken is the upstream OAuth token
+    const response = await fetch("https://api.provider.com/data", {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+    });
+    return JSON.stringify(await response.json());
+  },
+  name: "get-data",
+});
+```
+
+- Use built-in helpers: `requireAuth`, `requireScopes`, `requireRole`, `getAuthSession`
+- Combine with `requireAll` and `requireAny` for complex logic
+- Access upstream token via `session.accessToken`
 
 ### Transport Compatibility
 

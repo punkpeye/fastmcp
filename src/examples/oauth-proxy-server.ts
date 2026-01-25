@@ -1,44 +1,39 @@
 /**
- * Example FastMCP server with OAuth Proxy
+ * Example FastMCP server with OAuth
  *
- * This example demonstrates how to use the OAuth Proxy to enable
- * Dynamic Client Registration for providers that don't support it natively.
+ * This example demonstrates how to use the simplified auth configuration
+ * to enable Dynamic Client Registration for providers that don't support it natively.
  *
  * Run with: node dist/examples/oauth-proxy-server.js
  */
 
-import { GoogleProvider } from "../auth/index.js";
+import { getAuthSession, GoogleProvider, requireAuth } from "../auth/index.js";
 import { FastMCP } from "../FastMCP.js";
 
-// Create OAuth Proxy using Google provider
-const authProxy = new GoogleProvider({
-  baseUrl: "http://localhost:4200",
-  clientId: process.env.GOOGLE_CLIENT_ID || "your-google-client-id",
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET || "your-google-client-secret",
-  consentRequired: true,
-  scopes: ["openid", "profile", "email"],
-});
-
-// Create FastMCP server with OAuth Proxy
+// Create FastMCP server with Google OAuth
 const server = new FastMCP({
-  name: "OAuth Proxy Example Server",
-  oauth: {
-    authorizationServer: authProxy.getAuthorizationServerMetadata(),
-    enabled: true,
-  },
+  auth: new GoogleProvider({
+    baseUrl: "http://localhost:4200",
+    clientId: process.env.GOOGLE_CLIENT_ID || "your-google-client-id",
+    clientSecret:
+      process.env.GOOGLE_CLIENT_SECRET || "your-google-client-secret",
+    consentRequired: true,
+    scopes: ["openid", "profile", "email"],
+  }),
+  name: "OAuth Example Server",
   version: "1.0.0",
 });
 
 // Add a tool that requires authentication
 server.addTool({
+  canAccess: requireAuth, // Only visible to authenticated users
   description: "Get user information from OAuth token",
-  execute: async (_args, { session }) => {
-    // In a real implementation, you would extract and verify the access token
-    // from the session headers and use it to fetch user information
+  execute: async (_, { session }) => {
+    const { accessToken } = getAuthSession(session);
     return {
       content: [
         {
-          text: `Authenticated session: ${session?.id || "none"}`,
+          text: `Authenticated! Token starts with: ${accessToken.slice(0, 8)}...`,
           type: "text" as const,
         },
       ],
@@ -54,7 +49,7 @@ await server.start({
 });
 
 console.log(`
-🚀 OAuth Proxy Example Server is running!
+🚀 OAuth Example Server is running!
 
 Configuration:
 - Base URL: http://localhost:4200

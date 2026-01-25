@@ -46,31 +46,39 @@ This is the main entry point for OAuth Proxy documentation. For detailed informa
 
 ## Quick Start
 
-### Seamless Integration (Just 3 Steps!)
+### Seamless Integration (Just 2 Steps!)
 
 ```typescript
-import { FastMCP } from "fastmcp";
-import { GoogleProvider } from "fastmcp/auth";
+import { FastMCP, GoogleProvider, requireAuth } from "fastmcp";
 
-// 1. Create the OAuth proxy
-const authProxy = new GoogleProvider({
-  clientId: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  baseUrl: "https://your-server.com",
-  scopes: ["openid", "profile", "email"],
-});
-
-// 2. Configure FastMCP with OAuth
+// 1. Create FastMCP with OAuth provider
 const server = new FastMCP({
+  auth: new GoogleProvider({
+    baseUrl: "https://your-server.com",
+    clientId: process.env.GOOGLE_CLIENT_ID!,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+  }),
   name: "My Server",
-  oauth: {
-    enabled: true,
-    authorizationServer: authProxy.getAuthorizationServerMetadata(),
-    proxy: authProxy, // ← Routes auto-register!
-  },
+  version: "1.0.0",
 });
 
-// 3. Start the server
+// 2. Add protected tools
+server.addTool({
+  canAccess: requireAuth,
+  description: "Get user profile",
+  execute: async (_args, { session }) => {
+    // session.accessToken is the upstream OAuth token
+    const response = await fetch(
+      "https://www.googleapis.com/oauth2/v2/userinfo",
+      {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      },
+    );
+    return JSON.stringify(await response.json());
+  },
+  name: "get-profile",
+});
+
 await server.start({
   transportType: "httpStream",
   httpStream: { port: 3000 },
@@ -94,12 +102,16 @@ No manual route setup required - exactly like Python FastMCP! 🎉
 #### Google
 
 ```typescript
-import { GoogleProvider } from "fastmcp/auth";
+import { FastMCP, GoogleProvider } from "fastmcp";
 
-const authProxy = new GoogleProvider({
-  clientId: "xxx.apps.googleusercontent.com",
-  clientSecret: "your-secret",
-  baseUrl: "https://your-server.com",
+const server = new FastMCP({
+  auth: new GoogleProvider({
+    baseUrl: "https://your-server.com",
+    clientId: "xxx.apps.googleusercontent.com",
+    clientSecret: "your-secret",
+  }),
+  name: "My Server",
+  version: "1.0.0",
 });
 ```
 
@@ -108,12 +120,16 @@ const authProxy = new GoogleProvider({
 #### GitHub
 
 ```typescript
-import { GitHubProvider } from "fastmcp/auth";
+import { FastMCP, GitHubProvider } from "fastmcp";
 
-const authProxy = new GitHubProvider({
-  clientId: "your-github-app-id",
-  clientSecret: "your-github-app-secret",
-  baseUrl: "https://your-server.com",
+const server = new FastMCP({
+  auth: new GitHubProvider({
+    baseUrl: "https://your-server.com",
+    clientId: "your-github-app-id",
+    clientSecret: "your-github-app-secret",
+  }),
+  name: "My Server",
+  version: "1.0.0",
 });
 ```
 
@@ -122,13 +138,17 @@ const authProxy = new GitHubProvider({
 #### Azure/Entra ID
 
 ```typescript
-import { AzureProvider } from "fastmcp/auth";
+import { FastMCP, AzureProvider } from "fastmcp";
 
-const authProxy = new AzureProvider({
-  clientId: "your-azure-app-id",
-  clientSecret: "your-azure-app-secret",
-  baseUrl: "https://your-server.com",
-  tenantId: "common",
+const server = new FastMCP({
+  auth: new AzureProvider({
+    baseUrl: "https://your-server.com",
+    clientId: "your-azure-app-id",
+    clientSecret: "your-azure-app-secret",
+    tenantId: "common",
+  }),
+  name: "My Server",
+  version: "1.0.0",
 });
 ```
 
@@ -136,16 +156,22 @@ const authProxy = new AzureProvider({
 
 ### Custom Provider
 
-```typescript
-import { OAuthProxy } from "fastmcp/auth";
+For any OAuth 2.0 provider (SAP, Auth0, Okta, etc.):
 
-const authProxy = new OAuthProxy({
-  upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
-  upstreamTokenEndpoint: "https://provider.com/oauth/token",
-  upstreamClientId: process.env.OAUTH_CLIENT_ID,
-  upstreamClientSecret: process.env.OAUTH_CLIENT_SECRET,
-  baseUrl: "https://your-server.com",
-  scopes: ["openid", "profile"],
+```typescript
+import { FastMCP, OAuthProvider } from "fastmcp";
+
+const server = new FastMCP({
+  auth: new OAuthProvider({
+    authorizationEndpoint: "https://provider.com/oauth/authorize",
+    baseUrl: "https://your-server.com",
+    clientId: process.env.OAUTH_CLIENT_ID!,
+    clientSecret: process.env.OAUTH_CLIENT_SECRET!,
+    scopes: ["openid", "profile"],
+    tokenEndpoint: "https://provider.com/oauth/token",
+  }),
+  name: "My Server",
+  version: "1.0.0",
 });
 ```
 
@@ -190,26 +216,67 @@ const authProxy = new OAuthProxy({
 
 ## Protecting Tools with OAuth
 
+Use the built-in authorization helpers:
+
 ```typescript
+import {
+  requireAuth,
+  requireScopes,
+  requireRole,
+  requireAll,
+  requireAny,
+  getAuthSession,
+} from "fastmcp";
+
+// Require any authenticated user
 server.addTool({
-  name: "get-user-data",
+  canAccess: requireAuth,
   description: "Get authenticated user data",
-  canAccess: async ({ session }) => {
-    // Verify session has valid OAuth token
-    return session?.headers?.["authorization"] !== undefined;
-  },
-  execute: async (args, { session }) => {
-    const token = session?.headers?.["authorization"];
-
-    // Use token to call upstream API
+  execute: async (_args, { session }) => {
+    // session.accessToken is the upstream OAuth token
     const response = await fetch("https://api.provider.com/user", {
-      headers: { Authorization: token },
+      headers: { Authorization: `Bearer ${session.accessToken}` },
     });
+    return JSON.stringify(await response.json(), null, 2);
+  },
+  name: "get-user-data",
+});
 
-    const data = await response.json();
-    return {
-      content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
-    };
+// Require specific scopes
+server.addTool({
+  canAccess: requireScopes("read:data", "write:data"),
+  description: "Access data with required scopes",
+  execute: async () => "Scoped access granted!",
+  name: "scoped-data",
+});
+
+// Require specific role
+server.addTool({
+  canAccess: requireRole("admin"),
+  description: "Admin-only tool",
+  execute: async () => "Admin access granted!",
+  name: "admin-tool",
+});
+
+// Combine with AND/OR logic
+server.addTool({
+  canAccess: requireAll(
+    requireAuth,
+    requireAny(requireRole("admin"), requireRole("moderator")),
+  ),
+  description: "Staff-only tool",
+  execute: async () => "Staff access granted!",
+  name: "staff-tool",
+});
+
+// Type-safe session access with getAuthSession
+server.addTool({
+  canAccess: requireAuth,
+  name: "typed-session",
+  execute: async (_args, { session }) => {
+    const { accessToken } = getAuthSession(session); // throws if not authenticated
+    // Use accessToken to call upstream APIs
+    return `User authenticated`;
   },
 });
 ```
@@ -272,7 +339,7 @@ npm run build
 
 ## Migration from Python FastMCP
 
-The TypeScript implementation maintains API compatibility with Python FastMCP:
+The TypeScript implementation now matches Python FastMCP's simplicity:
 
 **Python:**
 
@@ -293,26 +360,26 @@ mcp = FastMCP(name="My Server", auth=auth)
 **TypeScript:**
 
 ```typescript
-import { FastMCP } from "fastmcp";
-import { OAuthProxy } from "fastmcp/auth";
+import { FastMCP, OAuthProvider } from "fastmcp";
 
-const auth = new OAuthProxy({
-  upstreamAuthorizationEndpoint: "...",
-  upstreamTokenEndpoint: "...",
-  upstreamClientId: "...",
-  upstreamClientSecret: "...",
-  baseUrl: "...",
-});
-
-const mcp = new FastMCP({
+const server = new FastMCP({
+  auth: new OAuthProvider({
+    authorizationEndpoint: "...",
+    baseUrl: "...",
+    clientId: "...",
+    clientSecret: "...",
+    tokenEndpoint: "...",
+  }),
   name: "My Server",
-  oauth: {
-    enabled: true,
-    authorizationServer: auth.getAuthorizationServerMetadata(),
-    proxy: auth,
-  },
+  version: "1.0.0",
 });
 ```
+
+Both approaches now:
+
+- Use a simple `auth` option
+- Auto-configure OAuth endpoints
+- Provide session with upstream access token
 
 See [Python vs TypeScript Comparison](oauth-python-typescript.md) for detailed migration guidance.
 

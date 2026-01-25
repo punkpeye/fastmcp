@@ -114,7 +114,7 @@ Dependencies:
 
 ## API Comparison
 
-### Creating an OAuth Proxy
+### Creating an OAuth Server
 
 **Python:**
 
@@ -136,31 +136,22 @@ mcp = FastMCP(name="My Server", auth=auth)
 **TypeScript:**
 
 ```typescript
-import { FastMCP } from "fastmcp";
-import { OAuthProxy } from "fastmcp/auth";
+import { FastMCP, OAuthProvider } from "fastmcp";
 
-const auth = new OAuthProxy({
-  upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
-  upstreamTokenEndpoint: "https://provider.com/oauth/token",
-  upstreamClientId: "client-id",
-  upstreamClientSecret: "client-secret",
-  baseUrl: "https://your-server.com",
-});
-
-const mcp = new FastMCP({
+const server = new FastMCP({
+  auth: new OAuthProvider({
+    authorizationEndpoint: "https://provider.com/oauth/authorize",
+    baseUrl: "https://your-server.com",
+    clientId: "client-id",
+    clientSecret: "client-secret",
+    tokenEndpoint: "https://provider.com/oauth/token",
+  }),
   name: "My Server",
-  oauth: {
-    enabled: true,
-    authorizationServer: auth.getAuthorizationServerMetadata(),
-    proxy: auth,
-  },
+  version: "1.0.0",
 });
 ```
 
-**Differences:**
-
-- Python: `auth=auth` parameter
-- TypeScript: `oauth.proxy` nested configuration
+**Differences:** Minimal - both use a simple `auth` option with camelCase vs snake_case naming.
 
 ### Using Pre-configured Providers
 
@@ -182,26 +173,21 @@ mcp = FastMCP(name="My Server", auth=auth)
 **TypeScript:**
 
 ```typescript
-import { GoogleProvider } from "fastmcp/auth";
+import { FastMCP, GoogleProvider } from "fastmcp";
 
-const auth = new GoogleProvider({
-  clientId: "xxx.apps.googleusercontent.com",
-  clientSecret: "secret",
-  baseUrl: "https://your-server.com",
-  scopes: ["openid", "profile", "email"],
-});
-
-const mcp = new FastMCP({
+const server = new FastMCP({
+  auth: new GoogleProvider({
+    baseUrl: "https://your-server.com",
+    clientId: "xxx.apps.googleusercontent.com",
+    clientSecret: "secret",
+    scopes: ["openid", "profile", "email"],
+  }),
   name: "My Server",
-  oauth: {
-    enabled: true,
-    authorizationServer: auth.getAuthorizationServerMetadata(),
-    proxy: auth,
-  },
+  version: "1.0.0",
 });
 ```
 
-**Differences:** Minimal, mostly camelCase vs snake_case naming.
+**Differences:** Minimal - both use `auth` option with camelCase vs snake_case naming.
 
 ### Token Swap Pattern
 
@@ -329,8 +315,7 @@ from fastmcp.server.auth import OAuthProxy, GoogleProvider
 **TypeScript:**
 
 ```typescript
-import { FastMCP } from "fastmcp";
-import { OAuthProxy, GoogleProvider } from "fastmcp/auth";
+import { FastMCP, OAuthProvider, GoogleProvider, requireAuth } from "fastmcp";
 ```
 
 ### Step 3: Convert Configuration
@@ -351,24 +336,49 @@ mcp = FastMCP(name="My Server", auth=auth)
 **TypeScript:**
 
 ```typescript
-const auth = new GoogleProvider({
-  clientId: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  baseUrl: "https://example.com",
-  scopes: ["openid", "profile"],
-});
-
-const mcp = new FastMCP({
+const server = new FastMCP({
+  auth: new GoogleProvider({
+    baseUrl: "https://example.com",
+    clientId: process.env.GOOGLE_CLIENT_ID!,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    scopes: ["openid", "profile"],
+  }),
   name: "My Server",
-  oauth: {
-    enabled: true,
-    authorizationServer: auth.getAuthorizationServerMetadata(),
-    proxy: auth,
+  version: "1.0.0",
+});
+```
+
+### Step 4: Update Token Access
+
+**Python:**
+
+```python
+@mcp.tool()
+async def protected_tool(session: Session):
+    # Access user token
+    token = session.auth_token
+    # Use token to call upstream API
+```
+
+**TypeScript:**
+
+```typescript
+import { requireAuth, getAuthSession } from "fastmcp";
+
+server.addTool({
+  canAccess: requireAuth,
+  name: "protected-tool",
+  execute: async (_args, { session }) => {
+    // session.accessToken is the upstream OAuth token
+    const response = await fetch("https://api.provider.com/user", {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+    });
+    return JSON.stringify(await response.json());
   },
 });
 ```
 
-### Step 4: Adjust Storage (If Using Disk)
+### Step 5: Adjust Storage (If Using Disk)
 
 **Python:**
 
@@ -384,65 +394,15 @@ auth = OAuthProxy(
 **TypeScript:**
 
 ```typescript
-import { DiskStore } from "fastmcp/auth";
+import { OAuthProvider, DiskStore } from "fastmcp/auth";
 
-// Encryption is automatic (matches Python)
-const auth = new OAuthProxy({
-  // ... config
-  tokenStorage: new DiskStore({ directory: "/var/lib/fastmcp" }),
-  // encryptionKey: customKey, // Optional - auto-generated if not provided
-});
-```
-
-### Step 5: Configure Token Swap (Optional - Enabled by Default)
-
-**Python (automatic):**
-
-```python
-# Token swap is enabled by default, no config needed
-```
-
-**TypeScript (also automatic, optionally customize):**
-
-```typescript
-import { JWTIssuer } from "fastmcp/auth";
-
-const auth = new OAuthProxy({
-  // ... config
-  // Token swap enabled by default
-  // Optionally provide your own signing key (recommended for production)
-  jwtSigningKey: await JWTIssuer.deriveKey(process.env.JWT_SECRET),
-});
-```
-
-### Step 6: Update Token Access
-
-**Python:**
-
-```python
-@mcp.tool()
-async def protected_tool(session: Session):
-    # Access user token
-    token = session.auth_token
-    # Token is already upstream token or can be swapped
-```
-
-**TypeScript:**
-
-```typescript
-server.addTool({
-  name: "protected-tool",
-  execute: async (args, { session }) => {
-    const clientToken = session?.headers?.["authorization"];
-
-    // If token swap enabled, load upstream tokens
-    const upstreamTokens = await authProxy.loadUpstreamTokens(clientToken);
-
-    // Use upstream tokens
-    const response = await fetch("https://api.provider.com/user", {
-      headers: { Authorization: `Bearer ${upstreamTokens.accessToken}` },
-    });
-  },
+const server = new FastMCP({
+  auth: new OAuthProvider({
+    // ... config
+    tokenStorage: new DiskStore({ directory: "/var/lib/fastmcp" }),
+  }),
+  name: "My Server",
+  version: "1.0.0",
 });
 ```
 
