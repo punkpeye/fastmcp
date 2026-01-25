@@ -1,38 +1,37 @@
 /**
- * Example FastMCP server with GitHub OAuth Proxy
+ * Example FastMCP server with GitHub OAuth
  *
  * This example shows how to use GitHub as the OAuth provider
+ * with the simplified auth configuration.
  *
  * Run with: node dist/examples/oauth-proxy-github.js
  */
 
-import { GitHubProvider } from "../auth/index.js";
+import { getAuthSession, GitHubProvider, requireAuth } from "../auth/index.js";
 import { FastMCP } from "../FastMCP.js";
 
-// Create OAuth Proxy using GitHub provider
-const authProxy = new GitHubProvider({
-  baseUrl: "http://localhost:4201",
-  clientId: process.env.GITHUB_CLIENT_ID || "your-github-client-id",
-  clientSecret: process.env.GITHUB_CLIENT_SECRET || "your-github-client-secret",
-  scopes: ["read:user", "user:email"],
-});
-
+// Create FastMCP server with GitHub OAuth
 const server = new FastMCP({
-  name: "GitHub OAuth Proxy Server",
-  oauth: {
-    authorizationServer: authProxy.getAuthorizationServerMetadata(),
-    enabled: true,
-  },
+  auth: new GitHubProvider({
+    baseUrl: "http://localhost:4201",
+    clientId: process.env.GITHUB_CLIENT_ID || "your-github-client-id",
+    clientSecret:
+      process.env.GITHUB_CLIENT_SECRET || "your-github-client-secret",
+    scopes: ["read:user", "user:email"],
+  }),
+  name: "GitHub OAuth Server",
   version: "1.0.0",
 });
 
 server.addTool({
+  canAccess: requireAuth, // Only visible to authenticated users
   description: "Get GitHub repositories for authenticated user",
-  execute: async () => {
+  execute: async (_, { session }) => {
+    const { accessToken } = getAuthSession(session);
     return {
       content: [
         {
-          text: "This would fetch repositories using the OAuth access token",
+          text: `Authenticated! Token starts with: ${accessToken.slice(0, 8)}...`,
           type: "text" as const,
         },
       ],
@@ -47,7 +46,7 @@ await server.start({
 });
 
 console.log(`
-🚀 GitHub OAuth Proxy Server is running on http://localhost:4201
+🚀 GitHub OAuth Server is running on http://localhost:4201
 
 OAuth Provider: GitHub
 Callback URL: http://localhost:4201/oauth/callback
