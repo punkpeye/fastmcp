@@ -356,7 +356,7 @@ const server = new FastMCP({
 
 ### Session Integration
 
-OAuth tokens available in tool execution context via `session.accessToken`:
+OAuth tokens available in tool execution context via `getAuthSession`:
 
 ```typescript
 import {
@@ -369,9 +369,9 @@ import {
 server.addTool({
   canAccess: requireAuth, // Or: requireScopes("read"), requireRole("admin")
   execute: async (_args, { session }) => {
-    // session.accessToken is the upstream OAuth token
+    const { accessToken } = getAuthSession(session);
     const response = await fetch("https://api.provider.com/data", {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     return JSON.stringify(await response.json());
   },
@@ -381,7 +381,7 @@ server.addTool({
 
 - Use built-in helpers: `requireAuth`, `requireScopes`, `requireRole`, `getAuthSession`
 - Combine with `requireAll` and `requireAny` for complex logic
-- Access upstream token via `session.accessToken`
+- Access upstream token via `getAuthSession(session).accessToken`
 
 ### Transport Compatibility
 

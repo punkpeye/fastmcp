@@ -18,7 +18,7 @@ This guide shows you how to implement OAuth authentication in your FastMCP serve
 The simplest way to add OAuth is using the `auth` option with a pre-configured provider:
 
 ```typescript
-import { FastMCP, GoogleProvider, requireAuth } from "fastmcp";
+import { FastMCP, getAuthSession, GoogleProvider, requireAuth } from "fastmcp";
 
 const server = new FastMCP({
   auth: new GoogleProvider({
@@ -36,11 +36,11 @@ server.addTool({
   canAccess: requireAuth,
   description: "Get user profile from Google",
   execute: async (_args, { session }) => {
-    // session.accessToken is the upstream Google access token
+    const { accessToken } = getAuthSession(session);
     const response = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {
-        headers: { Authorization: `Bearer ${session.accessToken}` },
+        headers: { Authorization: `Bearer ${accessToken}` },
       },
     );
     return JSON.stringify(await response.json());
@@ -67,7 +67,7 @@ await server.start({
 For providers without pre-built support (SAP, Auth0, Okta, etc.), use `OAuthProvider`:
 
 ```typescript
-import { FastMCP, OAuthProvider, requireAuth } from "fastmcp";
+import { FastMCP, getAuthSession, OAuthProvider, requireAuth } from "fastmcp";
 
 const server = new FastMCP({
   auth: new OAuthProvider({
@@ -86,8 +86,9 @@ server.addTool({
   canAccess: requireAuth,
   description: "Call protected API",
   execute: async (_args, { session }) => {
+    const { accessToken } = getAuthSession(session);
     const response = await fetch("https://api.provider.com/data", {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     return JSON.stringify(await response.json());
   },
@@ -747,8 +748,9 @@ server.addTool({
   canAccess: requireAuth,
   description: "Requires authentication",
   execute: async (_args, { session }) => {
-    // session.accessToken is the upstream OAuth token
-    return `Authenticated! Token: ${session.accessToken.slice(0, 10)}...`;
+    const { accessToken } = getAuthSession(session);
+    // Use accessToken to call upstream APIs
+    return "Authenticated!";
   },
   name: "protected-tool",
 });

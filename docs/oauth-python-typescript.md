@@ -369,9 +369,9 @@ server.addTool({
   canAccess: requireAuth,
   name: "protected-tool",
   execute: async (_args, { session }) => {
-    // session.accessToken is the upstream OAuth token
+    const { accessToken } = getAuthSession(session);
     const response = await fetch("https://api.provider.com/user", {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     return JSON.stringify(await response.json());
   },

@@ -1237,7 +1237,7 @@ FastMCP supports OAuth 2.1 authentication with pre-configured providers, allowin
 Use the `auth` option with a provider to enable OAuth authentication:
 
 ```ts
-import { FastMCP, GoogleProvider, requireAuth } from "fastmcp";
+import { FastMCP, getAuthSession, GoogleProvider, requireAuth } from "fastmcp";
 
 const server = new FastMCP({
   auth: new GoogleProvider({
@@ -1253,11 +1253,11 @@ server.addTool({
   canAccess: requireAuth,
   description: "Get user profile",
   execute: async (_args, { session }) => {
-    // session.accessToken is the upstream OAuth access token
+    const { accessToken } = getAuthSession(session);
     const response = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {
-        headers: { Authorization: `Bearer ${session.accessToken}` },
+        headers: { Authorization: `Bearer ${accessToken}` },
       },
     );
     return JSON.stringify(await response.json());
@@ -1382,6 +1382,8 @@ server.addTool({
 });
 ```
 
+> **Note:** You can also access `session.accessToken` directly, but you must handle the case where `session` is undefined. The `getAuthSession` helper throws a clear error if the session is not authenticated, making it safer when used with `canAccess: requireAuth`.
+
 #### Custom Authentication
 
 For non-OAuth scenarios (API keys, custom tokens), use the `authenticate` option:
@@ -1427,7 +1429,7 @@ The `auth` option uses FastMCP's built-in **OAuth Proxy** that acts as a secure 
 **Quick Start:**
 
 ```ts
-import { FastMCP, GoogleProvider, requireAuth } from "fastmcp";
+import { FastMCP, getAuthSession, GoogleProvider, requireAuth } from "fastmcp";
 
 const server = new FastMCP({
   auth: new GoogleProvider({
@@ -1443,8 +1445,9 @@ server.addTool({
   canAccess: requireAuth,
   name: "protected-tool",
   execute: async (_args, { session }) => {
-    // Use session.accessToken to call upstream APIs
-    return `Authenticated with token: ${session.accessToken.slice(0, 10)}...`;
+    const { accessToken } = getAuthSession(session);
+    // Use accessToken to call upstream APIs
+    return "Authenticated!";
   },
 });
 ```

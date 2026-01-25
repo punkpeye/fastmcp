@@ -49,7 +49,7 @@ This is the main entry point for OAuth Proxy documentation. For detailed informa
 ### Seamless Integration (Just 2 Steps!)
 
 ```typescript
-import { FastMCP, GoogleProvider, requireAuth } from "fastmcp";
+import { FastMCP, getAuthSession, GoogleProvider, requireAuth } from "fastmcp";
 
 // 1. Create FastMCP with OAuth provider
 const server = new FastMCP({
@@ -67,11 +67,11 @@ server.addTool({
   canAccess: requireAuth,
   description: "Get user profile",
   execute: async (_args, { session }) => {
-    // session.accessToken is the upstream OAuth token
+    const { accessToken } = getAuthSession(session);
     const response = await fetch(
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {
-        headers: { Authorization: `Bearer ${session.accessToken}` },
+        headers: { Authorization: `Bearer ${accessToken}` },
       },
     );
     return JSON.stringify(await response.json());
@@ -233,9 +233,9 @@ server.addTool({
   canAccess: requireAuth,
   description: "Get authenticated user data",
   execute: async (_args, { session }) => {
-    // session.accessToken is the upstream OAuth token
+    const { accessToken } = getAuthSession(session);
     const response = await fetch("https://api.provider.com/user", {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     return JSON.stringify(await response.json(), null, 2);
   },
@@ -269,16 +269,8 @@ server.addTool({
   name: "staff-tool",
 });
 
-// Type-safe session access with getAuthSession
-server.addTool({
-  canAccess: requireAuth,
-  name: "typed-session",
-  execute: async (_args, { session }) => {
-    const { accessToken } = getAuthSession(session); // throws if not authenticated
-    // Use accessToken to call upstream APIs
-    return `User authenticated`;
-  },
-});
+// Note: getAuthSession throws if session is not authenticated,
+// so it's safe to use when canAccess: requireAuth is set
 ```
 
 ## Security Features
