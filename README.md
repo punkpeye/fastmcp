@@ -19,6 +19,8 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Logging](#logging)
 - [Error handling](#errors)
 - [HTTP Streaming](#http-streaming) (with SSE compatibility)
+- [Custom HTTP routes](#custom-http-routes) for REST APIs, webhooks, and admin interfaces
+- [Edge Runtime Support](#edge-runtime-support) for Cloudflare Workers, Deno Deploy, and more
 - [Stateless mode](#stateless-mode) for serverless deployments
 - CORS (enabled by default)
 - [Progress notifications](#progress)
@@ -181,6 +183,210 @@ const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
 
 await client.connect(transport);
 ```
+
+#### Custom HTTP Routes
+
+FastMCP allows you to add custom HTTP routes alongside MCP endpoints, enabling you to build comprehensive HTTP services that include REST APIs, webhooks, admin interfaces, and more - all within the same server process.
+
+```ts
+// Add REST API endpoints
+server.addRoute("GET", "/api/users", async (req, res) => {
+  res.json({ users: [] });
+});
+
+// Handle path parameters
+server.addRoute("GET", "/api/users/:id", async (req, res) => {
+  res.json({
+    userId: req.params.id,
+    query: req.query, // Access query parameters
+  });
+});
+
+// Handle POST requests with body parsing
+server.addRoute("POST", "/api/users", async (req, res) => {
+  const body = await req.json();
+  res.status(201).json({ created: body });
+});
+
+// Serve HTML content
+server.addRoute("GET", "/admin", async (req, res) => {
+  res.send("<html><body><h1>Admin Panel</h1></body></html>");
+});
+
+// Handle webhooks
+server.addRoute("POST", "/webhook/github", async (req, res) => {
+  const payload = await req.json();
+  const event = req.headers["x-github-event"];
+
+  // Process webhook...
+  res.json({ received: true });
+});
+```
+
+Custom routes support:
+
+- All HTTP methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
+- Path parameters (`:param`) and wildcards (`*`)
+- Query string parsing
+- JSON and text body parsing
+- Custom status codes and headers
+- Authentication via the same `authenticate` function as MCP
+- **Public routes** that bypass authentication
+
+Routes are matched in the order they are registered, allowing you to define specific routes before catch-all patterns.
+
+##### Public Routes
+
+By default, custom routes require authentication (if configured). You can make routes public by adding the `{ public: true }` option:
+
+```ts
+// Public route - no authentication required
+server.addRoute(
+  "GET",
+  "/.well-known/openid-configuration",
+  async (req, res) => {
+    res.json({
+      issuer: "https://example.com",
+      authorization_endpoint: "https://example.com/auth",
+      token_endpoint: "https://example.com/token",
+    });
+  },
+  { public: true },
+);
+
+// Private route - requires authentication
+server.addRoute("GET", "/api/users", async (req, res) => {
+  // req.auth contains authenticated user data
+  res.json({ users: [] });
+});
+
+// Public static files
+server.addRoute(
+  "GET",
+  "/public/*",
+  async (req, res) => {
+    // Serve static files without authentication
+    res.send(`File: ${req.url}`);
+  },
+  { public: true },
+);
+```
+
+Public routes are perfect for:
+
+- OAuth discovery endpoints (`.well-known/*`)
+- Health checks and status pages
+- Static assets and documentation
+- Webhook endpoints from external services
+- Public APIs that don't require user authentication
+
+See the [custom-routes example](src/examples/custom-routes.ts) for a complete demonstration.
+
+#### Edge Runtime Support
+
+FastMCP supports edge runtimes like Cloudflare Workers, enabling deployment of MCP servers to the edge with minimal latency worldwide.
+
+##### Choosing Between FastMCP and EdgeFastMCP
+
+| Use Case                        | Class         | Import                                       |
+| ------------------------------- | ------------- | -------------------------------------------- |
+| Node.js, Express, Bun           | `FastMCP`     | `import { FastMCP } from "fastmcp"`          |
+| Cloudflare Workers, Deno Deploy | `EdgeFastMCP` | `import { EdgeFastMCP } from "fastmcp/edge"` |
+
+| Feature              | FastMCP                        | EdgeFastMCP                            |
+| -------------------- | ------------------------------ | -------------------------------------- |
+| Runtime              | Node.js                        | Edge (V8 isolates)                     |
+| Start method         | `server.start({ port })`       | `export default server`                |
+| Transport            | stdio, httpStream, SSE         | HTTP Streamable only                   |
+| Sessions             | Stateful or stateless          | Stateless only                         |
+| File system          | Yes                            | No                                     |
+| OAuth/Authentication | Built-in `authenticate` option | Use Hono middleware (built-in planned) |
+| Custom routes        | `server.getApp()`              | `server.getApp()`                      |
+
+> **Note:** Built-in authentication for EdgeFastMCP is planned for a future release. Both FastMCP and EdgeFastMCP use Hono internally, so there's no technical barrier—EdgeFastMCP was simply written before OAuth was added to FastMCP. PRs are welcome to add an `authenticate` option that accepts web `Request` instead of Node.js `http.IncomingMessage`.
+>
+> In the meantime, use Hono middleware:
+>
+> ```ts
+> const app = server.getApp();
+> app.use("/api/*", async (c, next) => {
+>   if (c.req.header("authorization") !== "Bearer secret") {
+>     return c.json({ error: "Unauthorized" }, 401);
+>   }
+>   await next();
+> });
+> ```
+
+##### Cloudflare Workers
+
+To deploy FastMCP to Cloudflare Workers, use the `EdgeFastMCP` class from the `/edge` subpath:
+
+```ts
+import { EdgeFastMCP } from "fastmcp/edge";
+import { z } from "zod";
+
+const server = new EdgeFastMCP({
+  name: "My Edge Server",
+  version: "1.0.0",
+  description: "MCP server running on Cloudflare Workers",
+});
+
+// Add tools, resources, prompts as usual
+server.addTool({
+  name: "greet",
+  description: "Greet someone",
+  parameters: z.object({
+    name: z.string(),
+  }),
+  execute: async ({ name }) => {
+    return `Hello, ${name}! Served from the edge.`;
+  },
+});
+
+// Export the server as the default (required for Cloudflare Workers)
+export default server;
+```
+
+##### Edge Runtime Differences
+
+When running on edge runtimes:
+
+- **Stateless by default**: Each request is handled independently
+- **No filesystem access**: Use fetch APIs for external data
+- **V8 Isolates**: Fast cold starts and efficient resource usage
+- **Global deployment**: Automatic distribution to edge locations
+
+##### Custom Routes on Edge
+
+You can access the underlying Hono app to add custom HTTP routes:
+
+```ts
+const app = server.getApp();
+
+// Add a landing page
+app.get("/", (c) => c.html("<h1>Welcome to my MCP server</h1>"));
+
+// Add REST API endpoints
+app.get("/api/status", (c) => c.json({ status: "ok" }));
+```
+
+##### Deployment
+
+Configure your `wrangler.toml`:
+
+```toml
+name = "my-mcp-server"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+```
+
+Deploy with:
+
+```bash
+wrangler deploy
+```
+
+See the [edge-cloudflare-worker example](src/examples/edge-cloudflare-worker.ts) for a complete demonstration.
 
 #### Stateless Mode
 
