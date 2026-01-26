@@ -3223,6 +3223,7 @@ export class FastMCP<
       httpStream: {
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
+        eventStore?: EventStore;
         host?: string;
         port: number;
         stateless?: boolean;
@@ -3284,11 +3285,13 @@ export class FastMCP<
         statelessArg === "true" ||
         envStateless === "true" ||
         false;
+      const eventStore = overrides?.httpStream?.eventStore;
 
       return {
         httpStream: {
           enableJsonResponse,
           endpoint: endpoint as `/${string}`,
+          eventStore,
           host,
           port,
           stateless,
