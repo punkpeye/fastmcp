@@ -32,6 +32,7 @@ import { StandardSchemaV1 } from "@standard-schema/spec";
 import { EventEmitter } from "events";
 import { readFile } from "fs/promises";
 import Fuse from "fuse.js";
+import { Hono } from "hono";
 import http from "http";
 import { startHTTPServer } from "mcp-proxy";
 import { StrictEventEmitter } from "strict-event-emitter-types";
@@ -974,6 +975,66 @@ export enum ServerState {
   Error = "error",
   Running = "running",
   Stopped = "stopped",
+}
+
+/**
+ * Enhanced request object for custom routes
+ */
+export interface FastMCPRequest<
+  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+> {
+  auth?: T;
+  body?: unknown;
+  headers: http.IncomingHttpHeaders;
+  json(): Promise<unknown>;
+  method: string;
+  params: Record<string, string>;
+  query: Record<string, string | string[]>;
+  text(): Promise<string>;
+  url: string;
+}
+
+/**
+ * Enhanced response object for custom routes
+ */
+export interface FastMCPResponse {
+  end(data?: Buffer | string): void;
+  json(data: unknown): void;
+  send(data: Buffer | string): void;
+  setHeader(name: string, value: number | string | string[]): FastMCPResponse;
+  status(code: number): FastMCPResponse;
+}
+
+/**
+ * HTTP method types for custom routes
+ */
+export type HTTPMethod =
+  | "DELETE"
+  | "GET"
+  | "OPTIONS"
+  | "PATCH"
+  | "POST"
+  | "PUT";
+
+/**
+ * Route handler function type
+ */
+export type RouteHandler<T extends FastMCPSessionAuth = FastMCPSessionAuth> = (
+  req: FastMCPRequest<T>,
+  res: FastMCPResponse,
+) => Promise<void> | void;
+
+/**
+ * Options for configuring custom routes
+ */
+export interface RouteOptions {
+  /**
+   * Whether this route should bypass authentication.
+   * When true, the route handler will be called without authentication,
+   * and req.auth will be undefined.
+   * @default false
+   */
+  public?: boolean;
 }
 
 type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
@@ -2130,6 +2191,7 @@ export class FastMCP<
     return this.#sessions;
   }
   #authenticate: Authenticate<T> | undefined;
+  #honoApp = new Hono();
   #httpStreamServer: null | SSEServer = null;
   #logger: Logger;
   #options: ServerOptions<T>;
@@ -2137,7 +2199,6 @@ export class FastMCP<
   #resources: Resource<T>[] = [];
   #resourcesTemplates: InputResourceTemplate<T>[] = [];
   #serverState: ServerState = ServerState.Stopped;
-
   #sessions: FastMCPSession<T>[] = [];
 
   #tools: Tool<T>[] = [];
@@ -2344,6 +2405,30 @@ export class FastMCP<
     throw new UnexpectedStateError(`Resource not found: ${uri}`, { uri });
   }
   /**
+   * Returns the underlying Hono app instance for direct access to Hono's native API.
+   * This allows you to add custom routes, middleware, and handlers using Hono's standard methods.
+   *
+   * @returns The Hono app instance
+   *
+   * @example
+   * ```typescript
+   * const app = server.getApp();
+   *
+   * // Add routes using native Hono API
+   * app.get('/api/users', async (c) => {
+   *   return c.json({ users: [] });
+   * });
+   *
+   * app.post('/api/users/:id', async (c) => {
+   *   const id = c.req.param('id');
+   *   return c.json({ id });
+   * });
+   * ```
+   */
+  public getApp(): Hono {
+    return this.#honoApp;
+  }
+  /**
    * Removes a prompt from the server.
    */
   public removePrompt(name: string) {
@@ -2363,6 +2448,7 @@ export class FastMCP<
       this.#promptsListChanged(this.#prompts);
     }
   }
+
   /**
    * Removes a resource from the server.
    */
@@ -2372,7 +2458,6 @@ export class FastMCP<
       this.#resourcesListChanged(this.#resources);
     }
   }
-
   /**
    * Removes resources from the server.
    */
@@ -2408,6 +2493,7 @@ export class FastMCP<
       this.#resourceTemplatesListChanged(this.#resourcesTemplates);
     }
   }
+
   /**
    * Removes a tool from the server.
    */
@@ -2712,7 +2798,7 @@ export class FastMCP<
   }
 
   /**
-   * Handles unhandled HTTP requests with health, readiness, and OAuth endpoints
+   * Handles unhandled HTTP requests with health, readiness, OAuth endpoints, and custom routes
    */
   #handleUnhandledRequest = async (
     req: http.IncomingMessage,
@@ -2721,6 +2807,49 @@ export class FastMCP<
     host: string,
     streamEndpoint?: string,
   ) => {
+    const url = new URL(req.url || "", `http://${host}`);
+
+    // Try Hono routes first - users may have added routes via getApp()
+    try {
+      // Convert Node.js IncomingMessage to Web Request
+      const webRequest = this.#nodeRequestToWebRequest(req, url);
+
+      // Call Hono's fetch handler
+      const honoResponse = await this.#honoApp.fetch(webRequest, {
+        incoming: req,
+        outgoing: res,
+      });
+
+      // If Hono handled it (not 404), write response and return
+      if (honoResponse.status !== 404) {
+        // Write Hono response to Node.js response
+        if (!res.headersSent) {
+          res.statusCode = honoResponse.status;
+          honoResponse.headers.forEach((value, key) => {
+            res.setHeader(key, value);
+          });
+
+          if (honoResponse.body) {
+            const reader = honoResponse.body.getReader();
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                res.write(value);
+              }
+            } finally {
+              reader.releaseLock();
+            }
+          }
+          res.end();
+        }
+        return;
+      }
+    } catch (error) {
+      // If Hono throws, log and continue to other endpoints
+      this.#logger.debug("[FastMCP debug] Hono route not matched", error);
+    }
+
     const healthConfig = this.#options.health ?? {};
 
     const enabled =
@@ -3049,6 +3178,46 @@ export class FastMCP<
     res.writeHead(404).end();
   };
 
+  /**
+   * Converts Node.js IncomingMessage to Web Request for Hono
+   */
+  #nodeRequestToWebRequest(req: http.IncomingMessage, url: URL): Request {
+    const method = req.method || "GET";
+
+    // Build headers
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value) {
+        if (Array.isArray(value)) {
+          for (const v of value) {
+            headers.append(key, v);
+          }
+        } else {
+          headers.set(key, value);
+        }
+      }
+    }
+
+    // Create Web Request
+    // For methods that can have a body, we need to pass the body
+    const hasBody = method !== "GET" && method !== "HEAD";
+
+    if (hasBody) {
+      return new Request(url.toString(), {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        body: req as any, // Node.js IncomingMessage is readable stream
+        duplex: "half", // Required for streaming bodies
+        headers,
+        method,
+      } as RequestInit);
+    } else {
+      return new Request(url.toString(), {
+        headers,
+        method,
+      });
+    }
+  }
+
   #parseRuntimeConfig(
     overrides?: Partial<{
       httpStream: {
@@ -3211,6 +3380,7 @@ export type {
   ContentResult,
   Context,
   FastMCPEvents,
+  FastMCPSessionAuth,
   FastMCPSessionEvents,
   ImageContent,
   InputPrompt,
