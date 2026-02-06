@@ -902,6 +902,20 @@ type Tool<
   T extends FastMCPSessionAuth,
   Params extends ToolParameters = ToolParameters,
 > = {
+  /**
+   * MCP ext-apps metadata for linking interactive UI components.
+   * This field is passed through to the tool listing response.
+   * @see https://modelcontextprotocol.github.io/ext-apps/
+   */
+  _meta?: {
+    /** Additional metadata fields */
+    [key: string]: unknown;
+    /** UI component configuration */
+    ui?: {
+      /** URI of the resource serving the UI (e.g., "ui://my-tool/app.html") */
+      resourceUri?: string;
+    };
+  };
   annotations?: {
     /**
      * When true, the tool leverages incremental content streaming
@@ -910,8 +924,8 @@ type Tool<
     streamingHint?: boolean;
   } & ToolAnnotations;
   canAccess?: (auth: T) => boolean;
-  description?: string;
 
+  description?: string;
   execute: (
     args: StandardSchemaV1.InferOutput<Params>,
     context: Context<T>,
@@ -1899,6 +1913,8 @@ export class FastMCPSession<
                   type: "object",
                 }) as SDKTool["inputSchema"],
             name: tool.name,
+            // Pass through _meta for MCP ext-apps UI support (issue #229)
+            ...(tool._meta && { _meta: tool._meta }),
           };
         }),
       );
