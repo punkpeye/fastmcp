@@ -1142,9 +1142,9 @@ export class OAuthProxy {
     // Define Zod schema for token response validation
     const tokenResponseSchema = z.object({
       access_token: z.string().min(1, "access_token cannot be empty"),
-      expires_in: z.number().int().positive().optional(),
+      expires_in: z.coerce.number().int().positive().optional(),
       id_token: z.string().optional(),
-      refresh_expires_in: z.number().int().positive().optional(),
+      refresh_expires_in: z.coerce.number().int().positive().optional(),
       refresh_token: z.string().optional(),
       scope: z.string().optional(),
       token_type: z.string().optional(),
