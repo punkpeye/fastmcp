@@ -19,6 +19,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Logging](#logging)
 - [Error handling](#errors)
 - [HTTP Streaming](#http-streaming) (with SSE compatibility)
+- [HTTPS Support](#https-support) for secure connections
 - [Custom HTTP routes](#custom-http-routes) for REST APIs, webhooks, and admin interfaces
 - [Edge Runtime Support](#edge-runtime-support) for Cloudflare Workers, Deno Deploy, and more
 - [Stateless mode](#stateless-mode) for serverless deployments
@@ -183,6 +184,40 @@ const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
 
 await client.connect(transport);
 ```
+
+##### HTTPS Support
+
+FastMCP supports HTTPS for secure connections by providing SSL certificate options:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8443,
+    sslCert: "./path/to/cert.pem",
+    sslKey: "./path/to/key.pem",
+    sslCa: "./path/to/ca.pem", // Optional: for client certificate authentication
+  },
+});
+```
+
+This will start the server with HTTPS on `https://localhost:8443/mcp`.
+
+**SSL Options:**
+
+- `sslCert` - Path to SSL certificate file
+- `sslKey` - Path to SSL private key file
+- `sslCa` - (Optional) Path to CA certificate for mutual TLS authentication
+
+**For testing**, you can generate self-signed certificates:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
+```
+
+**For production**, obtain certificates from a trusted CA like Let's Encrypt.
+
+See the [https-server example](src/examples/https-server.ts) for a complete demonstration.
 
 #### Custom HTTP Routes
 
