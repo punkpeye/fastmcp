@@ -2,6 +2,8 @@
 
 A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable of handling client sessions.
 
+![Demo](assets/demo.gif)
+
 > [!NOTE]
 >
 > For a Python implementation, see [FastMCP](https://github.com/jlowin/fastmcp).
