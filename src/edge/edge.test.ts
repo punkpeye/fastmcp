@@ -1,3 +1,4 @@
+import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -22,7 +23,7 @@ describe("EdgeFastMCP", () => {
           params: {
             capabilities: {},
             clientInfo: { name: "test-client", version: "1.0.0" },
-            protocolVersion: "2024-11-05",
+            protocolVersion: LATEST_PROTOCOL_VERSION,
           },
         }),
         headers: {

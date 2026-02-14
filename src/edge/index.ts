@@ -23,7 +23,11 @@
  * ```
  */
 
-import { ErrorCode, JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ErrorCode,
+  JSONRPCMessage,
+  LATEST_PROTOCOL_VERSION,
+} from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -209,7 +213,7 @@ export class EdgeFastMCP {
           resources: this.#resources.length > 0 ? {} : undefined,
           tools: this.#tools.length > 0 ? {} : undefined,
         },
-        protocolVersion: "2024-11-05",
+        protocolVersion: LATEST_PROTOCOL_VERSION,
         serverInfo: {
           name: this.#name,
           version: this.#version,
@@ -570,7 +574,13 @@ export class EdgeFastMCP {
     schema: StandardSchemaV1 | z.ZodType,
   ): Record<string, unknown> {
     try {
-      // Check if it's a Zod schema by looking for Zod-specific properties
+      // Zod 4+: use native toJSONSchema if available
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (typeof (z as any).toJSONSchema === "function") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (z as any).toJSONSchema(schema) as Record<string, unknown>;
+      }
+      // Zod 3 fallback: use zod-to-json-schema
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ("_def" in (schema as any) || schema instanceof z.ZodType) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
