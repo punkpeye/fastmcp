@@ -1,5 +1,9 @@
 import { expect, test, describe } from "vitest";
-import { buildToolParameters, classifyRoute, extractRoutes } from "./openapi.js";
+import {
+  buildToolParameters,
+  classifyRoute,
+  extractRoutes,
+} from "./openapi.js";
 import type { OpenAPIDocument } from "./openapi.js";
 
 const petStoreSpec: OpenAPIDocument = {

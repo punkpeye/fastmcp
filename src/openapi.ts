@@ -3,7 +3,14 @@
  * We inline these to avoid adding an external dependency.
  */
 
-type HttpMethod = "delete" | "get" | "head" | "options" | "patch" | "post" | "put";
+type HttpMethod =
+  | "delete"
+  | "get"
+  | "head"
+  | "options"
+  | "patch"
+  | "post"
+  | "put";
 
 type OpenAPIDocument = {
   components?: {
@@ -125,7 +132,8 @@ function openApiSchemaToJsonSchema(
   if (resolved.type === "object" && resolved.properties) {
     result.properties = {};
     for (const [key, value] of Object.entries(resolved.properties)) {
-      (result.properties as Record<string, unknown>)[key] = openApiSchemaToJsonSchema(spec, value);
+      (result.properties as Record<string, unknown>)[key] =
+        openApiSchemaToJsonSchema(spec, value);
     }
     if (resolved.required) {
       result.required = resolved.required;
@@ -144,7 +152,15 @@ function openApiSchemaToJsonSchema(
  */
 export function extractRoutes(spec: OpenAPIDocument): OpenAPIRoute[] {
   const routes: OpenAPIRoute[] = [];
-  const methods: HttpMethod[] = ["get", "post", "put", "patch", "delete", "head", "options"];
+  const methods: HttpMethod[] = [
+    "get",
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "head",
+    "options",
+  ];
 
   for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
     if (!pathItem) continue;
@@ -156,17 +172,25 @@ export function extractRoutes(spec: OpenAPIDocument): OpenAPIRoute[] {
 
       const operationId =
         operation.operationId ??
-        `${method}_${path.replace(/[^a-zA-Z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "")}`;
+        `${method}_${path
+          .replace(/[^a-zA-Z0-9]/g, "_")
+          .replace(/_+/g, "_")
+          .replace(/^_|_$/g, "")}`;
 
-      const parameters = (operation.parameters ?? resolvedPathItem.parameters ?? []).map(
-        (p) => deref<ParameterObject>(spec, p),
-      );
+      const parameters = (
+        operation.parameters ??
+        resolvedPathItem.parameters ??
+        []
+      ).map((p) => deref<ParameterObject>(spec, p));
 
       const requestBody = operation.requestBody
         ? deref<RequestBodyObject>(spec, operation.requestBody)
         : undefined;
 
-      const summary = operation.summary ?? operation.description ?? `${method.toUpperCase()} ${path}`;
+      const summary =
+        operation.summary ??
+        operation.description ??
+        `${method.toUpperCase()} ${path}`;
 
       routes.push({
         description: summary,
@@ -199,7 +223,8 @@ export function buildToolParameters(
         : { type: "string" };
       properties[param.name] = {
         ...schema,
-        description: param.description ?? (schema as Record<string, unknown>).description,
+        description:
+          param.description ?? (schema as Record<string, unknown>).description,
       };
       if (param.required) {
         required.push(param.name);
@@ -247,7 +272,9 @@ export function buildToolParameters(
  * - GET with path params -> resource template
  * - Other HTTP methods -> tool
  */
-export function classifyRoute(route: OpenAPIRoute): "resource" | "resourceTemplate" | "tool" {
+export function classifyRoute(
+  route: OpenAPIRoute,
+): "resource" | "resourceTemplate" | "tool" {
   if (route.method !== "get") {
     return "tool";
   }
@@ -255,4 +282,11 @@ export function classifyRoute(route: OpenAPIRoute): "resource" | "resourceTempla
   return hasPathParams ? "resourceTemplate" : "resource";
 }
 
-export type { HttpMethod, OpenAPIDocument, OpenAPIRoute, ParameterObject, RequestBodyObject, SchemaObject };
+export type {
+  HttpMethod,
+  OpenAPIDocument,
+  OpenAPIRoute,
+  ParameterObject,
+  RequestBodyObject,
+  SchemaObject,
+};

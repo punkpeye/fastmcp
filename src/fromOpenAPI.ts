@@ -1,4 +1,8 @@
-import { buildToolParameters, classifyRoute, extractRoutes } from "./openapi.js";
+import {
+  buildToolParameters,
+  classifyRoute,
+  extractRoutes,
+} from "./openapi.js";
 import type { OpenAPIDocument, OpenAPIRoute } from "./openapi.js";
 
 type HttpClient = {
@@ -135,9 +139,10 @@ function createToolHandler(
     return {
       content: [
         {
-          text: typeof response.data === "string"
-            ? response.data
-            : JSON.stringify(response.data, null, 2),
+          text:
+            typeof response.data === "string"
+              ? response.data
+              : JSON.stringify(response.data, null, 2),
           type: "text" as const,
         },
       ],
@@ -167,9 +172,10 @@ function createResourceHandler(
     });
 
     return {
-      text: typeof response.data === "string"
-        ? response.data
-        : JSON.stringify(response.data, null, 2),
+      text:
+        typeof response.data === "string"
+          ? response.data
+          : JSON.stringify(response.data, null, 2),
     };
   };
 }
@@ -196,14 +202,18 @@ function createResourceHandler(
  */
 export function fromOpenAPI(options: FromOpenAPIOptions) {
   const { client, headers = {}, spec } = options;
-  const baseUrl = options.baseUrl ??
-    (spec as Record<string, unknown> & { servers?: Array<{ url: string }> }).servers?.[0]?.url ??
+  const baseUrl =
+    options.baseUrl ??
+    (spec as Record<string, unknown> & { servers?: Array<{ url: string }> })
+      .servers?.[0]?.url ??
     "http://localhost";
 
   const routes = extractRoutes(spec);
   const tools: Array<{
     description: string;
-    execute: (args: Record<string, unknown>) => Promise<{ content: Array<{ text: string; type: "text" }> }>;
+    execute: (
+      args: Record<string, unknown>,
+    ) => Promise<{ content: Array<{ text: string; type: "text" }> }>;
     name: string;
     parameters: ReturnType<typeof buildToolParameters>["jsonSchema"];
   }> = [];
@@ -261,9 +271,10 @@ export function fromOpenAPI(options: FromOpenAPIOptions) {
               url,
             });
             return {
-              text: typeof response.data === "string"
-                ? response.data
-                : JSON.stringify(response.data, null, 2),
+              text:
+                typeof response.data === "string"
+                  ? response.data
+                  : JSON.stringify(response.data, null, 2),
             };
           },
           uriTemplate: `api://${templateUri}`,
