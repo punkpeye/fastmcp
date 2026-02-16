@@ -1394,6 +1394,54 @@ server.addTool({
 });
 ```
 
+
+### OpenAPI Integration
+
+Automatically convert any [OpenAPI 3.x](https://swagger.io/specification/) specification into MCP tools, resources, and resource templates:
+
+```typescript
+import { FastMCP } from "fastmcp";
+import { fromOpenAPI } from "fastmcp/openapi";
+
+const spec = JSON.parse(fs.readFileSync("openapi.json", "utf-8"));
+
+const { tools, resources, resourceTemplates } = fromOpenAPI({
+  spec,
+  client: {
+    request: async (config) => {
+      const res = await fetch(config.url, {
+        method: config.method,
+        headers: config.headers,
+        body: config.body ? JSON.stringify(config.body) : undefined,
+      });
+      return { status: res.status, data: await res.json() };
+    },
+  },
+});
+
+const server = new FastMCP({ name: "My API", version: "1.0.0" });
+
+for (const tool of tools) server.addTool(tool);
+for (const resource of resources) server.addResource(resource);
+for (const template of resourceTemplates) server.addResourceTemplate(template);
+
+server.start({ transportType: "stdio" });
+```
+
+Routes are classified automatically:
+- `GET` without path params → **Resource**
+- `GET` with path params → **Resource Template**
+- `POST`/`PUT`/`PATCH`/`DELETE` → **Tool**
+
+Features:
+- Zero external dependencies (inline OpenAPI types)
+- Full `$ref` resolution
+- Request body flattening with `body_` prefix
+- Pluggable HTTP client (bring your own `fetch`/`axios`)
+- Custom base URL and default headers (e.g., for auth)
+
+For detailed documentation, see [OpenAPI Integration Guide](./docs/openapi.md).
+
 ### Prompts
 
 [Prompts](https://modelcontextprotocol.io/docs/concepts/prompts) enable servers to define reusable prompt templates and workflows that clients can easily surface to users and LLMs. They provide a powerful way to standardize and share common LLM interactions.
