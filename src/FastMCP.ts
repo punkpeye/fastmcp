@@ -1,3 +1,4 @@
+export { jsonSchemaAdapter, type JsonSchemaObject } from "./jsonSchemaAdapter.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -1906,7 +1907,7 @@ export class FastMCPSession<
             annotations: tool.annotations,
             description: tool.description,
             inputSchema: (tool.parameters
-              ? await toJsonSchema(tool.parameters)
+              ? ("__jsonSchema" in tool.parameters && tool.parameters.__jsonSchema ? tool.parameters.__jsonSchema : await toJsonSchema(tool.parameters))
               : {
                   additionalProperties: false,
                   properties: {},
