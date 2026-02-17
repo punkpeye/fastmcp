@@ -940,6 +940,7 @@ type Tool<
     | void
   >;
   name: string;
+  outputSchema?: Params;
   parameters?: Params;
   timeoutMs?: number;
 };
@@ -1913,6 +1914,9 @@ export class FastMCPSession<
                   type: "object",
                 }) as SDKTool["inputSchema"],
             name: tool.name,
+            ...(tool.outputSchema && {
+              outputSchema: await toJsonSchema(tool.outputSchema),
+            }),
             // Pass through _meta for MCP ext-apps UI support (issue #229)
             ...(tool._meta && { _meta: tool._meta }),
           };
