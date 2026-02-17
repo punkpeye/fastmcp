@@ -1,0 +1,47 @@
+# plugin.yaml — FastMCP Agent Plugin Manifest
+# This file makes FastMCP discoverable as an agent plugin.
+# Learn more: https://list.agenium.net/plugins
+
+name: fastmcp
+display_name: FastMCP
+version: "1.0.0"
+description: >
+  TypeScript framework for building MCP (Model Context Protocol) servers
+  with automatic tool discovery, type-safe schemas, and zero boilerplate.
+
+author:
+  name: punkpeye
+  url: https://github.com/punkpeye
+
+repository: https://github.com/punkpeye/fastmcp
+license: MIT
+
+categories:
+  - mcp-servers
+  - developer-tools
+  - frameworks
+
+tags:
+  - mcp
+  - model-context-protocol
+  - typescript
+  - agent-tools
+  - server-framework
+
+capabilities:
+  - tool-serving
+  - resource-providing
+  - prompt-templates
+
+install:
+  npm: fastmcp
+
+runtime:
+  language: typescript
+  min_node: "18"
+
+discovery:
+  protocol: mcp
+  transport:
+    - stdio
+    - sse
