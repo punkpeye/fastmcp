@@ -40,8 +40,8 @@ runtime:
   language: typescript
   min_node: "18"
 
-discovery:
-  protocol: mcp
-  transport:
+protocols:
+  - mcp
+transport:
     - stdio
     - sse
