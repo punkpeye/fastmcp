@@ -49,11 +49,11 @@ server.start({ transportType: "stdio" });
 
 `fromOpenAPI` automatically classifies each OpenAPI operation:
 
-| HTTP Method | Path Parameters | MCP Type |
-|---|---|---|
-| `GET` | None | **Resource** — static data the LLM can read |
-| `GET` | Has `{params}` | **Resource Template** — parameterized data |
-| `POST`, `PUT`, `PATCH`, `DELETE` | Any | **Tool** — an action the LLM can invoke |
+| HTTP Method                      | Path Parameters | MCP Type                                    |
+| -------------------------------- | --------------- | ------------------------------------------- |
+| `GET`                            | None            | **Resource** — static data the LLM can read |
+| `GET`                            | Has `{params}`  | **Resource Template** — parameterized data  |
+| `POST`, `PUT`, `PATCH`, `DELETE` | Any             | **Tool** — an action the LLM can invoke     |
 
 For example, given this OpenAPI spec:
 
@@ -79,6 +79,7 @@ paths:
 ```
 
 `fromOpenAPI` produces:
+
 - **Resource**: `listPets` (URI: `api:///pets`)
 - **Resource Template**: `getPet` (URI template: `api:///pets/{petId}`)
 - **Tool**: `deletePet`
@@ -111,6 +112,7 @@ type HttpClient = {
 You can use `fetch`, `axios`, or any HTTP library:
 
 **Using fetch:**
+
 ```typescript
 const client = {
   request: async (config) => {
@@ -125,6 +127,7 @@ const client = {
 ```
 
 **Using axios:**
+
 ```typescript
 import axios from "axios";
 
@@ -270,7 +273,12 @@ const petstoreSpec = {
         operationId: "getPet",
         summary: "Get a pet by ID",
         parameters: [
-          { name: "petId", in: "path", required: true, schema: { type: "string" } },
+          {
+            name: "petId",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          },
         ],
       },
     },
@@ -308,19 +316,23 @@ server.start({ transportType: "stdio" });
 Converts an OpenAPI spec into FastMCP-compatible definitions.
 
 **Parameters:**
+
 - `options.spec` — `OpenAPIDocument` — Parsed OpenAPI 3.x spec
 - `options.client` — `HttpClient` — HTTP client for making requests
 - `options.baseUrl` — `string` (optional) — Override the API base URL
 - `options.headers` — `Record<string, string>` (optional) — Default request headers
 
 **Returns:**
+
 ```typescript
 {
   tools: Array<{
     name: string;
     description: string;
     parameters: JsonSchema;
-    execute: (args: Record<string, unknown>) => Promise<{ content: Array<{ text: string; type: "text" }> }>;
+    execute: (
+      args: Record<string, unknown>,
+    ) => Promise<{ content: Array<{ text: string; type: "text" }> }>;
   }>;
   resources: Array<{
     name: string;

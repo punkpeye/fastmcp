@@ -1394,7 +1394,6 @@ server.addTool({
 });
 ```
 
-
 ### OpenAPI Integration
 
 Automatically convert any [OpenAPI 3.x](https://swagger.io/specification/) specification into MCP tools, resources, and resource templates:
@@ -1429,11 +1428,13 @@ server.start({ transportType: "stdio" });
 ```
 
 Routes are classified automatically:
+
 - `GET` without path params → **Resource**
 - `GET` with path params → **Resource Template**
 - `POST`/`PUT`/`PATCH`/`DELETE` → **Tool**
 
 Features:
+
 - Zero external dependencies (inline OpenAPI types)
 - Full `$ref` resolution
 - Request body flattening with `body_` prefix
