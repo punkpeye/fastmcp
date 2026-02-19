@@ -4629,7 +4629,7 @@ test("adds tools with outputSchema", async () => {
           humidity: { type: "number" },
           temperature: { type: "number" },
         },
-        required: ["temperature", "humidity"],
+        required: ["humidity", "temperature"],
         type: "object",
       });
     },
