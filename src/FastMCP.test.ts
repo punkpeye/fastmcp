@@ -125,7 +125,7 @@ test("adds tools", async () => {
 
       server.addTool({
         description: "Add two numbers",
-        execute: async (args) => {
+        execute: async (_args) => {
           return String(args.a + args.b);
         },
         name: "add",
@@ -175,7 +175,7 @@ test("adds tools with Zod v4 schema", async () => {
 
       server.addTool({
         description: "Add two numbers (using Zod v4 schema)",
-        execute: async (args) => {
+        execute: async (_args) => {
           return String(args.a + args.b);
         },
         name: "add-zod-v4",
@@ -233,7 +233,7 @@ test("calls a tool", async () => {
 
       server.addTool({
         description: "Add two numbers",
-        execute: async (args) => {
+        execute: async (_args) => {
           return String(args.a + args.b);
         },
         name: "add",
@@ -696,7 +696,7 @@ test("handles tool timeout", async () => {
 
       server.addTool({
         description: "Add two numbers with potential timeout",
-        execute: async (args) => {
+        execute: async (_args) => {
           console.log(`Adding ${args.a} and ${args.b}`);
 
           if (args.a > 1000 || args.b > 1000) {
@@ -1009,7 +1009,7 @@ test("embedded resources work in tools", async () => {
 
       server.addTool({
         description: "Get user profile data",
-        execute: async (args) => {
+        execute: async (_args) => {
           return {
             content: [
               {
@@ -1193,7 +1193,7 @@ test("embedded resources work with URI templates and query parameters", async ()
       server.addTool({
         description:
           "Get search resource data using embedded function with query parameters",
-        execute: async (args) => {
+        execute: async (_args) => {
           return {
             content: [
               {
@@ -1303,7 +1303,7 @@ test("embedded resources work with complex URI template patterns", async () => {
       server.addTool({
         description:
           "Get user data using complex URI templates with path and query parameters",
-        execute: async (args) => {
+        execute: async (_args) => {
           return {
             content: [
               {
@@ -1947,7 +1947,7 @@ test(
 
     server.addTool({
       description: "Add two numbers",
-      execute: async (args) => {
+      execute: async (_args) => {
         return String(args.a + args.b);
       },
       name: "add",
@@ -2159,7 +2159,7 @@ test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema"
 
       server.addTool({
         description: "Add two numbers",
-        execute: async (args) => {
+        execute: async (_args) => {
           return String(args.a + args.b);
         },
         name: "add",
@@ -2217,7 +2217,7 @@ test("server remains usable after InvalidParams error", async () => {
 
       server.addTool({
         description: "Add two numbers",
-        execute: async (args) => {
+        execute: async (_args) => {
           return String(args.a + args.b);
         },
         name: "add",
@@ -2242,7 +2242,7 @@ test("allows new clients to connect after a client disconnects", async () => {
 
   server.addTool({
     description: "Add two numbers",
-    execute: async (args) => {
+    execute: async (_args) => {
       return String(args.a + args.b);
     },
     name: "add",
@@ -2352,7 +2352,7 @@ test("closing event source does not produce error", async () => {
 
   server.addTool({
     description: "Add two numbers",
-    execute: async (args) => {
+    execute: async (_args) => {
       return String(args.a + args.b);
     },
     name: "add",
@@ -3363,7 +3363,7 @@ test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
 
   server.addTool({
     description: "Add two numbers",
-    execute: async (args) => {
+    execute: async (_args) => {
       return String(args.a + args.b);
     },
     name: "add",
@@ -3474,7 +3474,7 @@ test("uses `formatInvalidParamsErrorMessage` callback to build ErrorCode.Invalid
 
       server.addTool({
         description: "Add two numbers",
-        execute: async (args) => {
+        execute: async (_args) => {
           return String(args.a + args.b);
         },
         name: "add",
@@ -3499,7 +3499,7 @@ test("stateless mode works correctly", async () => {
 
   server.addTool({
     description: "Add two numbers",
-    execute: async (args) => {
+    execute: async (_args) => {
       return String(args.a + args.b);
     },
     name: "add",
@@ -4641,7 +4641,7 @@ test("adds tools with outputSchema", async () => {
 
       server.addTool({
         description: "Get weather for a city",
-        execute: async (args) => {
+        execute: async (_args) => {
           return JSON.stringify({ humidity: 65, temperature: 72 });
         },
         name: "get-weather",
