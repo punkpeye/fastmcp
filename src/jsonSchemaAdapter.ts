@@ -55,6 +55,7 @@ export function jsonSchemaAdapter(
         let Ajv: unknown;
 
         try {
+          // @ts-ignore ajv is an optional peer dependency
           const ajvModule = await import("ajv");
           Ajv =
             "default" in ajvModule
