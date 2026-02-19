@@ -1,77 +1,79 @@
-import { expect, test, describe } from "vitest";
+import { describe, expect, test } from "vitest";
+
+import type { OpenAPIDocument } from "./openapi.js";
+
 import {
   buildToolParameters,
   classifyRoute,
   extractRoutes,
 } from "./openapi.js";
-import type { OpenAPIDocument } from "./openapi.js";
 
 const petStoreSpec: OpenAPIDocument = {
-  openapi: "3.0.0",
   info: { title: "Pet Store", version: "1.0.0" },
+  openapi: "3.0.0",
   paths: {
     "/pets": {
       get: {
         operationId: "listPets",
-        summary: "List all pets",
         parameters: [
           {
-            name: "limit",
-            in: "query",
-            schema: { type: "integer", minimum: 1, maximum: 100 },
             description: "Max number of pets to return",
+            in: "query",
+            name: "limit",
+            schema: { maximum: 100, minimum: 1, type: "integer" },
           },
         ],
         responses: { "200": { description: "A list of pets" } },
+        summary: "List all pets",
       },
       post: {
         operationId: "createPet",
-        summary: "Create a pet",
         requestBody: {
-          required: true,
           content: {
             "application/json": {
               schema: {
-                type: "object",
                 properties: {
-                  name: { type: "string", description: "Pet name" },
+                  name: { description: "Pet name", type: "string" },
                   tag: { type: "string" },
                 },
                 required: ["name"],
+                type: "object",
               },
             },
           },
+          required: true,
         },
         responses: { "201": { description: "Pet created" } },
+        summary: "Create a pet",
       },
     },
     "/pets/{petId}": {
-      get: {
-        operationId: "getPet",
-        summary: "Get a pet by ID",
-        parameters: [
-          {
-            name: "petId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-            description: "The pet ID",
-          },
-        ],
-        responses: { "200": { description: "A pet" } },
-      },
       delete: {
         operationId: "deletePet",
-        summary: "Delete a pet",
         parameters: [
           {
-            name: "petId",
             in: "path",
+            name: "petId",
             required: true,
             schema: { type: "string" },
           },
         ],
         responses: { "204": { description: "Pet deleted" } },
+        summary: "Delete a pet",
+      },
+      get: {
+        operationId: "getPet",
+        parameters: [
+          {
+            description: "The pet ID",
+            in: "path",
+            name: "petId",
+            required: true,
+            schema: { type: "string" },
+          },
+        ],
+        responses: { "200": { description: "A pet" } },
+        summary: "Get a pet by ID",
       },
     },
   },
@@ -137,16 +139,16 @@ describe("buildToolParameters", () => {
     const params = buildToolParameters(petStoreSpec, listPets);
 
     expect(params.jsonSchema).toEqual({
-      type: "object",
       properties: {
         limit: {
-          type: "integer",
-          minimum: 1,
-          maximum: 100,
           description: "Max number of pets to return",
+          maximum: 100,
+          minimum: 1,
+          type: "integer",
         },
       },
       required: undefined,
+      type: "object",
     });
   });
 
@@ -173,34 +175,34 @@ describe("buildToolParameters", () => {
 describe("$ref resolution", () => {
   test("resolves $ref in schemas", () => {
     const specWithRefs: OpenAPIDocument = {
-      openapi: "3.0.0",
-      info: { title: "Ref Test", version: "1.0.0" },
-      paths: {
-        "/items": {
-          post: {
-            operationId: "createItem",
-            summary: "Create an item",
-            requestBody: {
-              required: true,
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/Item" },
-                },
-              },
-            },
-            responses: { "201": { description: "Created" } },
-          },
-        },
-      },
       components: {
         schemas: {
           Item: {
-            type: "object",
             properties: {
               name: { type: "string" },
               value: { type: "number" },
             },
             required: ["name"],
+            type: "object",
+          },
+        },
+      },
+      info: { title: "Ref Test", version: "1.0.0" },
+      openapi: "3.0.0",
+      paths: {
+        "/items": {
+          post: {
+            operationId: "createItem",
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Item" },
+                },
+              },
+              required: true,
+            },
+            responses: { "201": { description: "Created" } },
+            summary: "Create an item",
           },
         },
       },
