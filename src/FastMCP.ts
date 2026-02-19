@@ -901,6 +901,7 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
 type Tool<
   T extends FastMCPSessionAuth,
   Params extends ToolParameters = ToolParameters,
+  OutputParams extends ToolParameters = ToolParameters,
 > = {
   /**
    * MCP ext-apps metadata for linking interactive UI components.
@@ -940,7 +941,7 @@ type Tool<
     | void
   >;
   name: string;
-  outputSchema?: Params;
+  outputSchema?: OutputParams;
   parameters?: Params;
   timeoutMs?: number;
 };
@@ -1915,7 +1916,9 @@ export class FastMCPSession<
                 }) as SDKTool["inputSchema"],
             name: tool.name,
             ...(tool.outputSchema && {
-              outputSchema: await toJsonSchema(tool.outputSchema),
+              outputSchema: (await toJsonSchema(
+                tool.outputSchema,
+              )) as SDKTool["inputSchema"],
             }),
             // Pass through _meta for MCP ext-apps UI support (issue #229)
             ...(tool._meta && { _meta: tool._meta }),
