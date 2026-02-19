@@ -116,6 +116,13 @@ npx fastmcp inspect src/examples/addition.ts
 
 If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
 
+Alternatively, you can scaffold a new project from the command line using `create-mcp-server`:
+
+```bash
+# For more options, see https://github.com/agentailor/create-mcp-server
+npx @agentailor/create-mcp-server --framework=fastmcp
+```
+
 ### Remote Server Options
 
 FastMCP supports multiple transport options for remote communication, allowing an MCP hosted on a remote machine to be accessed over the network.
