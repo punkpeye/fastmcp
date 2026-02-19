@@ -45,12 +45,10 @@ export type JsonSchemaObject = {
  */
 export function jsonSchemaAdapter(
   schema: JsonSchemaObject,
-): StandardSchemaV1 & { __jsonSchema: JsonSchemaObject } {
+): { __jsonSchema: JsonSchemaObject } & StandardSchemaV1 {
   return {
     __jsonSchema: schema,
     "~standard": {
-      vendor: "json-schema",
-      version: 1,
       validate: async (
         data: unknown,
       ): Promise<StandardSchemaV1.Result<unknown>> => {
@@ -111,6 +109,8 @@ export function jsonSchemaAdapter(
           })),
         };
       },
+      vendor: "json-schema",
+      version: 1,
     },
   };
 }

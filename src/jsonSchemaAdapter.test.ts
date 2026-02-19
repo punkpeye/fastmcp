@@ -1,29 +1,30 @@
 import { expect, test } from "vitest";
+
 import { jsonSchemaAdapter } from "./jsonSchemaAdapter.js";
 
 test("jsonSchemaAdapter validates valid input", async () => {
   const schema = jsonSchemaAdapter({
-    type: "object",
     properties: {
-      name: { type: "string" },
       age: { type: "number" },
+      name: { type: "string" },
     },
     required: ["name"],
+    type: "object",
   });
 
-  const result = await schema["~standard"].validate({ name: "Alice", age: 30 });
+  const result = await schema["~standard"].validate({ age: 30, name: "Alice" });
   expect(result.issues).toBeUndefined();
-  expect(result.value).toEqual({ name: "Alice", age: 30 });
+  expect(result.value).toEqual({ age: 30, name: "Alice" });
 });
 
 test("jsonSchemaAdapter returns issues for invalid input", async () => {
   const schema = jsonSchemaAdapter({
-    type: "object",
     properties: {
-      name: { type: "string" },
       age: { type: "number" },
+      name: { type: "string" },
     },
     required: ["name"],
+    type: "object",
   });
 
   const result = await schema["~standard"].validate({ age: "not a number" });
@@ -33,11 +34,11 @@ test("jsonSchemaAdapter returns issues for invalid input", async () => {
 
 test("jsonSchemaAdapter exposes __jsonSchema for fast-path", () => {
   const raw = {
-    type: "object",
     properties: {
       x: { type: "string" },
     },
     required: ["x"],
+    type: "object",
   };
   const schema = jsonSchemaAdapter(raw);
   expect(schema.__jsonSchema).toBe(raw);
@@ -45,8 +46,8 @@ test("jsonSchemaAdapter exposes __jsonSchema for fast-path", () => {
 
 test("jsonSchemaAdapter sets vendor to json-schema", () => {
   const schema = jsonSchemaAdapter({
-    type: "object",
     properties: {},
+    type: "object",
   });
   expect(schema["~standard"].vendor).toBe("json-schema");
   expect(schema["~standard"].version).toBe(1);
@@ -54,18 +55,18 @@ test("jsonSchemaAdapter sets vendor to json-schema", () => {
 
 test("jsonSchemaAdapter validates nested objects", async () => {
   const schema = jsonSchemaAdapter({
-    type: "object",
     properties: {
       address: {
-        type: "object",
         properties: {
           street: { type: "string" },
           zip: { type: "string" },
         },
         required: ["street"],
+        type: "object",
       },
     },
     required: ["address"],
+    type: "object",
   });
 
   const valid = await schema["~standard"].validate({
