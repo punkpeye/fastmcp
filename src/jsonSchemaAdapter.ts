@@ -71,6 +71,7 @@ export function jsonSchemaAdapter(
         const ajv = new (Ajv as any)({ allErrors: true, strict: false });
 
         try {
+          // @ts-expect-error ajv-formats is an optional peer dependency
           const ajvFormatsModule = await import("ajv-formats");
           const addFormats =
             "default" in ajvFormatsModule

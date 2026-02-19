@@ -14,7 +14,9 @@ test("jsonSchemaAdapter validates valid input", async () => {
 
   const result = await schema["~standard"].validate({ age: 30, name: "Alice" });
   expect(result.issues).toBeUndefined();
-  expect(result.value).toEqual({ age: 30, name: "Alice" });
+  if (result.issues === undefined) {
+    expect(result.value).toEqual({ age: 30, name: "Alice" });
+  }
 });
 
 test("jsonSchemaAdapter returns issues for invalid input", async () => {
