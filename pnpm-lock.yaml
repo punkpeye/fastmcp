@@ -42,8 +42,8 @@ importers:
         specifier: ^0.2.0
         version: 0.2.0
       xsschema:
-        specifier: 0.4.0-beta.5
-        version: 0.4.0-beta.5(@valibot/to-json-schema@1.4.0(valibot@1.2.0(typescript@5.9.3)))(arktype@2.1.28)(zod-to-json-schema@3.25.0(zod@4.1.13))(zod@4.1.13)
+        specifier: ^0.4.3
+        version: 0.4.3(@valibot/to-json-schema@1.4.0(valibot@1.2.0(typescript@5.9.3)))(arktype@2.1.28)(zod-to-json-schema@3.25.0(zod@4.1.13))(zod@4.1.13)
       yargs:
         specifier: ^18.0.0
         version: 18.0.0
@@ -4021,15 +4021,15 @@ packages:
     resolution: {integrity: sha512-h3Fbisa2nKGPxCpm89Hk33lBLsnaGBvctQopaBSOW/uIs6FTe1ATyAnKFJrzVs9vpGdsTe73WF3V4lIsk4Gacw==}
     engines: {node: '>=18'}
 
-  xsschema@0.4.0-beta.5:
-    resolution: {integrity: sha512-73pYwf1hMy++7SnOkghJdgdPaGi+Y5I0SaO6rIlxb1ouV6tEyDbEcXP82kyr32KQVTlUbFj6qewi9eUVEiXm+g==}
+  xsschema@0.4.3:
+    resolution: {integrity: sha512-8MFtONewz49S+R5ZfOGfJzEaPAmJ+Gw1ILjvuerYG0mOMVYe7OrsVQNlpiUTct4L3toAJAKD5NMwmCfmTIGYHQ==}
     peerDependencies:
       '@valibot/to-json-schema': ^1.0.0
       arktype: ^2.1.20
       effect: ^3.16.0
       sury: ^10.0.0
       zod: ^3.25.0 || ^4.0.0
-      zod-to-json-schema: ^3.24.5
+      zod-to-json-schema: ^3.25.0
     peerDependenciesMeta:
       '@valibot/to-json-schema':
         optional: true
@@ -7830,7 +7830,7 @@ snapshots:
     dependencies:
       is-wsl: 3.1.0
 
-  xsschema@0.4.0-beta.5(@valibot/to-json-schema@1.4.0(valibot@1.2.0(typescript@5.9.3)))(arktype@2.1.28)(zod-to-json-schema@3.25.0(zod@4.1.13))(zod@4.1.13):
+  xsschema@0.4.3(@valibot/to-json-schema@1.4.0(valibot@1.2.0(typescript@5.9.3)))(arktype@2.1.28)(zod-to-json-schema@3.25.0(zod@4.1.13))(zod@4.1.13):
     optionalDependencies:
       '@valibot/to-json-schema': 1.4.0(valibot@1.2.0(typescript@5.9.3))
       arktype: 2.1.28
