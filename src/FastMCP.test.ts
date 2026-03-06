@@ -4605,3 +4605,87 @@ test("OAuth config with only protectedResource returns Bearer WWW-Authenticate",
     await server.stop();
   }
 });
+
+test("adds tools with outputSchema", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const { tools } = await client.listTools();
+      expect(tools).toHaveLength(1);
+      expect(tools[0].name).toBe("get-weather");
+      expect(tools[0].inputSchema).toEqual({
+        $schema: "http://json-schema.org/draft-07/schema#",
+        additionalProperties: false,
+        properties: {
+          city: { type: "string" },
+        },
+        required: ["city"],
+        type: "object",
+      });
+      // outputSchema should be present in the raw response
+      expect((tools[0] as Record<string, unknown>).outputSchema).toEqual({
+        $schema: "http://json-schema.org/draft-07/schema#",
+        additionalProperties: false,
+        properties: {
+          humidity: { type: "number" },
+          temperature: { type: "number" },
+        },
+        required: ["humidity", "temperature"],
+        type: "object",
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          return JSON.stringify({ humidity: 65, temperature: 72 });
+        },
+        name: "get-weather",
+        outputSchema: z.object({
+          humidity: z.number(),
+          temperature: z.number(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("tools without outputSchema omit it from listing", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const { tools } = await client.listTools();
+      expect(tools).toHaveLength(1);
+      expect(
+        (tools[0] as Record<string, unknown>).outputSchema,
+      ).toBeUndefined();
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "A simple tool",
+        execute: async () => {
+          return "hello";
+        },
+        name: "greet",
+        parameters: z.object({
+          name: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
