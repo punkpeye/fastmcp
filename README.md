@@ -1773,11 +1773,11 @@ const server = new FastMCP({
           const publicKey = await getJwks.getPublicKey({
             kid: header.kid,
             alg: header.alg,
-            domain: 'https://auth.example.com',
-          })
-          return publicKey
+            domain: "https://auth.example.com",
+          });
+          return publicKey;
         },
-        algorithms: ['RS256'],
+        algorithms: ["RS256"],
       });
 
       // Verify the JWT token
