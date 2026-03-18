@@ -859,12 +859,9 @@ test("tool log calls are forwarded to custom logger", async () => {
       expect(customLogger.debug).toHaveBeenCalledWith("debug message", {
         foo: "bar",
       });
-      expect(customLogger.error).toHaveBeenCalledWith(
-        "error message",
-        undefined,
-      );
-      expect(customLogger.info).toHaveBeenCalledWith("info message", undefined);
-      expect(customLogger.warn).toHaveBeenCalledWith("warn message", undefined);
+      expect(customLogger.error).toHaveBeenCalledWith("error message");
+      expect(customLogger.info).toHaveBeenCalledWith("info message");
+      expect(customLogger.warn).toHaveBeenCalledWith("warn message");
     },
     server: async () => {
       const server = new FastMCP({
@@ -893,6 +890,75 @@ test("tool log calls are forwarded to custom logger", async () => {
       return server;
     },
   });
+});
+
+test("tool log calls do not go to default console logger", async () => {
+  const consoleSpy = {
+    debug: vi.spyOn(console, "debug"),
+    error: vi.spyOn(console, "error"),
+    info: vi.spyOn(console, "info"),
+    warn: vi.spyOn(console, "warn"),
+  };
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      // Reset spies after server startup logs
+      consoleSpy.debug.mockClear();
+      consoleSpy.error.mockClear();
+      consoleSpy.info.mockClear();
+      consoleSpy.warn.mockClear();
+
+      await client.callTool({
+        arguments: {
+          a: 1,
+          b: 2,
+        },
+        name: "add",
+      });
+
+      // Tool log calls should NOT be forwarded to console when no custom logger
+      for (const spy of Object.values(consoleSpy)) {
+        for (const call of spy.mock.calls) {
+          expect(call[0]).not.toBe("tool debug");
+          expect(call[0]).not.toBe("tool error");
+          expect(call[0]).not.toBe("tool info");
+          expect(call[0]).not.toBe("tool warn");
+        }
+      }
+    },
+    server: async () => {
+      // No custom logger — uses default console
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Add two numbers",
+        execute: async (args, { log }) => {
+          log.debug("tool debug");
+          log.error("tool error");
+          log.info("tool info");
+          log.warn("tool warn");
+
+          return String(args.a + args.b);
+        },
+        name: "add",
+        parameters: z.object({
+          a: z.number(),
+          b: z.number(),
+        }),
+      });
+
+      return server;
+    },
+  });
+
+  // Restore console
+  consoleSpy.debug.mockRestore();
+  consoleSpy.error.mockRestore();
+  consoleSpy.info.mockRestore();
+  consoleSpy.warn.mockRestore();
 });
 
 test("adds resources", async () => {

@@ -1086,6 +1086,7 @@ export class FastMCPSession<
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
   #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
+  #logToolCalls: boolean;
   #logger: Logger;
   #loggingLevel: LoggingLevel = "info";
   #needsEventLoopFlush: boolean = false;
@@ -1116,6 +1117,7 @@ export class FastMCPSession<
   constructor({
     auth,
     instructions,
+    logToolCalls,
     logger,
     name,
     ping,
@@ -1131,6 +1133,7 @@ export class FastMCPSession<
   }: {
     auth?: T;
     instructions?: string;
+    logToolCalls?: boolean;
     logger: Logger;
     name: string;
     ping?: ServerOptions<T>["ping"];
@@ -1147,6 +1150,7 @@ export class FastMCPSession<
     super();
 
     this.#auth = auth;
+    this.#logToolCalls = logToolCalls ?? false;
     this.#logger = logger;
     this.#pingConfig = ping;
     this.#rootsConfig = roots;
@@ -1997,7 +2001,11 @@ export class FastMCPSession<
 
         const log = {
           debug: (message: string, context?: SerializableValue) => {
-            this.#logger.debug(message, context);
+            if (this.#logToolCalls) {
+              this.#logger.debug(
+                ...(context !== undefined ? [message, context] : [message]),
+              );
+            }
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2007,7 +2015,11 @@ export class FastMCPSession<
             });
           },
           error: (message: string, context?: SerializableValue) => {
-            this.#logger.error(message, context);
+            if (this.#logToolCalls) {
+              this.#logger.error(
+                ...(context !== undefined ? [message, context] : [message]),
+              );
+            }
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2017,7 +2029,11 @@ export class FastMCPSession<
             });
           },
           info: (message: string, context?: SerializableValue) => {
-            this.#logger.info(message, context);
+            if (this.#logToolCalls) {
+              this.#logger.info(
+                ...(context !== undefined ? [message, context] : [message]),
+              );
+            }
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2027,7 +2043,11 @@ export class FastMCPSession<
             });
           },
           warn: (message: string, context?: SerializableValue) => {
-            this.#logger.warn(message, context);
+            if (this.#logToolCalls) {
+              this.#logger.warn(
+                ...(context !== undefined ? [message, context] : [message]),
+              );
+            }
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2220,6 +2240,7 @@ export class FastMCP<
   #authenticate: Authenticate<T> | undefined;
   #honoApp = new Hono();
   #httpStreamServer: null | SSEServer = null;
+  #logToolCalls: boolean;
   #logger: Logger;
   #options: ServerOptions<T>;
   #prompts: InputPrompt<T>[] = [];
@@ -2234,6 +2255,7 @@ export class FastMCP<
     super();
 
     this.#options = options;
+    this.#logToolCalls = !!options.logger;
     this.#logger = options.logger || console;
 
     // If auth provider is specified, use it to configure authenticate and oauth
@@ -2589,6 +2611,7 @@ export class FastMCP<
       const session = new FastMCPSession<T>({
         auth,
         instructions: this.#options.instructions,
+        logToolCalls: this.#logToolCalls,
         logger: this.#logger,
         name: this.#options.name,
         ping: this.#options.ping,
@@ -2820,6 +2843,7 @@ export class FastMCP<
     return new FastMCPSession<T>({
       auth,
       instructions: this.#options.instructions,
+      logToolCalls: this.#logToolCalls,
       logger: this.#logger,
       name: this.#options.name,
       ping: this.#options.ping,
