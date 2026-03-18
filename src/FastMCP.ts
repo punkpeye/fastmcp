@@ -1086,9 +1086,9 @@ export class FastMCPSession<
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
   #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
-  #logToolCalls: boolean;
   #logger: Logger;
   #loggingLevel: LoggingLevel = "info";
+  #logToolCalls: boolean;
   #needsEventLoopFlush: boolean = false;
   #pingConfig?: ServerOptions<T>["ping"];
 
@@ -1117,8 +1117,8 @@ export class FastMCPSession<
   constructor({
     auth,
     instructions,
-    logToolCalls,
     logger,
+    logToolCalls,
     name,
     ping,
     prompts,
@@ -1133,8 +1133,8 @@ export class FastMCPSession<
   }: {
     auth?: T;
     instructions?: string;
-    logToolCalls?: boolean;
     logger: Logger;
+    logToolCalls?: boolean;
     name: string;
     ping?: ServerOptions<T>["ping"];
     prompts: Prompt<T>[];
@@ -1150,8 +1150,8 @@ export class FastMCPSession<
     super();
 
     this.#auth = auth;
-    this.#logToolCalls = logToolCalls ?? false;
     this.#logger = logger;
+    this.#logToolCalls = logToolCalls ?? false;
     this.#pingConfig = ping;
     this.#rootsConfig = roots;
     this.#sessionId = sessionId;
@@ -2240,8 +2240,8 @@ export class FastMCP<
   #authenticate: Authenticate<T> | undefined;
   #honoApp = new Hono();
   #httpStreamServer: null | SSEServer = null;
-  #logToolCalls: boolean;
   #logger: Logger;
+  #logToolCalls: boolean;
   #options: ServerOptions<T>;
   #prompts: InputPrompt<T>[] = [];
   #resources: Resource<T>[] = [];
@@ -2611,8 +2611,8 @@ export class FastMCP<
       const session = new FastMCPSession<T>({
         auth,
         instructions: this.#options.instructions,
-        logToolCalls: this.#logToolCalls,
         logger: this.#logger,
+        logToolCalls: this.#logToolCalls,
         name: this.#options.name,
         ping: this.#options.ping,
         prompts: this.#prompts,
@@ -2843,8 +2843,8 @@ export class FastMCP<
     return new FastMCPSession<T>({
       auth,
       instructions: this.#options.instructions,
-      logToolCalls: this.#logToolCalls,
       logger: this.#logger,
+      logToolCalls: this.#logToolCalls,
       name: this.#options.name,
       ping: this.#options.ping,
       prompts: this.#prompts,
