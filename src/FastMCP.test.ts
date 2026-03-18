@@ -837,6 +837,64 @@ test("sends logging messages to the client", async () => {
   });
 });
 
+test("tool log calls are forwarded to custom logger", async () => {
+  const customLogger = {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    log: vi.fn(),
+    warn: vi.fn(),
+  };
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      await client.callTool({
+        arguments: {
+          a: 1,
+          b: 2,
+        },
+        name: "add",
+      });
+
+      expect(customLogger.debug).toHaveBeenCalledWith("debug message", {
+        foo: "bar",
+      });
+      expect(customLogger.error).toHaveBeenCalledWith(
+        "error message",
+        undefined,
+      );
+      expect(customLogger.info).toHaveBeenCalledWith("info message", undefined);
+      expect(customLogger.warn).toHaveBeenCalledWith("warn message", undefined);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        logger: customLogger,
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Add two numbers",
+        execute: async (args, { log }) => {
+          log.debug("debug message", { foo: "bar" });
+          log.error("error message");
+          log.info("info message");
+          log.warn("warn message");
+
+          return String(args.a + args.b);
+        },
+        name: "add",
+        parameters: z.object({
+          a: z.number(),
+          b: z.number(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("adds resources", async () => {
   await runWithTestServer({
     run: async ({ client }) => {

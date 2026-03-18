@@ -1997,6 +1997,7 @@ export class FastMCPSession<
 
         const log = {
           debug: (message: string, context?: SerializableValue) => {
+            this.#logger.debug(message, context);
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2006,6 +2007,7 @@ export class FastMCPSession<
             });
           },
           error: (message: string, context?: SerializableValue) => {
+            this.#logger.error(message, context);
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2015,6 +2017,7 @@ export class FastMCPSession<
             });
           },
           info: (message: string, context?: SerializableValue) => {
+            this.#logger.info(message, context);
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2024,6 +2027,7 @@ export class FastMCPSession<
             });
           },
           warn: (message: string, context?: SerializableValue) => {
+            this.#logger.warn(message, context);
             this.#server.sendLoggingMessage({
               data: {
                 context,
