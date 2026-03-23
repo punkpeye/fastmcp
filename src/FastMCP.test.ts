@@ -837,14 +837,8 @@ test("sends logging messages to the client", async () => {
   });
 });
 
-test("tool log calls are forwarded to custom logger", async () => {
-  const customLogger = {
-    debug: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-    log: vi.fn(),
-    warn: vi.fn(),
-  };
+test("onToolCall callback is invoked with tool name and arguments", async () => {
+  const onToolCall = vi.fn();
 
   await runWithTestServer({
     run: async ({ client }) => {
@@ -856,28 +850,21 @@ test("tool log calls are forwarded to custom logger", async () => {
         name: "add",
       });
 
-      expect(customLogger.debug).toHaveBeenCalledWith("debug message", {
-        foo: "bar",
+      expect(onToolCall).toHaveBeenCalledWith({
+        arguments: { a: 1, b: 2 },
+        toolName: "add",
       });
-      expect(customLogger.error).toHaveBeenCalledWith("error message");
-      expect(customLogger.info).toHaveBeenCalledWith("info message");
-      expect(customLogger.warn).toHaveBeenCalledWith("warn message");
     },
     server: async () => {
       const server = new FastMCP({
-        logger: customLogger,
         name: "Test",
+        onToolCall,
         version: "1.0.0",
       });
 
       server.addTool({
         description: "Add two numbers",
-        execute: async (args, { log }) => {
-          log.debug("debug message", { foo: "bar" });
-          log.error("error message");
-          log.info("info message");
-          log.warn("warn message");
-
+        execute: async (args) => {
           return String(args.a + args.b);
         },
         name: "add",
@@ -890,75 +877,6 @@ test("tool log calls are forwarded to custom logger", async () => {
       return server;
     },
   });
-});
-
-test("tool log calls do not go to default console logger", async () => {
-  const consoleSpy = {
-    debug: vi.spyOn(console, "debug"),
-    error: vi.spyOn(console, "error"),
-    info: vi.spyOn(console, "info"),
-    warn: vi.spyOn(console, "warn"),
-  };
-
-  await runWithTestServer({
-    run: async ({ client }) => {
-      // Reset spies after server startup logs
-      consoleSpy.debug.mockClear();
-      consoleSpy.error.mockClear();
-      consoleSpy.info.mockClear();
-      consoleSpy.warn.mockClear();
-
-      await client.callTool({
-        arguments: {
-          a: 1,
-          b: 2,
-        },
-        name: "add",
-      });
-
-      // Tool log calls should NOT be forwarded to console when no custom logger
-      for (const spy of Object.values(consoleSpy)) {
-        for (const call of spy.mock.calls) {
-          expect(call[0]).not.toBe("tool debug");
-          expect(call[0]).not.toBe("tool error");
-          expect(call[0]).not.toBe("tool info");
-          expect(call[0]).not.toBe("tool warn");
-        }
-      }
-    },
-    server: async () => {
-      // No custom logger — uses default console
-      const server = new FastMCP({
-        name: "Test",
-        version: "1.0.0",
-      });
-
-      server.addTool({
-        description: "Add two numbers",
-        execute: async (args, { log }) => {
-          log.debug("tool debug");
-          log.error("tool error");
-          log.info("tool info");
-          log.warn("tool warn");
-
-          return String(args.a + args.b);
-        },
-        name: "add",
-        parameters: z.object({
-          a: z.number(),
-          b: z.number(),
-        }),
-      });
-
-      return server;
-    },
-  });
-
-  // Restore console
-  consoleSpy.debug.mockRestore();
-  consoleSpy.error.mockRestore();
-  consoleSpy.info.mockRestore();
-  consoleSpy.warn.mockRestore();
 });
 
 test("adds resources", async () => {

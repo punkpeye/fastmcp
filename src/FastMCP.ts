@@ -857,6 +857,14 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
      */
     proxy?: OAuthProxy;
   };
+  /**
+   * Callback invoked when a tool is called.
+   * Use this to log, audit, or track tool usage.
+   */
+  onToolCall?: (context: {
+    arguments: Record<string, unknown>;
+    toolName: string;
+  }) => Promise<void> | void;
 
   ping?: {
     /**
@@ -1088,8 +1096,8 @@ export class FastMCPSession<
   #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
   #logger: Logger;
   #loggingLevel: LoggingLevel = "info";
-  #logToolCalls: boolean;
   #needsEventLoopFlush: boolean = false;
+  #onToolCall?: ServerOptions<T>["onToolCall"];
   #pingConfig?: ServerOptions<T>["ping"];
 
   #pingInterval: null | ReturnType<typeof setInterval> = null;
@@ -1118,8 +1126,8 @@ export class FastMCPSession<
     auth,
     instructions,
     logger,
-    logToolCalls,
     name,
+    onToolCall,
     ping,
     prompts,
     resources,
@@ -1134,8 +1142,8 @@ export class FastMCPSession<
     auth?: T;
     instructions?: string;
     logger: Logger;
-    logToolCalls?: boolean;
     name: string;
+    onToolCall?: ServerOptions<T>["onToolCall"];
     ping?: ServerOptions<T>["ping"];
     prompts: Prompt<T>[];
     resources: Resource<T>[];
@@ -1151,7 +1159,7 @@ export class FastMCPSession<
 
     this.#auth = auth;
     this.#logger = logger;
-    this.#logToolCalls = logToolCalls ?? false;
+    this.#onToolCall = onToolCall;
     this.#pingConfig = ping;
     this.#rootsConfig = roots;
     this.#sessionId = sessionId;
@@ -2001,11 +2009,6 @@ export class FastMCPSession<
 
         const log = {
           debug: (message: string, context?: SerializableValue) => {
-            if (this.#logToolCalls) {
-              this.#logger.debug(
-                ...(context !== undefined ? [message, context] : [message]),
-              );
-            }
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2015,11 +2018,6 @@ export class FastMCPSession<
             });
           },
           error: (message: string, context?: SerializableValue) => {
-            if (this.#logToolCalls) {
-              this.#logger.error(
-                ...(context !== undefined ? [message, context] : [message]),
-              );
-            }
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2029,11 +2027,6 @@ export class FastMCPSession<
             });
           },
           info: (message: string, context?: SerializableValue) => {
-            if (this.#logToolCalls) {
-              this.#logger.info(
-                ...(context !== undefined ? [message, context] : [message]),
-              );
-            }
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2043,11 +2036,6 @@ export class FastMCPSession<
             });
           },
           warn: (message: string, context?: SerializableValue) => {
-            if (this.#logToolCalls) {
-              this.#logger.warn(
-                ...(context !== undefined ? [message, context] : [message]),
-              );
-            }
             this.#server.sendLoggingMessage({
               data: {
                 context,
@@ -2085,6 +2073,13 @@ export class FastMCPSession<
             );
           }
         };
+
+        if (this.#onToolCall) {
+          await this.#onToolCall({
+            arguments: (args ?? {}) as Record<string, unknown>,
+            toolName: request.params.name,
+          });
+        }
 
         const executeToolPromise = tool.execute(args, {
           client: {
@@ -2241,7 +2236,6 @@ export class FastMCP<
   #honoApp = new Hono();
   #httpStreamServer: null | SSEServer = null;
   #logger: Logger;
-  #logToolCalls: boolean;
   #options: ServerOptions<T>;
   #prompts: InputPrompt<T>[] = [];
   #resources: Resource<T>[] = [];
@@ -2255,7 +2249,6 @@ export class FastMCP<
     super();
 
     this.#options = options;
-    this.#logToolCalls = !!options.logger;
     this.#logger = options.logger || console;
 
     // If auth provider is specified, use it to configure authenticate and oauth
@@ -2612,8 +2605,8 @@ export class FastMCP<
         auth,
         instructions: this.#options.instructions,
         logger: this.#logger,
-        logToolCalls: this.#logToolCalls,
         name: this.#options.name,
+        onToolCall: this.#options.onToolCall,
         ping: this.#options.ping,
         prompts: this.#prompts,
         resources: this.#resources,
@@ -2844,8 +2837,8 @@ export class FastMCP<
       auth,
       instructions: this.#options.instructions,
       logger: this.#logger,
-      logToolCalls: this.#logToolCalls,
       name: this.#options.name,
+      onToolCall: this.#options.onToolCall,
       ping: this.#options.ping,
       prompts: this.#prompts,
       resources: this.#resources,
