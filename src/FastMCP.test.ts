@@ -837,6 +837,48 @@ test("sends logging messages to the client", async () => {
   });
 });
 
+test("onToolCall callback is invoked with tool name and arguments", async () => {
+  const onToolCall = vi.fn();
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      await client.callTool({
+        arguments: {
+          a: 1,
+          b: 2,
+        },
+        name: "add",
+      });
+
+      expect(onToolCall).toHaveBeenCalledWith({
+        arguments: { a: 1, b: 2 },
+        toolName: "add",
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        onToolCall,
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Add two numbers",
+        execute: async (args) => {
+          return String(args.a + args.b);
+        },
+        name: "add",
+        parameters: z.object({
+          a: z.number(),
+          b: z.number(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("adds resources", async () => {
   await runWithTestServer({
     run: async ({ client }) => {

@@ -857,6 +857,14 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
      */
     proxy?: OAuthProxy;
   };
+  /**
+   * Callback invoked when a tool is called.
+   * Use this to log, audit, or track tool usage.
+   */
+  onToolCall?: (context: {
+    arguments: Record<string, unknown>;
+    toolName: string;
+  }) => Promise<void> | void;
 
   ping?: {
     /**
@@ -1089,6 +1097,7 @@ export class FastMCPSession<
   #logger: Logger;
   #loggingLevel: LoggingLevel = "info";
   #needsEventLoopFlush: boolean = false;
+  #onToolCall?: ServerOptions<T>["onToolCall"];
   #pingConfig?: ServerOptions<T>["ping"];
 
   #pingInterval: null | ReturnType<typeof setInterval> = null;
@@ -1118,6 +1127,7 @@ export class FastMCPSession<
     instructions,
     logger,
     name,
+    onToolCall,
     ping,
     prompts,
     resources,
@@ -1133,6 +1143,7 @@ export class FastMCPSession<
     instructions?: string;
     logger: Logger;
     name: string;
+    onToolCall?: ServerOptions<T>["onToolCall"];
     ping?: ServerOptions<T>["ping"];
     prompts: Prompt<T>[];
     resources: Resource<T>[];
@@ -1148,6 +1159,7 @@ export class FastMCPSession<
 
     this.#auth = auth;
     this.#logger = logger;
+    this.#onToolCall = onToolCall;
     this.#pingConfig = ping;
     this.#rootsConfig = roots;
     this.#sessionId = sessionId;
@@ -2062,6 +2074,13 @@ export class FastMCPSession<
           }
         };
 
+        if (this.#onToolCall) {
+          await this.#onToolCall({
+            arguments: (args ?? {}) as Record<string, unknown>,
+            toolName: request.params.name,
+          });
+        }
+
         const executeToolPromise = tool.execute(args, {
           client: {
             version: this.#server.getClientVersion(),
@@ -2587,6 +2606,7 @@ export class FastMCP<
         instructions: this.#options.instructions,
         logger: this.#logger,
         name: this.#options.name,
+        onToolCall: this.#options.onToolCall,
         ping: this.#options.ping,
         prompts: this.#prompts,
         resources: this.#resources,
@@ -2818,6 +2838,7 @@ export class FastMCP<
       instructions: this.#options.instructions,
       logger: this.#logger,
       name: this.#options.name,
+      onToolCall: this.#options.onToolCall,
       ping: this.#options.ping,
       prompts: this.#prompts,
       resources: this.#resources,
