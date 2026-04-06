@@ -1269,8 +1269,7 @@ export class OAuthProxy {
           error_description?: string;
         };
         errorCode = error.error || "invalid_grant";
-        errorDescription =
-          error.error_description || "Upstream refresh failed";
+        errorDescription = error.error_description || "Upstream refresh failed";
       } catch {
         errorDescription = `Upstream returned HTTP ${tokenResponse.status} ${tokenResponse.statusText}`;
       }
