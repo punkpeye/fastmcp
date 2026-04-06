@@ -433,8 +433,7 @@ describe("OAuthProxy - Token Response Parsing", () => {
         });
 
       try {
-        // OAuthProxyError uses `code` as the Error message, and stores
-        // the human-readable text in `description`. Verify both.
+        // For HTTP-level errors (non-OAuth), description contains the HTTP status.
         const err = await proxy
           .exchangeRefreshToken({
             client_id: "test-client",
