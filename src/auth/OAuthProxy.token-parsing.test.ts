@@ -414,4 +414,78 @@ describe("OAuthProxy - Token Response Parsing", () => {
       proxy.destroy();
     });
   });
+
+  describe("upstream error response handling", () => {
+    it("should handle non-JSON error from upstream token endpoint without crashing", async () => {
+      // Disable token swap so exchangeRefreshToken goes through handlePassthroughRefresh
+      const proxy = new OAuthProxy({
+        ...baseConfig,
+        enableTokenSwap: false,
+      });
+
+      // Mock global fetch to return an HTML error page (e.g. load balancer 502)
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () =>
+        new Response("<html><body>502 Bad Gateway</body></html>", {
+          headers: { "Content-Type": "text/html" },
+          status: 502,
+          statusText: "Bad Gateway",
+        });
+
+      try {
+        // For HTTP-level errors (non-OAuth), description contains the HTTP status.
+        const err = await proxy
+          .exchangeRefreshToken({
+            client_id: "test-client",
+            grant_type: "refresh_token",
+            refresh_token: "test-refresh-token",
+          })
+          .catch((e: any) => e);
+
+        expect(err.name).toBe("OAuthProxyError");
+        expect(err.description).toMatch(/Upstream returned HTTP 502/);
+      } finally {
+        globalThis.fetch = originalFetch;
+        proxy.destroy();
+      }
+    });
+
+    it("should still parse JSON error bodies from upstream when available", async () => {
+      const proxy = new OAuthProxy({
+        ...baseConfig,
+        enableTokenSwap: false,
+      });
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            error: "invalid_grant",
+            error_description: "Refresh token expired",
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 400,
+            statusText: "Bad Request",
+          },
+        );
+
+      try {
+        const err = await proxy
+          .exchangeRefreshToken({
+            client_id: "test-client",
+            grant_type: "refresh_token",
+            refresh_token: "expired-token",
+          })
+          .catch((e: any) => e);
+
+        expect(err.name).toBe("OAuthProxyError");
+        expect(err.code).toBe("invalid_grant");
+        expect(err.description).toBe("Refresh token expired");
+      } finally {
+        globalThis.fetch = originalFetch;
+        proxy.destroy();
+      }
+    });
+  });
 });

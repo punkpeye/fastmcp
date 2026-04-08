@@ -638,14 +638,19 @@ export class OAuthProxy {
     });
 
     if (!tokenResponse.ok) {
-      const error = (await tokenResponse.json()) as {
-        error?: string;
-        error_description?: string;
-      };
-      throw new OAuthProxyError(
-        error.error || "server_error",
-        error.error_description,
-      );
+      let errorCode = "server_error";
+      let errorDescription: string | undefined;
+      try {
+        const error = (await tokenResponse.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+        errorCode = error.error || "server_error";
+        errorDescription = error.error_description;
+      } catch {
+        errorDescription = `Upstream returned HTTP ${tokenResponse.status} ${tokenResponse.statusText}`;
+      }
+      throw new OAuthProxyError(errorCode, errorDescription);
     }
 
     const tokens = await this.parseTokenResponse(tokenResponse);
@@ -818,14 +823,19 @@ export class OAuthProxy {
     });
 
     if (!tokenResponse.ok) {
-      const error = (await tokenResponse.json()) as {
-        error?: string;
-        error_description?: string;
-      };
-      throw new OAuthProxyError(
-        error.error || "invalid_grant",
-        error.error_description,
-      );
+      let errorCode = "invalid_grant";
+      let errorDescription: string | undefined;
+      try {
+        const error = (await tokenResponse.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+        errorCode = error.error || "invalid_grant";
+        errorDescription = error.error_description;
+      } catch {
+        errorDescription = `Upstream returned HTTP ${tokenResponse.status} ${tokenResponse.statusText}`;
+      }
+      throw new OAuthProxyError(errorCode, errorDescription);
     }
 
     const tokens = await this.parseTokenResponse(tokenResponse);
@@ -1251,14 +1261,19 @@ export class OAuthProxy {
     });
 
     if (!tokenResponse.ok) {
-      const error = (await tokenResponse.json()) as {
-        error?: string;
-        error_description?: string;
-      };
-      throw new OAuthProxyError(
-        error.error || "invalid_grant",
-        error.error_description || "Upstream refresh failed",
-      );
+      let errorCode = "invalid_grant";
+      let errorDescription: string | undefined = "Upstream refresh failed";
+      try {
+        const error = (await tokenResponse.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+        errorCode = error.error || "invalid_grant";
+        errorDescription = error.error_description || "Upstream refresh failed";
+      } catch {
+        errorDescription = `Upstream returned HTTP ${tokenResponse.status} ${tokenResponse.statusText}`;
+      }
+      throw new OAuthProxyError(errorCode, errorDescription);
     }
 
     const tokens = await this.parseTokenResponse(tokenResponse);
