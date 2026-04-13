@@ -10,6 +10,7 @@ import { MemoryTokenStorage } from "./utils/tokenStore.js";
 
 describe("OAuthProxy - Token Swap Pattern", () => {
   const baseConfig = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
     baseUrl: "https://proxy.example.com",
     consentRequired: false,
     upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",

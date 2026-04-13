@@ -48,7 +48,11 @@ export class OAuthProxy {
 
   constructor(config: OAuthProxyConfig) {
     this.config = {
-      allowedRedirectUriPatterns: ["https://*", "http://localhost:*"],
+      // Empty by default. Framework users must explicitly configure the URIs they
+      // trust, per RFC 6819 §4.1.5. The previous default (`["https://*", "http://localhost:*"]`)
+      // allowed open DCR registration of any https URL, enabling CWE-601 open-redirect
+      // attacks against /oauth/authorize.
+      allowedRedirectUriPatterns: [],
       authorizationCodeTtl: 300, // 5 minutes
       consentRequired: true,
       enableTokenSwap: true, // Enabled by default for security
@@ -125,6 +129,23 @@ export class OAuthProxy {
       );
     }
 
+    // RFC 6749 §5.2 - reject unknown clients with invalid_client.
+    // The proxy exposes a single upstream identity; any other client_id is rejected.
+    if (params.client_id !== this.config.upstreamClientId) {
+      throw new OAuthProxyError("invalid_client", "Unknown client_id");
+    }
+
+    // RFC 6749 §3.1.2.3 / RFC 6819 §4.1.5 - the redirect_uri MUST match one
+    // previously registered by the client (exact string comparison). Skipping
+    // this check is CWE-601: an attacker can steal an authorization code by
+    // passing their own URL as redirect_uri.
+    if (!this.registeredClients.has(params.redirect_uri)) {
+      throw new OAuthProxyError(
+        "invalid_request",
+        "redirect_uri is not registered for this client",
+      );
+    }
+
     // Validate PKCE if provided
     if (params.code_challenge && !params.code_challenge_method) {
       throw new OAuthProxyError(
@@ -173,6 +194,13 @@ export class OAuthProxy {
         "unsupported_grant_type",
         "Only authorization_code grant type is supported",
       );
+    }
+
+    // RFC 6749 §5.2 - reject unknown clients. The proxy exposes a single
+    // upstream identity; any other client_id is rejected here as well as at
+    // authorize(), so stolen codes cannot be exchanged by arbitrary callers.
+    if (request.client_id !== this.config.upstreamClientId) {
+      throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
 
     const clientCode = this.clientCodes.get(request.code);
@@ -368,6 +396,17 @@ export class OAuthProxy {
       throw new OAuthProxyError("invalid_request", "Invalid or expired state");
     }
 
+    // Defense-in-depth: the transaction's stored callback URL must still be
+    // registered. Guards against any code path that could persist an
+    // unvalidated URI, and against registration being revoked mid-flow.
+    if (!this.registeredClients.has(transaction.clientCallbackUrl)) {
+      this.transactions.delete(state);
+      throw new OAuthProxyError(
+        "invalid_request",
+        "Transaction callback URL is not registered",
+      );
+    }
+
     // Exchange code with upstream provider
     const upstreamTokens = await this.exchangeUpstreamCode(code, transaction);
 
@@ -416,6 +455,13 @@ export class OAuthProxy {
     if (action === "deny") {
       // User denied consent
       this.transactions.delete(transactionId);
+      // Defense-in-depth: never redirect to an unregistered URI.
+      if (!this.registeredClients.has(transaction.clientCallbackUrl)) {
+        throw new OAuthProxyError(
+          "invalid_request",
+          "Transaction callback URL is not registered",
+        );
+      }
       const redirectUrl = new URL(transaction.clientCallbackUrl);
       redirectUrl.searchParams.set("error", "access_denied");
       redirectUrl.searchParams.set(
@@ -518,7 +564,12 @@ export class OAuthProxy {
       registeredAt: new Date(),
     };
 
-    this.registeredClients.set(request.redirect_uris[0], client);
+    // Store registration under every presented redirect_uri so that authorize()
+    // can validate each one exactly (RFC 6749 §3.1.2.3). The previous code only
+    // stored the first URI, silently dropping the rest.
+    for (const uri of request.redirect_uris) {
+      this.registeredClients.set(uri, client);
+    }
 
     // Return RFC 7591 compliant response
     const response: DCRResponse = {
@@ -945,28 +996,30 @@ export class OAuthProxy {
   }
 
   /**
-   * Validate redirect URI against allowed patterns
+   * Validate a redirect URI against the configured allow-list.
+   *
+   * Returns `true` only if the URI is syntactically valid AND matches one of
+   * the explicitly configured `allowedRedirectUriPatterns`. An empty or unset
+   * pattern list means DCR will reject every URI — framework users must
+   * opt-in by listing the exact URIs (or wildcards) they trust.
+   *
+   * Prior versions also fell back to allowing any https URL or localhost,
+   * which enabled attackers to DCR an arbitrary URL and then abuse it via
+   * /oauth/authorize (CWE-601). Do not re-introduce that fallback.
    */
   private validateRedirectUri(uri: string): boolean {
     try {
-      const url = new URL(uri);
-      const patterns = this.config.allowedRedirectUriPatterns || [];
-
-      for (const pattern of patterns) {
-        if (this.matchesPattern(uri, pattern)) {
-          return true;
-        }
-      }
-
-      // Default: allow https and localhost
-      return (
-        url.protocol === "https:" ||
-        url.hostname === "localhost" ||
-        url.hostname === "127.0.0.1"
-      );
+      new URL(uri); // syntactic check only — throws on malformed input
     } catch {
       return false;
     }
+
+    const patterns = this.config.allowedRedirectUriPatterns || [];
+    if (patterns.length === 0) {
+      return false;
+    }
+
+    return patterns.some((pattern) => this.matchesPattern(uri, pattern));
   }
 }
 

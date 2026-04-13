@@ -189,7 +189,23 @@ export interface OAuthProviderConfig {
  * Configuration for the OAuth Proxy
  */
 export interface OAuthProxyConfig {
-  /** Allowed redirect URI patterns for client registration */
+  /**
+   * Allow-list of redirect URI patterns accepted by Dynamic Client Registration.
+   *
+   * A client calling POST /oauth/register must present a `redirect_uri` that
+   * matches one of these patterns (exact string or glob with `*` / `?`);
+   * otherwise the registration is rejected with `invalid_redirect_uri`. Once
+   * registered, the same exact URI must be echoed back at /oauth/authorize —
+   * the proxy performs exact string comparison per RFC 6749 §3.1.2.3.
+   *
+   * Default: `[]` (DCR rejects everything — explicit opt-in required).
+   *
+   * Prior versions defaulted to `["https://*", "http://localhost:*"]` with an
+   * implicit fallback that allowed any https URL. This enabled CWE-601
+   * open-redirect / authorization-code theft: an attacker could DCR their own
+   * URL and then steal victim codes via /oauth/authorize. Do not loosen this
+   * default without understanding that threat model.
+   */
   allowedRedirectUriPatterns?: string[];
   /** Authorization code TTL in seconds (default: 300) */
   authorizationCodeTtl?: number;

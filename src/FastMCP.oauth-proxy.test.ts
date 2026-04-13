@@ -15,6 +15,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
 
     // Create OAuth Proxy
     const authProxy = new OAuthProxy({
+      allowedRedirectUriPatterns: ["https://client.example.com/*"],
       baseUrl: `http://localhost:${port}`,
       scopes: ["openid", "profile"],
       upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
@@ -126,6 +127,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
     const port = await getRandomPort();
 
     const authProxy = new OAuthProxy({
+      allowedRedirectUriPatterns: ["https://client.example.com/*"],
       baseUrl: `http://localhost:${port}`,
       consentRequired: false, // Disable consent for testing
       scopes: ["openid"],
