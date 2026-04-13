@@ -718,6 +718,60 @@ test("handles tool timeout", async () => {
   });
 });
 
+test("handles UserError with timeoutMs", async () => {
+  const unhandledRejections: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => {
+    unhandledRejections.push(reason);
+  };
+
+  process.on("unhandledRejection", onUnhandledRejection);
+
+  try {
+    await runWithTestServer({
+      run: async ({ client }) => {
+        const result = await client.callTool({
+          arguments: {
+            a: 1,
+            b: 2,
+          },
+          name: "add",
+        });
+
+        expect(result).toEqual({
+          content: [{ text: "Something went wrong", type: "text" }],
+          isError: true,
+        });
+      },
+      server: async () => {
+        const server = new FastMCP({
+          name: "Test",
+          version: "1.0.0",
+        });
+
+        server.addTool({
+          description: "Throws UserError with timeoutMs configured",
+          execute: async () => {
+            throw new UserError("Something went wrong");
+          },
+          name: "add",
+          parameters: z.object({
+            a: z.number(),
+            b: z.number(),
+          }),
+          timeoutMs: 1000,
+        });
+
+        return server;
+      },
+    });
+
+    await delay(0);
+    expect(unhandledRejections).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", onUnhandledRejection);
+  }
+});
+
 test("sends logging messages to the client", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
@@ -769,6 +823,48 @@ test("sends logging messages to the client", async () => {
           log.info("info message");
           log.warn("warn message");
 
+          return String(args.a + args.b);
+        },
+        name: "add",
+        parameters: z.object({
+          a: z.number(),
+          b: z.number(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("onToolCall callback is invoked with tool name and arguments", async () => {
+  const onToolCall = vi.fn();
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      await client.callTool({
+        arguments: {
+          a: 1,
+          b: 2,
+        },
+        name: "add",
+      });
+
+      expect(onToolCall).toHaveBeenCalledWith({
+        arguments: { a: 1, b: 2 },
+        toolName: "add",
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        onToolCall,
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Add two numbers",
+        execute: async (args) => {
           return String(args.a + args.b);
         },
         name: "add",
@@ -4550,4 +4646,88 @@ test("OAuth config with only protectedResource returns Bearer WWW-Authenticate",
   } finally {
     await server.stop();
   }
+});
+
+test("adds tools with outputSchema", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const { tools } = await client.listTools();
+      expect(tools).toHaveLength(1);
+      expect(tools[0].name).toBe("get-weather");
+      expect(tools[0].inputSchema).toEqual({
+        $schema: "http://json-schema.org/draft-07/schema#",
+        additionalProperties: false,
+        properties: {
+          city: { type: "string" },
+        },
+        required: ["city"],
+        type: "object",
+      });
+      // outputSchema should be present in the raw response
+      expect((tools[0] as Record<string, unknown>).outputSchema).toEqual({
+        $schema: "http://json-schema.org/draft-07/schema#",
+        additionalProperties: false,
+        properties: {
+          humidity: { type: "number" },
+          temperature: { type: "number" },
+        },
+        required: ["humidity", "temperature"],
+        type: "object",
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          return JSON.stringify({ humidity: 65, temperature: 72 });
+        },
+        name: "get-weather",
+        outputSchema: z.object({
+          humidity: z.number(),
+          temperature: z.number(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("tools without outputSchema omit it from listing", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const { tools } = await client.listTools();
+      expect(tools).toHaveLength(1);
+      expect(
+        (tools[0] as Record<string, unknown>).outputSchema,
+      ).toBeUndefined();
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "A simple tool",
+        execute: async () => {
+          return "hello";
+        },
+        name: "greet",
+        parameters: z.object({
+          name: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
 });

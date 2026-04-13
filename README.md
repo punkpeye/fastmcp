@@ -19,6 +19,9 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Logging](#logging)
 - [Error handling](#errors)
 - [HTTP Streaming](#http-streaming) (with SSE compatibility)
+- [HTTPS Support](#https-support) for secure connections
+- [Custom HTTP routes](#custom-http-routes) for REST APIs, webhooks, and admin interfaces
+- [Edge Runtime Support](#edge-runtime-support) for Cloudflare Workers, Deno Deploy, and more
 - [Stateless mode](#stateless-mode) for serverless deployments
 - CORS (enabled by default)
 - [Progress notifications](#progress)
@@ -181,6 +184,244 @@ const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
 
 await client.connect(transport);
 ```
+
+##### HTTPS Support
+
+FastMCP supports HTTPS for secure connections by providing SSL certificate options:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8443,
+    sslCert: "./path/to/cert.pem",
+    sslKey: "./path/to/key.pem",
+    sslCa: "./path/to/ca.pem", // Optional: for client certificate authentication
+  },
+});
+```
+
+This will start the server with HTTPS on `https://localhost:8443/mcp`.
+
+**SSL Options:**
+
+- `sslCert` - Path to SSL certificate file
+- `sslKey` - Path to SSL private key file
+- `sslCa` - (Optional) Path to CA certificate for mutual TLS authentication
+
+**For testing**, you can generate self-signed certificates:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
+```
+
+**For production**, obtain certificates from a trusted CA like Let's Encrypt.
+
+See the [https-server example](src/examples/https-server.ts) for a complete demonstration.
+
+#### Custom HTTP Routes
+
+FastMCP allows you to add custom HTTP routes alongside MCP endpoints, enabling you to build comprehensive HTTP services that include REST APIs, webhooks, admin interfaces, and more - all within the same server process.
+
+```ts
+// Add REST API endpoints
+server.addRoute("GET", "/api/users", async (req, res) => {
+  res.json({ users: [] });
+});
+
+// Handle path parameters
+server.addRoute("GET", "/api/users/:id", async (req, res) => {
+  res.json({
+    userId: req.params.id,
+    query: req.query, // Access query parameters
+  });
+});
+
+// Handle POST requests with body parsing
+server.addRoute("POST", "/api/users", async (req, res) => {
+  const body = await req.json();
+  res.status(201).json({ created: body });
+});
+
+// Serve HTML content
+server.addRoute("GET", "/admin", async (req, res) => {
+  res.send("<html><body><h1>Admin Panel</h1></body></html>");
+});
+
+// Handle webhooks
+server.addRoute("POST", "/webhook/github", async (req, res) => {
+  const payload = await req.json();
+  const event = req.headers["x-github-event"];
+
+  // Process webhook...
+  res.json({ received: true });
+});
+```
+
+Custom routes support:
+
+- All HTTP methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
+- Path parameters (`:param`) and wildcards (`*`)
+- Query string parsing
+- JSON and text body parsing
+- Custom status codes and headers
+- Authentication via the same `authenticate` function as MCP
+- **Public routes** that bypass authentication
+
+Routes are matched in the order they are registered, allowing you to define specific routes before catch-all patterns.
+
+##### Public Routes
+
+By default, custom routes require authentication (if configured). You can make routes public by adding the `{ public: true }` option:
+
+```ts
+// Public route - no authentication required
+server.addRoute(
+  "GET",
+  "/.well-known/openid-configuration",
+  async (req, res) => {
+    res.json({
+      issuer: "https://example.com",
+      authorization_endpoint: "https://example.com/auth",
+      token_endpoint: "https://example.com/token",
+    });
+  },
+  { public: true },
+);
+
+// Private route - requires authentication
+server.addRoute("GET", "/api/users", async (req, res) => {
+  // req.auth contains authenticated user data
+  res.json({ users: [] });
+});
+
+// Public static files
+server.addRoute(
+  "GET",
+  "/public/*",
+  async (req, res) => {
+    // Serve static files without authentication
+    res.send(`File: ${req.url}`);
+  },
+  { public: true },
+);
+```
+
+Public routes are perfect for:
+
+- OAuth discovery endpoints (`.well-known/*`)
+- Health checks and status pages
+- Static assets and documentation
+- Webhook endpoints from external services
+- Public APIs that don't require user authentication
+
+See the [custom-routes example](src/examples/custom-routes.ts) for a complete demonstration.
+
+#### Edge Runtime Support
+
+FastMCP supports edge runtimes like Cloudflare Workers, enabling deployment of MCP servers to the edge with minimal latency worldwide.
+
+##### Choosing Between FastMCP and EdgeFastMCP
+
+| Use Case                        | Class         | Import                                       |
+| ------------------------------- | ------------- | -------------------------------------------- |
+| Node.js, Express, Bun           | `FastMCP`     | `import { FastMCP } from "fastmcp"`          |
+| Cloudflare Workers, Deno Deploy | `EdgeFastMCP` | `import { EdgeFastMCP } from "fastmcp/edge"` |
+
+| Feature              | FastMCP                        | EdgeFastMCP                            |
+| -------------------- | ------------------------------ | -------------------------------------- |
+| Runtime              | Node.js                        | Edge (V8 isolates)                     |
+| Start method         | `server.start({ port })`       | `export default server`                |
+| Transport            | stdio, httpStream, SSE         | HTTP Streamable only                   |
+| Sessions             | Stateful or stateless          | Stateless only                         |
+| File system          | Yes                            | No                                     |
+| OAuth/Authentication | Built-in `authenticate` option | Use Hono middleware (built-in planned) |
+| Custom routes        | `server.getApp()`              | `server.getApp()`                      |
+
+> **Note:** Built-in authentication for EdgeFastMCP is planned for a future release. Both FastMCP and EdgeFastMCP use Hono internally, so there's no technical barrier—EdgeFastMCP was simply written before OAuth was added to FastMCP. PRs are welcome to add an `authenticate` option that accepts web `Request` instead of Node.js `http.IncomingMessage`.
+>
+> In the meantime, use Hono middleware:
+>
+> ```ts
+> const app = server.getApp();
+> app.use("/api/*", async (c, next) => {
+>   if (c.req.header("authorization") !== "Bearer secret") {
+>     return c.json({ error: "Unauthorized" }, 401);
+>   }
+>   await next();
+> });
+> ```
+
+##### Cloudflare Workers
+
+To deploy FastMCP to Cloudflare Workers, use the `EdgeFastMCP` class from the `/edge` subpath:
+
+```ts
+import { EdgeFastMCP } from "fastmcp/edge";
+import { z } from "zod";
+
+const server = new EdgeFastMCP({
+  name: "My Edge Server",
+  version: "1.0.0",
+  description: "MCP server running on Cloudflare Workers",
+});
+
+// Add tools, resources, prompts as usual
+server.addTool({
+  name: "greet",
+  description: "Greet someone",
+  parameters: z.object({
+    name: z.string(),
+  }),
+  execute: async ({ name }) => {
+    return `Hello, ${name}! Served from the edge.`;
+  },
+});
+
+// Export the server as the default (required for Cloudflare Workers)
+export default server;
+```
+
+##### Edge Runtime Differences
+
+When running on edge runtimes:
+
+- **Stateless by default**: Each request is handled independently
+- **No filesystem access**: Use fetch APIs for external data
+- **V8 Isolates**: Fast cold starts and efficient resource usage
+- **Global deployment**: Automatic distribution to edge locations
+
+##### Custom Routes on Edge
+
+You can access the underlying Hono app to add custom HTTP routes:
+
+```ts
+const app = server.getApp();
+
+// Add a landing page
+app.get("/", (c) => c.html("<h1>Welcome to my MCP server</h1>"));
+
+// Add REST API endpoints
+app.get("/api/status", (c) => c.json({ status: "ok" }));
+```
+
+##### Deployment
+
+Configure your `wrangler.toml`:
+
+```toml
+name = "my-mcp-server"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+```
+
+Deploy with:
+
+```bash
+wrangler deploy
+```
+
+See the [edge-cloudflare-worker example](src/examples/edge-cloudflare-worker.ts) for a complete demonstration.
 
 #### Stateless Mode
 
@@ -1230,14 +1471,163 @@ server.addPrompt({
 
 ### Authentication
 
-FastMCP supports session-based authentication, allowing you to secure your server and control access to its features.
+FastMCP supports OAuth 2.1 authentication with pre-configured providers, allowing you to secure your server with minimal setup.
 
-> [!NOTE]
-> For more granular control over which tools are available to authenticated users, see the [Tool Authorization](#tool-authorization) section.
+#### OAuth with Pre-configured Providers
 
-To enable authentication, provide an `authenticate` function in the server options. This function receives the incoming HTTP request and should return a promise that resolves with the authentication context.
+Use the `auth` option with a provider to enable OAuth authentication:
 
-If authentication fails, the function should throw a `Response` object, which will be sent to the client.
+```ts
+import { FastMCP, getAuthSession, GoogleProvider, requireAuth } from "fastmcp";
+
+const server = new FastMCP({
+  auth: new GoogleProvider({
+    baseUrl: "https://your-server.com",
+    clientId: process.env.GOOGLE_CLIENT_ID!,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+  }),
+  name: "My Server",
+  version: "1.0.0",
+});
+
+server.addTool({
+  canAccess: requireAuth,
+  description: "Get user profile",
+  execute: async (_args, { session }) => {
+    const { accessToken } = getAuthSession(session);
+    const response = await fetch(
+      "https://www.googleapis.com/oauth2/v2/userinfo",
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    );
+    return JSON.stringify(await response.json());
+  },
+  name: "get-profile",
+});
+```
+
+**Available Providers:**
+
+| Provider         | Import    | Use Case               |
+| :--------------- | :-------- | :--------------------- |
+| `GoogleProvider` | `fastmcp` | Google OAuth           |
+| `GitHubProvider` | `fastmcp` | GitHub OAuth           |
+| `AzureProvider`  | `fastmcp` | Azure/Entra ID         |
+| `OAuthProvider`  | `fastmcp` | Any OAuth 2.0 provider |
+
+**Generic OAuth Provider** (for SAP, Auth0, Okta, etc.):
+
+```ts
+import { FastMCP, OAuthProvider } from "fastmcp";
+
+const server = new FastMCP({
+  auth: new OAuthProvider({
+    authorizationEndpoint: process.env.OAUTH_AUTH_ENDPOINT!,
+    baseUrl: "https://your-server.com",
+    clientId: process.env.OAUTH_CLIENT_ID!,
+    clientSecret: process.env.OAUTH_CLIENT_SECRET!,
+    scopes: ["openid", "profile"],
+    tokenEndpoint: process.env.OAUTH_TOKEN_ENDPOINT!,
+  }),
+  name: "My Server",
+  version: "1.0.0",
+});
+```
+
+#### Tool Authorization
+
+Control tool access using the `canAccess` property with built-in helper functions:
+
+```ts
+import {
+  requireAuth,
+  requireScopes,
+  requireRole,
+  requireAll,
+  requireAny,
+  getAuthSession,
+} from "fastmcp";
+
+// Require any authenticated user
+server.addTool({
+  canAccess: requireAuth,
+  name: "user-tool",
+  // ...
+});
+
+// Require specific OAuth scopes
+server.addTool({
+  canAccess: requireScopes("read:user", "write:data"),
+  name: "scoped-tool",
+  // ...
+});
+
+// Require specific role
+server.addTool({
+  canAccess: requireRole("admin"),
+  name: "admin-tool",
+  // ...
+});
+
+// Combine with AND logic
+server.addTool({
+  canAccess: requireAll(requireAuth, requireRole("admin")),
+  name: "admin-only",
+  // ...
+});
+
+// Combine with OR logic
+server.addTool({
+  canAccess: requireAny(requireRole("admin"), requireRole("moderator")),
+  name: "staff-tool",
+  // ...
+});
+```
+
+**Custom Authorization:**
+
+For custom logic, pass a function directly:
+
+```typescript
+server.addTool({
+  name: "custom-auth-tool",
+  canAccess: (auth) =>
+    auth?.role === "admin" && auth?.department === "engineering",
+  execute: async () => "Access granted!",
+});
+```
+
+**Extracting Session Data:**
+
+Use `getAuthSession` for type-safe access to the OAuth session in your tool execute functions:
+
+```typescript
+import { getAuthSession, GoogleSession } from "fastmcp";
+
+server.addTool({
+  canAccess: requireAuth,
+  name: "get-profile",
+  execute: async (_args, { session }) => {
+    // Type-safe destructuring (throws if not authenticated)
+    const { accessToken } = getAuthSession(session);
+
+    // Or with provider-specific typing:
+    // const { accessToken } = getAuthSession<GoogleSession>(session);
+
+    const response = await fetch("https://api.example.com/user", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    return JSON.stringify(await response.json());
+  },
+});
+```
+
+> **Note:** You can also access `session.accessToken` directly, but you must handle the case where `session` is undefined. The `getAuthSession` helper throws a clear error if the session is not authenticated, making it safer when used with `canAccess: requireAuth`.
+
+#### Custom Authentication
+
+For non-OAuth scenarios (API keys, custom tokens), use the `authenticate` option:
 
 ```ts
 const server = new FastMCP({
@@ -1253,17 +1643,10 @@ const server = new FastMCP({
       });
     }
 
-    // Whatever you return here will be accessible in the `context.session` object.
-    return {
-      id: 1,
-    };
+    return { id: 1, role: "user" };
   },
 });
-```
 
-Now you can access the authenticated session data in your tools:
-
-```ts
 server.addTool({
   name: "sayHello",
   execute: async (args, { session }) => {
@@ -1272,48 +1655,9 @@ server.addTool({
 });
 ```
 
-#### Tool Authorization
-
-You can control which tools are available to authenticated users by adding an optional `canAccess` function to a tool's definition. This function receives the authentication context and should return `true` if the user is allowed to access the tool.
-
-If `canAccess` is not provided, the tool is accessible to all authenticated users by default. If no authentication is configured on the server, all tools are available to all clients.
-
-**Example:**
-
-```typescript
-const server = new FastMCP<{ role: "admin" | "user" }>({
-  authenticate: async (request) => {
-    const role = request.headers["x-role"] as string;
-    return { role: role === "admin" ? "admin" : "user" };
-  },
-  name: "My Server",
-  version: "1.0.0",
-});
-
-server.addTool({
-  name: "admin-dashboard",
-  description: "An admin-only tool",
-  // Only users with the 'admin' role can see and execute this tool
-  canAccess: (auth) => auth?.role === "admin",
-  execute: async () => {
-    return "Welcome to the admin dashboard!";
-  },
-});
-
-server.addTool({
-  name: "public-info",
-  description: "A tool available to everyone",
-  execute: async () => {
-    return "This is public information.";
-  },
-});
-```
-
-In this example, only clients authenticating with the `admin` role will be able to list or call the `admin-dashboard` tool. The `public-info` tool will be available to all authenticated users.
-
 #### OAuth Proxy
 
-FastMCP includes a built-in **OAuth Proxy** that acts as a secure intermediary between MCP clients and upstream OAuth providers. The proxy handles the complete OAuth 2.1 authorization flow, including Dynamic Client Registration (DCR), PKCE, consent management, and token management with encryption and token swap patterns enabled by default.
+The `auth` option uses FastMCP's built-in **OAuth Proxy** that acts as a secure intermediary between MCP clients and upstream OAuth providers. The proxy handles the complete OAuth 2.1 authorization flow, including Dynamic Client Registration (DCR), PKCE, consent management, and token management with encryption and token swap patterns enabled by default.
 
 **Key Features:**
 
@@ -1324,6 +1668,34 @@ FastMCP includes a built-in **OAuth Proxy** that acts as a secure intermediary b
 - 🔑 **Optional JWKS**: Support for RS256/ES256 token verification (via optional `jose` dependency)
 
 **Quick Start:**
+
+```ts
+import { FastMCP, getAuthSession, GoogleProvider, requireAuth } from "fastmcp";
+
+const server = new FastMCP({
+  auth: new GoogleProvider({
+    baseUrl: "https://your-server.com",
+    clientId: process.env.GOOGLE_CLIENT_ID!,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+  }),
+  name: "My Server",
+  version: "1.0.0",
+});
+
+server.addTool({
+  canAccess: requireAuth,
+  name: "protected-tool",
+  execute: async (_args, { session }) => {
+    const { accessToken } = getAuthSession(session);
+    // Use accessToken to call upstream APIs
+    return "Authenticated!";
+  },
+});
+```
+
+**Advanced Configuration:**
+
+For more control over OAuth behavior, you can use the `oauth` option directly:
 
 ```ts
 import { FastMCP } from "fastmcp";
@@ -1341,7 +1713,7 @@ const server = new FastMCP({
   oauth: {
     enabled: true,
     authorizationServer: authProxy.getAuthorizationServerMetadata(),
-    proxy: authProxy, // Routes automatically registered!
+    proxy: authProxy,
   },
 });
 ```

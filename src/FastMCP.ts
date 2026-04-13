@@ -12,16 +12,19 @@ import {
   GetPromptRequestSchema,
   GetPromptResult,
   ListPromptsRequestSchema,
+  ListPromptsResult,
   ListResourcesRequestSchema,
   ListResourcesResult,
   ListResourceTemplatesRequestSchema,
   ListResourceTemplatesResult,
   ListToolsRequestSchema,
+  ListToolsResult,
   McpError,
   ReadResourceRequestSchema,
   ResourceLink,
   Root,
   RootsListChangedNotificationSchema,
+  Tool as SDKTool,
   ServerCapabilities,
   SetLevelRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -29,6 +32,7 @@ import { StandardSchemaV1 } from "@standard-schema/spec";
 import { EventEmitter } from "events";
 import { readFile } from "fs/promises";
 import Fuse from "fuse.js";
+import { Hono } from "hono";
 import http from "http";
 import { startHTTPServer } from "mcp-proxy";
 import { StrictEventEmitter } from "strict-event-emitter-types";
@@ -39,6 +43,10 @@ import { toJsonSchema } from "xsschema";
 import { z } from "zod";
 
 import type { OAuthProxy } from "./auth/OAuthProxy.js";
+import type {
+  AuthProvider,
+  OAuthSession,
+} from "./auth/providers/AuthProvider.js";
 
 export interface Logger {
   debug(...args: unknown[]): void;
@@ -560,6 +568,30 @@ type SamplingResponse = {
 };
 
 type ServerOptions<T extends FastMCPSessionAuth> = {
+  /**
+   * Authentication provider for OAuth flows.
+   * When provided, automatically configures the `authenticate` function
+   * and `oauth` settings.
+   *
+   * For custom authentication logic, use the `authenticate` option instead.
+   * If both are provided, `authenticate` takes precedence.
+   *
+   * @example
+   * ```typescript
+   * import { FastMCP, GitHubProvider } from "fastmcp";
+   *
+   * const server = new FastMCP({
+   *   auth: new GitHubProvider({
+   *     baseUrl: "http://localhost:8000",
+   *     clientId: process.env.GITHUB_CLIENT_ID!,
+   *     clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+   *   }),
+   *   name: "My Server",
+   *   version: "1.0.0",
+   * });
+   * ```
+   */
+  auth?: AuthProvider<T extends OAuthSession ? T : OAuthSession>;
   authenticate?: Authenticate<T>;
   /**
    * Configuration for the health-check endpoint that can be exposed when the
@@ -825,6 +857,14 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
      */
     proxy?: OAuthProxy;
   };
+  /**
+   * Callback invoked when a tool is called.
+   * Use this to log, audit, or track tool usage.
+   */
+  onToolCall?: (context: {
+    arguments: Record<string, unknown>;
+    toolName: string;
+  }) => Promise<void> | void;
 
   ping?: {
     /**
@@ -869,7 +909,22 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
 type Tool<
   T extends FastMCPSessionAuth,
   Params extends ToolParameters = ToolParameters,
+  OutputParams extends ToolParameters = ToolParameters,
 > = {
+  /**
+   * MCP ext-apps metadata for linking interactive UI components.
+   * This field is passed through to the tool listing response.
+   * @see https://modelcontextprotocol.github.io/ext-apps/
+   */
+  _meta?: {
+    /** Additional metadata fields */
+    [key: string]: unknown;
+    /** UI component configuration */
+    ui?: {
+      /** URI of the resource serving the UI (e.g., "ui://my-tool/app.html") */
+      resourceUri?: string;
+    };
+  };
   annotations?: {
     /**
      * When true, the tool leverages incremental content streaming
@@ -878,8 +933,8 @@ type Tool<
     streamingHint?: boolean;
   } & ToolAnnotations;
   canAccess?: (auth: T) => boolean;
-  description?: string;
 
+  description?: string;
   execute: (
     args: StandardSchemaV1.InferOutput<Params>,
     context: Context<T>,
@@ -894,6 +949,7 @@ type Tool<
     | void
   >;
   name: string;
+  outputSchema?: OutputParams;
   parameters?: Params;
   timeoutMs?: number;
 };
@@ -945,6 +1001,66 @@ export enum ServerState {
   Stopped = "stopped",
 }
 
+/**
+ * Enhanced request object for custom routes
+ */
+export interface FastMCPRequest<
+  T extends FastMCPSessionAuth = FastMCPSessionAuth,
+> {
+  auth?: T;
+  body?: unknown;
+  headers: http.IncomingHttpHeaders;
+  json(): Promise<unknown>;
+  method: string;
+  params: Record<string, string>;
+  query: Record<string, string | string[]>;
+  text(): Promise<string>;
+  url: string;
+}
+
+/**
+ * Enhanced response object for custom routes
+ */
+export interface FastMCPResponse {
+  end(data?: Buffer | string): void;
+  json(data: unknown): void;
+  send(data: Buffer | string): void;
+  setHeader(name: string, value: number | string | string[]): FastMCPResponse;
+  status(code: number): FastMCPResponse;
+}
+
+/**
+ * HTTP method types for custom routes
+ */
+export type HTTPMethod =
+  | "DELETE"
+  | "GET"
+  | "OPTIONS"
+  | "PATCH"
+  | "POST"
+  | "PUT";
+
+/**
+ * Route handler function type
+ */
+export type RouteHandler<T extends FastMCPSessionAuth = FastMCPSessionAuth> = (
+  req: FastMCPRequest<T>,
+  res: FastMCPResponse,
+) => Promise<void> | void;
+
+/**
+ * Options for configuring custom routes
+ */
+export interface RouteOptions {
+  /**
+   * Whether this route should bypass authentication.
+   * When true, the route handler will be called without authentication,
+   * and req.auth will be undefined.
+   * @default false
+   */
+  public?: boolean;
+}
+
 type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
 
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
@@ -981,15 +1097,16 @@ export class FastMCPSession<
   #logger: Logger;
   #loggingLevel: LoggingLevel = "info";
   #needsEventLoopFlush: boolean = false;
+  #onToolCall?: ServerOptions<T>["onToolCall"];
   #pingConfig?: ServerOptions<T>["ping"];
 
   #pingInterval: null | ReturnType<typeof setInterval> = null;
 
-  #prompts: Prompt<T>[] = [];
+  #prompts: Map<string, Prompt<T>> = new Map();
 
-  #resources: Resource<T>[] = [];
+  #resources: Map<string, Resource<T>> = new Map();
 
-  #resourceTemplates: ResourceTemplate<T>[] = [];
+  #resourceTemplates: Map<string, ResourceTemplate<T>> = new Map();
 
   #roots: Root[] = [];
 
@@ -1010,6 +1127,7 @@ export class FastMCPSession<
     instructions,
     logger,
     name,
+    onToolCall,
     ping,
     prompts,
     resources,
@@ -1025,6 +1143,7 @@ export class FastMCPSession<
     instructions?: string;
     logger: Logger;
     name: string;
+    onToolCall?: ServerOptions<T>["onToolCall"];
     ping?: ServerOptions<T>["ping"];
     prompts: Prompt<T>[];
     resources: Resource<T>[];
@@ -1040,6 +1159,7 @@ export class FastMCPSession<
 
     this.#auth = auth;
     this.#logger = logger;
+    this.#onToolCall = onToolCall;
     this.#pingConfig = ping;
     this.#rootsConfig = roots;
     this.#sessionId = sessionId;
@@ -1086,19 +1206,19 @@ export class FastMCPSession<
         this.addResource(resource);
       }
 
-      this.setupResourceHandlers(resources);
+      this.setupResourceHandlers();
 
       if (resourcesTemplates.length) {
         for (const resourceTemplate of resourcesTemplates) {
           this.addResourceTemplate(resourceTemplate);
         }
 
-        this.setupResourceTemplateHandlers(resourcesTemplates);
+        this.setupResourceTemplateHandlers();
       }
     }
 
     if (prompts.length) {
-      this.setupPromptHandlers(prompts);
+      this.setupPromptHandlers();
     }
   }
 
@@ -1225,11 +1345,11 @@ export class FastMCPSession<
   }
 
   promptsListChanged(prompts: Prompt<T>[]) {
-    this.#prompts = [];
+    this.#prompts.clear();
     for (const prompt of prompts) {
       this.addPrompt(prompt);
     }
-    this.setupPromptHandlers(prompts);
+    this.setupPromptHandlers();
     this.triggerListChangedNotification("notifications/prompts/list_changed");
   }
 
@@ -1241,20 +1361,20 @@ export class FastMCPSession<
   }
 
   resourcesListChanged(resources: Resource<T>[]) {
-    this.#resources = [];
+    this.#resources.clear();
     for (const resource of resources) {
       this.addResource(resource);
     }
-    this.setupResourceHandlers(resources);
+    this.setupResourceHandlers();
     this.triggerListChangedNotification("notifications/resources/list_changed");
   }
 
   resourceTemplatesListChanged(resourceTemplates: ResourceTemplate<T>[]) {
-    this.#resourceTemplates = [];
+    this.#resourceTemplates.clear();
     for (const resourceTemplate of resourceTemplates) {
       this.addResourceTemplate(resourceTemplate);
     }
-    this.setupResourceTemplateHandlers(resourceTemplates);
+    this.setupResourceTemplateHandlers();
     this.triggerListChangedNotification("notifications/resources/list_changed");
   }
 
@@ -1278,6 +1398,14 @@ export class FastMCPSession<
         }`,
       );
     }
+  }
+
+  /**
+   * Update the session's authentication context.
+   * Called by mcp-proxy when a new token is validated on subsequent requests.
+   */
+  public updateAuth(auth: T): void {
+    this.#auth = auth;
   }
 
   public waitForReady(): Promise<void> {
@@ -1384,11 +1512,11 @@ export class FastMCPSession<
       },
     };
 
-    this.#prompts.push(prompt);
+    this.#prompts.set(prompt.name, prompt);
   }
 
   private addResource(inputResource: Resource<T>) {
-    this.#resources.push(inputResource);
+    this.#resources.set(inputResource.uri, inputResource);
   }
 
   private addResourceTemplate(inputResourceTemplate: InputResourceTemplate<T>) {
@@ -1417,7 +1545,7 @@ export class FastMCPSession<
       },
     };
 
-    this.#resourceTemplates.push(resourceTemplate);
+    this.#resourceTemplates.set(resourceTemplate.name, resourceTemplate);
   }
 
   private setupCompleteHandlers() {
@@ -1425,9 +1553,7 @@ export class FastMCPSession<
       if (request.params.ref.type === "ref/prompt") {
         const ref = request.params.ref;
 
-        const prompt =
-          "name" in ref &&
-          this.#prompts.find((prompt) => prompt.name === ref.name);
+        const prompt = "name" in ref && this.#prompts.get(ref.name);
 
         if (!prompt) {
           throw new UnexpectedStateError("Unknown prompt", {
@@ -1459,7 +1585,7 @@ export class FastMCPSession<
 
         const resource =
           "uri" in ref &&
-          this.#resourceTemplates.find(
+          Array.from(this.#resourceTemplates.values()).find(
             (resource) => resource.uriTemplate === ref.uri,
           );
 
@@ -1514,24 +1640,32 @@ export class FastMCPSession<
       return {};
     });
   }
-  private setupPromptHandlers(prompts: Prompt<T>[]) {
+  private setupPromptHandlers() {
+    let cachedPromptsList: ListPromptsResult["prompts"] | null = null;
+
     this.#server.setRequestHandler(ListPromptsRequestSchema, async () => {
+      if (cachedPromptsList) {
+        return {
+          prompts: cachedPromptsList,
+        };
+      }
+
+      cachedPromptsList = Array.from(this.#prompts.values()).map((prompt) => {
+        return {
+          arguments: prompt.arguments,
+          complete: prompt.complete,
+          description: prompt.description,
+          name: prompt.name,
+        };
+      });
+
       return {
-        prompts: prompts.map((prompt) => {
-          return {
-            arguments: prompt.arguments,
-            complete: prompt.complete,
-            description: prompt.description,
-            name: prompt.name,
-          };
-        }),
+        prompts: cachedPromptsList,
       };
     });
 
     this.#server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-      const prompt = prompts.find(
-        (prompt) => prompt.name === request.params.name,
-      );
+      const prompt = this.#prompts.get(request.params.name);
 
       if (!prompt) {
         throw new McpError(
@@ -1587,29 +1721,38 @@ export class FastMCPSession<
       }
     });
   }
-  private setupResourceHandlers(resources: Resource<T>[]) {
+  private setupResourceHandlers() {
+    let cachedResourcesList: ListResourcesResult["resources"] | null = null;
+
     this.#server.setRequestHandler(ListResourcesRequestSchema, async () => {
-      return {
-        resources: resources.map((resource) => ({
+      if (cachedResourcesList) {
+        return {
+          resources: cachedResourcesList,
+        };
+      }
+
+      cachedResourcesList = Array.from(this.#resources.values()).map(
+        (resource) => ({
           description: resource.description,
           mimeType: resource.mimeType,
           name: resource.name,
           uri: resource.uri,
-        })),
-      } satisfies ListResourcesResult;
+        }),
+      );
+
+      return {
+        resources: cachedResourcesList,
+      };
     });
 
     this.#server.setRequestHandler(
       ReadResourceRequestSchema,
       async (request) => {
         if ("uri" in request.params) {
-          const resource = resources.find(
-            (resource) =>
-              "uri" in resource && resource.uri === request.params.uri,
-          );
+          const resource = this.#resources.get(request.params.uri);
 
           if (!resource) {
-            for (const resourceTemplate of this.#resourceTemplates) {
+            for (const resourceTemplate of this.#resourceTemplates.values()) {
               const uriTemplate = parseURITemplate(
                 resourceTemplate.uriTemplate,
               );
@@ -1639,7 +1782,9 @@ export class FastMCPSession<
             throw new McpError(
               ErrorCode.MethodNotFound,
               `Resource not found: '${request.params.uri}'. Available resources: ${
-                resources.map((r) => r.uri).join(", ") || "none"
+                Array.from(this.#resources.values())
+                  .map((r) => r.uri)
+                  .join(", ") || "none"
               }`,
             );
           }
@@ -1684,20 +1829,32 @@ export class FastMCPSession<
       },
     );
   }
-  private setupResourceTemplateHandlers(
-    resourceTemplates: ResourceTemplate<T>[],
-  ) {
+  private setupResourceTemplateHandlers() {
+    let cachedResourceTemplatesList:
+      | ListResourceTemplatesResult["resourceTemplates"]
+      | null = null;
+
     this.#server.setRequestHandler(
       ListResourceTemplatesRequestSchema,
       async () => {
+        if (cachedResourceTemplatesList) {
+          return {
+            resourceTemplates: cachedResourceTemplatesList,
+          };
+        }
+
+        cachedResourceTemplatesList = Array.from(
+          this.#resourceTemplates.values(),
+        ).map((resourceTemplate) => ({
+          description: resourceTemplate.description,
+          mimeType: resourceTemplate.mimeType,
+          name: resourceTemplate.name,
+          uriTemplate: resourceTemplate.uriTemplate,
+        }));
+
         return {
-          resourceTemplates: resourceTemplates.map((resourceTemplate) => ({
-            description: resourceTemplate.description,
-            mimeType: resourceTemplate.mimeType,
-            name: resourceTemplate.name,
-            uriTemplate: resourceTemplate.uriTemplate,
-          })),
-        } satisfies ListResourceTemplatesResult;
+          resourceTemplates: cachedResourceTemplatesList,
+        };
       },
     );
   }
@@ -1748,29 +1905,46 @@ export class FastMCPSession<
     }
   }
   private setupToolHandlers(tools: Tool<T>[]) {
+    const toolsMap = new Map(tools.map((tool) => [tool.name, tool]));
+    let cachedToolsList: ListToolsResult["tools"] | null = null;
+
     this.#server.setRequestHandler(ListToolsRequestSchema, async () => {
+      if (cachedToolsList) {
+        return {
+          tools: cachedToolsList,
+        };
+      }
+      cachedToolsList = await Promise.all(
+        tools.map(async (tool) => {
+          return {
+            annotations: tool.annotations,
+            description: tool.description,
+            inputSchema: (tool.parameters
+              ? await toJsonSchema(tool.parameters)
+              : {
+                  additionalProperties: false,
+                  properties: {},
+                  type: "object",
+                }) as SDKTool["inputSchema"],
+            name: tool.name,
+            ...(tool.outputSchema && {
+              outputSchema: (await toJsonSchema(
+                tool.outputSchema,
+              )) as SDKTool["inputSchema"],
+            }),
+            // Pass through _meta for MCP ext-apps UI support (issue #229)
+            ...(tool._meta && { _meta: tool._meta }),
+          };
+        }),
+      );
+
       return {
-        tools: await Promise.all(
-          tools.map(async (tool) => {
-            return {
-              annotations: tool.annotations,
-              description: tool.description,
-              inputSchema: tool.parameters
-                ? await toJsonSchema(tool.parameters)
-                : {
-                    additionalProperties: false,
-                    properties: {},
-                    type: "object",
-                  }, // More complete schema for Cursor compatibility
-              name: tool.name,
-            };
-          }),
-        ),
+        tools: cachedToolsList,
       };
     });
 
     this.#server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const tool = tools.find((tool) => tool.name === request.params.name);
+      const tool = toolsMap.get(request.params.name);
 
       if (!tool) {
         throw new McpError(
@@ -1900,6 +2074,13 @@ export class FastMCPSession<
           }
         };
 
+        if (this.#onToolCall) {
+          await this.#onToolCall({
+            arguments: (args ?? {}) as Record<string, unknown>,
+            toolName: request.params.name,
+          });
+        }
+
         const executeToolPromise = tool.execute(args, {
           client: {
             version: this.#server.getClientVersion(),
@@ -1929,7 +2110,10 @@ export class FastMCPSession<
                 }, tool.timeoutMs);
 
                 // If promise resolves first
-                executeToolPromise.finally(() => clearTimeout(timeoutId));
+                executeToolPromise.then(
+                  () => clearTimeout(timeoutId),
+                  () => clearTimeout(timeoutId),
+                );
               }),
             ])
           : executeToolPromise)) as
@@ -2049,6 +2233,7 @@ export class FastMCP<
     return this.#sessions;
   }
   #authenticate: Authenticate<T> | undefined;
+  #honoApp = new Hono();
   #httpStreamServer: null | SSEServer = null;
   #logger: Logger;
   #options: ServerOptions<T>;
@@ -2056,7 +2241,6 @@ export class FastMCP<
   #resources: Resource<T>[] = [];
   #resourcesTemplates: InputResourceTemplate<T>[] = [];
   #serverState: ServerState = ServerState.Stopped;
-
   #sessions: FastMCPSession<T>[] = [];
 
   #tools: Tool<T>[] = [];
@@ -2065,8 +2249,28 @@ export class FastMCP<
     super();
 
     this.#options = options;
-    this.#authenticate = options.authenticate;
     this.#logger = options.logger || console;
+
+    // If auth provider is specified, use it to configure authenticate and oauth
+    if (options.auth) {
+      // Use auth provider's authenticate if not explicitly overridden
+      if (!options.authenticate) {
+        this.#authenticate = ((request: http.IncomingMessage | undefined) =>
+          options.auth!.authenticate(request)) as Authenticate<T>;
+      } else {
+        this.#authenticate = options.authenticate;
+      }
+
+      // Use auth provider's oauth config if not explicitly overridden
+      if (!options.oauth) {
+        this.#options = {
+          ...options,
+          oauth: options.auth.getOAuthConfig(),
+        };
+      }
+    } else {
+      this.#authenticate = options.authenticate;
+    }
   }
 
   /**
@@ -2243,6 +2447,30 @@ export class FastMCP<
     throw new UnexpectedStateError(`Resource not found: ${uri}`, { uri });
   }
   /**
+   * Returns the underlying Hono app instance for direct access to Hono's native API.
+   * This allows you to add custom routes, middleware, and handlers using Hono's standard methods.
+   *
+   * @returns The Hono app instance
+   *
+   * @example
+   * ```typescript
+   * const app = server.getApp();
+   *
+   * // Add routes using native Hono API
+   * app.get('/api/users', async (c) => {
+   *   return c.json({ users: [] });
+   * });
+   *
+   * app.post('/api/users/:id', async (c) => {
+   *   const id = c.req.param('id');
+   *   return c.json({ id });
+   * });
+   * ```
+   */
+  public getApp(): Hono {
+    return this.#honoApp;
+  }
+  /**
    * Removes a prompt from the server.
    */
   public removePrompt(name: string) {
@@ -2262,6 +2490,7 @@ export class FastMCP<
       this.#promptsListChanged(this.#prompts);
     }
   }
+
   /**
    * Removes a resource from the server.
    */
@@ -2271,7 +2500,6 @@ export class FastMCP<
       this.#resourcesListChanged(this.#resources);
     }
   }
-
   /**
    * Removes resources from the server.
    */
@@ -2307,6 +2535,7 @@ export class FastMCP<
       this.#resourceTemplatesListChanged(this.#resourcesTemplates);
     }
   }
+
   /**
    * Removes a tool from the server.
    */
@@ -2341,6 +2570,9 @@ export class FastMCP<
         eventStore?: EventStore;
         host?: string;
         port: number;
+        sslCa?: string;
+        sslCert?: string;
+        sslKey?: string;
         stateless?: boolean;
       };
       transportType: "httpStream" | "stdio";
@@ -2374,6 +2606,7 @@ export class FastMCP<
         instructions: this.#options.instructions,
         logger: this.#logger,
         name: this.#options.name,
+        onToolCall: this.#options.onToolCall,
         ping: this.#options.ping,
         prompts: this.#prompts,
         resources: this.#resources,
@@ -2416,11 +2649,13 @@ export class FastMCP<
       this.#serverState = ServerState.Running;
     } else if (config.transportType === "httpStream") {
       const httpConfig = config.httpStream;
+      const protocol =
+        httpConfig.sslCert || httpConfig.sslKey ? "https" : "http";
 
       if (httpConfig.stateless) {
         // Stateless mode - create new server instance for each request
         this.#logger.info(
-          `[FastMCP info] Starting server in stateless mode on HTTP Stream at http://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
+          `[FastMCP info] Starting server in stateless mode on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
         );
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
@@ -2480,6 +2715,9 @@ export class FastMCP<
             );
           },
           port: httpConfig.port,
+          sslCa: httpConfig.sslCa,
+          sslCert: httpConfig.sslCert,
+          sslKey: httpConfig.sslKey,
           stateless: true,
           streamEndpoint: httpConfig.endpoint,
         });
@@ -2543,12 +2781,15 @@ export class FastMCP<
             );
           },
           port: httpConfig.port,
+          sslCa: httpConfig.sslCa,
+          sslCert: httpConfig.sslCert,
+          sslKey: httpConfig.sslKey,
           stateless: httpConfig.stateless,
           streamEndpoint: httpConfig.endpoint,
         });
 
         this.#logger.info(
-          `[FastMCP info] server is running on HTTP Stream at http://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
+          `[FastMCP info] server is running on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
         );
       }
       this.#serverState = ServerState.Running;
@@ -2597,6 +2838,7 @@ export class FastMCP<
       instructions: this.#options.instructions,
       logger: this.#logger,
       name: this.#options.name,
+      onToolCall: this.#options.onToolCall,
       ping: this.#options.ping,
       prompts: this.#prompts,
       resources: this.#resources,
@@ -2611,7 +2853,7 @@ export class FastMCP<
   }
 
   /**
-   * Handles unhandled HTTP requests with health, readiness, and OAuth endpoints
+   * Handles unhandled HTTP requests with health, readiness, OAuth endpoints, and custom routes
    */
   #handleUnhandledRequest = async (
     req: http.IncomingMessage,
@@ -2620,6 +2862,49 @@ export class FastMCP<
     host: string,
     streamEndpoint?: string,
   ) => {
+    const url = new URL(req.url || "", `http://${host}`);
+
+    // Try Hono routes first - users may have added routes via getApp()
+    try {
+      // Convert Node.js IncomingMessage to Web Request
+      const webRequest = this.#nodeRequestToWebRequest(req, url);
+
+      // Call Hono's fetch handler
+      const honoResponse = await this.#honoApp.fetch(webRequest, {
+        incoming: req,
+        outgoing: res,
+      });
+
+      // If Hono handled it (not 404), write response and return
+      if (honoResponse.status !== 404) {
+        // Write Hono response to Node.js response
+        if (!res.headersSent) {
+          res.statusCode = honoResponse.status;
+          honoResponse.headers.forEach((value, key) => {
+            res.setHeader(key, value);
+          });
+
+          if (honoResponse.body) {
+            const reader = honoResponse.body.getReader();
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                res.write(value);
+              }
+            } finally {
+              reader.releaseLock();
+            }
+          }
+          res.end();
+        }
+        return;
+      }
+    } catch (error) {
+      // If Hono throws, log and continue to other endpoints
+      this.#logger.debug("[FastMCP debug] Hono route not matched", error);
+    }
+
     const healthConfig = this.#options.health ?? {};
 
     const enabled =
@@ -2948,13 +3233,57 @@ export class FastMCP<
     res.writeHead(404).end();
   };
 
+  /**
+   * Converts Node.js IncomingMessage to Web Request for Hono
+   */
+  #nodeRequestToWebRequest(req: http.IncomingMessage, url: URL): Request {
+    const method = req.method || "GET";
+
+    // Build headers
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value) {
+        if (Array.isArray(value)) {
+          for (const v of value) {
+            headers.append(key, v);
+          }
+        } else {
+          headers.set(key, value);
+        }
+      }
+    }
+
+    // Create Web Request
+    // For methods that can have a body, we need to pass the body
+    const hasBody = method !== "GET" && method !== "HEAD";
+
+    if (hasBody) {
+      return new Request(url.toString(), {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        body: req as any, // Node.js IncomingMessage is readable stream
+        duplex: "half", // Required for streaming bodies
+        headers,
+        method,
+      } as RequestInit);
+    } else {
+      return new Request(url.toString(), {
+        headers,
+        method,
+      });
+    }
+  }
+
   #parseRuntimeConfig(
     overrides?: Partial<{
       httpStream: {
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
+        eventStore?: EventStore;
         host?: string;
         port: number;
+        sslCa?: string;
+        sslCert?: string;
+        sslKey?: string;
         stateless?: boolean;
       };
       transportType: "httpStream" | "stdio";
@@ -2967,6 +3296,9 @@ export class FastMCP<
           eventStore?: EventStore;
           host: string;
           port: number;
+          sslCa?: string;
+          sslCert?: string;
+          sslKey?: string;
           stateless?: boolean;
         };
         transportType: "httpStream";
@@ -3014,13 +3346,21 @@ export class FastMCP<
         statelessArg === "true" ||
         envStateless === "true" ||
         false;
+      const eventStore = overrides?.httpStream?.eventStore;
+      const sslCa = overrides?.httpStream?.sslCa;
+      const sslCert = overrides?.httpStream?.sslCert;
+      const sslKey = overrides?.httpStream?.sslKey;
 
       return {
         httpStream: {
           enableJsonResponse,
           endpoint: endpoint as `/${string}`,
+          eventStore,
           host,
           port,
+          sslCa,
+          sslCert,
+          sslKey,
           stateless,
         },
         transportType: "httpStream" as const,
@@ -3074,6 +3414,34 @@ export class FastMCP<
   }
 }
 
+// Re-export commonly used auth utilities for convenience
+// Users can also import from "fastmcp/auth" for the full auth module
+export {
+  // Auth providers
+  AuthProvider,
+  AzureProvider,
+  // Auth helpers for canAccess
+  getAuthSession,
+  GitHubProvider,
+  GoogleProvider,
+  OAuthProvider,
+  requireAll,
+  requireAny,
+  requireAuth,
+  requireRole,
+  requireScopes,
+} from "./auth/index.js";
+
+export type {
+  AuthProviderConfig,
+  AzureProviderConfig,
+  AzureSession,
+  GenericOAuthProviderConfig,
+  GitHubSession,
+  GoogleSession,
+  OAuthSession,
+} from "./auth/index.js";
+
 export { DiscoveryDocumentCache } from "./DiscoveryDocumentCache.js";
 
 export type {
@@ -3082,6 +3450,7 @@ export type {
   ContentResult,
   Context,
   FastMCPEvents,
+  FastMCPSessionAuth,
   FastMCPSessionEvents,
   ImageContent,
   InputPrompt,

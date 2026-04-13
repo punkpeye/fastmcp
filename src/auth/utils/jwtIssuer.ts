@@ -6,6 +6,11 @@
 import { createHmac, pbkdf2, randomBytes } from "crypto";
 import { promisify } from "util";
 
+import {
+  DEFAULT_ACCESS_TOKEN_TTL,
+  DEFAULT_REFRESH_TOKEN_TTL,
+} from "../types.js";
+
 const pbkdf2Async = promisify(pbkdf2);
 
 /**
@@ -80,8 +85,8 @@ export class JWTIssuer {
   constructor(config: JWTIssuerConfig) {
     this.issuer = config.issuer;
     this.audience = config.audience;
-    this.accessTokenTtl = config.accessTokenTtl || 3600; // 1 hour
-    this.refreshTokenTtl = config.refreshTokenTtl || 2592000; // 30 days
+    this.accessTokenTtl = config.accessTokenTtl || DEFAULT_ACCESS_TOKEN_TTL;
+    this.refreshTokenTtl = config.refreshTokenTtl || DEFAULT_REFRESH_TOKEN_TTL;
     this.signingKey = Buffer.from(config.signingKey);
   }
 
@@ -105,6 +110,7 @@ export class JWTIssuer {
     clientId: string,
     scope: string[],
     additionalClaims?: Record<string, unknown>,
+    expiresIn?: number,
   ): string {
     const now = Math.floor(Date.now() / 1000);
     const jti = this.generateJti();
@@ -112,7 +118,7 @@ export class JWTIssuer {
     const claims: JWTClaims = {
       aud: this.audience,
       client_id: clientId,
-      exp: now + this.accessTokenTtl,
+      exp: now + (expiresIn ?? this.accessTokenTtl),
       iat: now,
       iss: this.issuer,
       jti,
@@ -131,6 +137,7 @@ export class JWTIssuer {
     clientId: string,
     scope: string[],
     additionalClaims?: Record<string, unknown>,
+    expiresIn?: number,
   ): string {
     const now = Math.floor(Date.now() / 1000);
     const jti = this.generateJti();
@@ -138,7 +145,7 @@ export class JWTIssuer {
     const claims: JWTClaims = {
       aud: this.audience,
       client_id: clientId,
-      exp: now + this.refreshTokenTtl,
+      exp: now + (expiresIn ?? this.refreshTokenTtl),
       iat: now,
       iss: this.issuer,
       jti,

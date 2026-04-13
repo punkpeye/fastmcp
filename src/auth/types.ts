@@ -4,6 +4,15 @@
  */
 
 /**
+ * Default TTL values for token expiration (in seconds)
+ */
+export const DEFAULT_ACCESS_TOKEN_TTL = 3600; // 1 hour
+export const DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH = 31536000; // 1 year
+export const DEFAULT_REFRESH_TOKEN_TTL = 2592000; // 30 days
+export const DEFAULT_AUTHORIZATION_CODE_TTL = 300; // 5 minutes
+export const DEFAULT_TRANSACTION_TTL = 600; // 10 minutes
+
+/**
  * OAuth authorization request parameters
  */
 export interface AuthorizationParams {
@@ -189,6 +198,7 @@ export interface OAuthProviderConfig {
  * Configuration for the OAuth Proxy
  */
 export interface OAuthProxyConfig {
+<<<<<<< HEAD
   /**
    * Allow-list of redirect URI patterns accepted by Dynamic Client Registration.
    *
@@ -206,6 +216,11 @@ export interface OAuthProxyConfig {
    * URL and then steal victim codes via /oauth/authorize. Do not loosen this
    * default without understanding that threat model.
    */
+=======
+  /** Access token TTL in seconds (default: 3600) */
+  accessTokenTtl?: number;
+  /** Allowed redirect URI patterns for client registration */
+>>>>>>> 18a178bf360d4be40ba4cdb7d56444a90025bffe
   allowedRedirectUriPatterns?: string[];
   /** Authorization code TTL in seconds (default: 300) */
   authorizationCodeTtl?: number;
@@ -234,6 +249,8 @@ export interface OAuthProxyConfig {
   jwtSigningKey?: string;
   /** OAuth callback path (default: /oauth/callback) */
   redirectPath?: string;
+  /** Refresh token TTL in seconds (default: 2592000) */
+  refreshTokenTtl?: number;
   /** Scopes to request from upstream provider */
   scopes?: string[];
   /** Custom token storage backend */
@@ -250,6 +267,10 @@ export interface OAuthProxyConfig {
   upstreamClientSecret: string;
   /** Upstream provider's token endpoint URL */
   upstreamTokenEndpoint: string;
+  /** Upstream token endpoint authentication method (default: "client_secret_basic") */
+  upstreamTokenEndpointAuthMethod?:
+    | "client_secret_basic"
+    | "client_secret_post";
 }
 
 /**
@@ -404,6 +425,8 @@ export interface UpstreamTokenSet {
   idToken?: string;
   /** Token issuance timestamp */
   issuedAt: Date;
+  /** Refresh token expiration in seconds (if provided by upstream) */
+  refreshExpiresIn?: number;
   /** Refresh token (if provided) */
   refreshToken?: string;
   /** Granted scopes */

@@ -22,6 +22,13 @@ import type {
   UpstreamTokenSet,
 } from "./types.js";
 
+import {
+  DEFAULT_ACCESS_TOKEN_TTL,
+  DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH,
+  DEFAULT_AUTHORIZATION_CODE_TTL,
+  DEFAULT_REFRESH_TOKEN_TTL,
+  DEFAULT_TRANSACTION_TTL,
+} from "./types.js";
 import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
 import { JWTIssuer } from "./utils/jwtIssuer.js";
@@ -48,16 +55,22 @@ export class OAuthProxy {
 
   constructor(config: OAuthProxyConfig) {
     this.config = {
+<<<<<<< HEAD
       // Empty by default. Framework users must explicitly configure the URIs they
       // trust, per RFC 6819 §4.1.5. The previous default (`["https://*", "http://localhost:*"]`)
       // allowed open DCR registration of any https URL, enabling CWE-601 open-redirect
       // attacks against /oauth/authorize.
       allowedRedirectUriPatterns: [],
       authorizationCodeTtl: 300, // 5 minutes
+=======
+      allowedRedirectUriPatterns: ["https://*", "http://localhost:*"],
+      authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
+>>>>>>> 18a178bf360d4be40ba4cdb7d56444a90025bffe
       consentRequired: true,
       enableTokenSwap: true, // Enabled by default for security
       redirectPath: "/oauth/callback",
-      transactionTtl: 600, // 10 minutes
+      transactionTtl: DEFAULT_TRANSACTION_TTL,
+      upstreamTokenEndpointAuthMethod: "client_secret_basic",
       ...config,
     };
 
@@ -290,42 +303,13 @@ export class OAuthProxy {
       );
     }
 
-    // Exchange refresh token with upstream provider
-    const tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
-      body: new URLSearchParams({
-        client_id: this.config.upstreamClientId,
-        client_secret: this.config.upstreamClientSecret,
-        grant_type: "refresh_token",
-        refresh_token: request.refresh_token,
-        ...(request.scope && { scope: request.scope }),
-      }),
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      method: "POST",
-    });
-
-    if (!tokenResponse.ok) {
-      const error = (await tokenResponse.json()) as {
-        error?: string;
-        error_description?: string;
-      };
-      throw new OAuthProxyError(
-        error.error || "invalid_grant",
-        error.error_description,
-      );
+    // Check for swap mode
+    if (this.config.enableTokenSwap && this.jwtIssuer) {
+      return await this.handleSwapModeRefresh(request);
     }
 
-    const tokens = await this.parseTokenResponse(tokenResponse);
-
-    return {
-      access_token: tokens.access_token,
-      expires_in: tokens.expires_in || 3600,
-      id_token: tokens.id_token,
-      refresh_token: tokens.refresh_token,
-      scope: tokens.scope,
-      token_type: tokens.token_type || "Bearer",
-    };
+    // Passthrough mode: forward refresh token directly to upstream
+    return await this.handlePassthroughRefresh(request);
   }
 
   /**
@@ -603,6 +587,21 @@ export class OAuthProxy {
   }
 
   /**
+   * Calculate access token TTL from upstream tokens
+   */
+  private calculateAccessTokenTtl(upstreamTokens: UpstreamTokenSet): number {
+    if (upstreamTokens.expiresIn > 0) {
+      return upstreamTokens.expiresIn;
+    } else if (this.config.accessTokenTtl) {
+      return this.config.accessTokenTtl;
+    } else if (upstreamTokens.refreshToken) {
+      return DEFAULT_ACCESS_TOKEN_TTL;
+    } else {
+      return DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH;
+    }
+  }
+
+  /**
    * Clean up expired transactions and codes
    */
   private cleanup(): void {
@@ -663,30 +662,51 @@ export class OAuthProxy {
     code: string,
     transaction: OAuthTransaction,
   ): Promise<UpstreamTokenSet> {
+    const useBasicAuth =
+      this.config.upstreamTokenEndpointAuthMethod === "client_secret_basic";
+
+    const bodyParams: Record<string, string> = {
+      code,
+      code_verifier: transaction.proxyCodeVerifier,
+      grant_type: "authorization_code",
+      redirect_uri: `${this.config.baseUrl}${this.config.redirectPath}`,
+    };
+
+    // Include client credentials in body only for client_secret_post
+    if (!useBasicAuth) {
+      bodyParams.client_id = this.config.upstreamClientId;
+      bodyParams.client_secret = this.config.upstreamClientSecret;
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/x-www-form-urlencoded",
+    };
+
+    // Add Basic Auth header for client_secret_basic
+    if (useBasicAuth) {
+      headers["Authorization"] = this.getBasicAuthHeader();
+    }
+
     const tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
-      body: new URLSearchParams({
-        client_id: this.config.upstreamClientId,
-        client_secret: this.config.upstreamClientSecret,
-        code,
-        code_verifier: transaction.proxyCodeVerifier,
-        grant_type: "authorization_code",
-        redirect_uri: `${this.config.baseUrl}${this.config.redirectPath}`,
-      }),
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
+      body: new URLSearchParams(bodyParams),
+      headers,
       method: "POST",
     });
 
     if (!tokenResponse.ok) {
-      const error = (await tokenResponse.json()) as {
-        error?: string;
-        error_description?: string;
-      };
-      throw new OAuthProxyError(
-        error.error || "server_error",
-        error.error_description,
-      );
+      let errorCode = "server_error";
+      let errorDescription: string | undefined;
+      try {
+        const error = (await tokenResponse.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+        errorCode = error.error || "server_error";
+        errorDescription = error.error_description;
+      } catch {
+        errorDescription = `Upstream returned HTTP ${tokenResponse.status} ${tokenResponse.statusText}`;
+      }
+      throw new OAuthProxyError(errorCode, errorDescription);
     }
 
     const tokens = await this.parseTokenResponse(tokenResponse);
@@ -696,6 +716,7 @@ export class OAuthProxy {
       expiresIn: tokens.expires_in || 3600,
       idToken: tokens.id_token,
       issuedAt: new Date(),
+      refreshExpiresIn: tokens.refresh_expires_in,
       refreshToken: tokens.refresh_token,
       scope: tokens.scope ? tokens.scope.split(" ") : transaction.scope,
       tokenType: tokens.token_type || "Bearer",
@@ -801,11 +822,174 @@ export class OAuthProxy {
   }
 
   /**
+   * Generate Basic auth header value for upstream token endpoint
+   * Per RFC 6749 Section 2.3.1, credentials must be URL-encoded before base64 encoding
+   */
+  private getBasicAuthHeader(): string {
+    const encodedClientId = encodeURIComponent(this.config.upstreamClientId);
+    const encodedClientSecret = encodeURIComponent(
+      this.config.upstreamClientSecret,
+    );
+    return `Basic ${Buffer.from(`${encodedClientId}:${encodedClientSecret}`).toString("base64")}`;
+  }
+
+  /**
    * Get provider name for display
    */
   private getProviderName(): string {
     const url = new URL(this.config.upstreamAuthorizationEndpoint);
     return url.hostname;
+  }
+
+  /**
+   * Handle passthrough mode refresh - forward refresh token directly to upstream
+   */
+  private async handlePassthroughRefresh(
+    request: RefreshRequest,
+  ): Promise<TokenResponse> {
+    const useBasicAuth =
+      this.config.upstreamTokenEndpointAuthMethod === "client_secret_basic";
+
+    const bodyParams: Record<string, string> = {
+      grant_type: "refresh_token",
+      refresh_token: request.refresh_token,
+      ...(request.scope && { scope: request.scope }),
+    };
+
+    // Include client credentials in body only for client_secret_post
+    if (!useBasicAuth) {
+      bodyParams.client_id = this.config.upstreamClientId;
+      bodyParams.client_secret = this.config.upstreamClientSecret;
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/x-www-form-urlencoded",
+    };
+
+    // Add Basic Auth header for client_secret_basic
+    if (useBasicAuth) {
+      headers["Authorization"] = this.getBasicAuthHeader();
+    }
+
+    // Exchange refresh token with upstream provider
+    const tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
+      body: new URLSearchParams(bodyParams),
+      headers,
+      method: "POST",
+    });
+
+    if (!tokenResponse.ok) {
+      let errorCode = "invalid_grant";
+      let errorDescription: string | undefined;
+      try {
+        const error = (await tokenResponse.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+        errorCode = error.error || "invalid_grant";
+        errorDescription = error.error_description;
+      } catch {
+        errorDescription = `Upstream returned HTTP ${tokenResponse.status} ${tokenResponse.statusText}`;
+      }
+      throw new OAuthProxyError(errorCode, errorDescription);
+    }
+
+    const tokens = await this.parseTokenResponse(tokenResponse);
+
+    return {
+      access_token: tokens.access_token,
+      expires_in: tokens.expires_in || 3600,
+      id_token: tokens.id_token,
+      refresh_token: tokens.refresh_token,
+      scope: tokens.scope,
+      token_type: tokens.token_type || "Bearer",
+    };
+  }
+
+  /**
+   * Handle swap mode refresh - verify FastMCP JWT and issue new tokens
+   */
+  private async handleSwapModeRefresh(
+    request: RefreshRequest,
+  ): Promise<TokenResponse> {
+    if (!this.jwtIssuer) {
+      throw new Error("JWT issuer not initialized");
+    }
+
+    const verifyResult = await this.jwtIssuer.verify(request.refresh_token);
+    if (!verifyResult.valid) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "Invalid or expired refresh token",
+      );
+    }
+
+    const jti = verifyResult.claims?.jti;
+    if (!jti) {
+      throw new OAuthProxyError("invalid_grant", "Refresh token missing JTI");
+    }
+
+    const mapping = (await this.tokenStorage.get(`mapping:${jti}`)) as {
+      clientId: string;
+      scope: string[];
+      upstreamTokenKey: string;
+    } | null;
+
+    if (!mapping) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "Refresh token already used or expired",
+      );
+    }
+
+    const upstreamTokens = (await this.tokenStorage.get(
+      `upstream:${mapping.upstreamTokenKey}`,
+    )) as null | UpstreamTokenSet;
+
+    if (!upstreamTokens) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "Upstream tokens not found or expired",
+      );
+    }
+
+    if (!upstreamTokens.refreshToken) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "No upstream refresh token available",
+      );
+    }
+
+    const refreshedUpstreamTokens = await this.refreshUpstreamTokens(
+      upstreamTokens.refreshToken,
+      request.scope,
+    );
+
+    if (refreshedUpstreamTokens.scope.length === 0) {
+      refreshedUpstreamTokens.scope = upstreamTokens.scope;
+    }
+
+    const refreshTokenTtl =
+      refreshedUpstreamTokens.refreshExpiresIn ??
+      this.config.refreshTokenTtl ??
+      DEFAULT_REFRESH_TOKEN_TTL;
+    const accessTokenTtl = this.calculateAccessTokenTtl(
+      refreshedUpstreamTokens,
+    );
+    const upstreamStorageTtl = Math.max(accessTokenTtl, refreshTokenTtl, 1);
+
+    await this.tokenStorage.save(
+      `upstream:${mapping.upstreamTokenKey}`,
+      refreshedUpstreamTokens,
+      upstreamStorageTtl,
+    );
+
+    return await this.issueSwappedTokensForRefresh(
+      mapping.clientId,
+      refreshedUpstreamTokens,
+      mapping.upstreamTokenKey,
+      jti,
+    );
   }
 
   /**
@@ -823,12 +1007,33 @@ export class OAuthProxy {
     // Extract custom claims from upstream tokens
     const customClaims = await this.extractUpstreamClaims(upstreamTokens);
 
-    // Store upstream tokens
+    // Determine access token TTL (hierarchical: upstream → config → default)
+    let accessTokenTtl: number;
+    if (upstreamTokens.expiresIn > 0) {
+      accessTokenTtl = upstreamTokens.expiresIn;
+    } else if (this.config.accessTokenTtl) {
+      accessTokenTtl = this.config.accessTokenTtl;
+    } else if (upstreamTokens.refreshToken) {
+      accessTokenTtl = DEFAULT_ACCESS_TOKEN_TTL;
+    } else {
+      accessTokenTtl = DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH;
+    }
+
+    // Determine refresh token TTL early (needed for upstream storage TTL)
+    // Use upstream's refresh_expires_in if provided, otherwise fall back to config/default
+    const refreshTokenTtl = upstreamTokens.refreshToken
+      ? (upstreamTokens.refreshExpiresIn ??
+        this.config.refreshTokenTtl ??
+        DEFAULT_REFRESH_TOKEN_TTL)
+      : 0;
+
+    // Store upstream tokens with longest-lived token TTL (min 1s for safety)
+    const upstreamStorageTtl = Math.max(accessTokenTtl, refreshTokenTtl, 1);
     const upstreamTokenKey = this.generateId();
     await this.tokenStorage.save(
       `upstream:${upstreamTokenKey}`,
       upstreamTokens,
-      upstreamTokens.expiresIn,
+      upstreamStorageTtl,
     );
 
     // Issue FastMCP access token with custom claims
@@ -836,6 +1041,7 @@ export class OAuthProxy {
       clientId,
       upstreamTokens.scope,
       customClaims || undefined,
+      accessTokenTtl,
     );
 
     // Decode JWT to get JTI
@@ -847,17 +1053,17 @@ export class OAuthProxy {
       {
         clientId,
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + upstreamTokens.expiresIn * 1000),
+        expiresAt: new Date(Date.now() + accessTokenTtl * 1000),
         jti: accessJti,
         scope: upstreamTokens.scope,
         upstreamTokenKey,
       },
-      upstreamTokens.expiresIn,
+      accessTokenTtl,
     );
 
     const response: TokenResponse = {
       access_token: accessToken,
-      expires_in: 3600, // FastMCP JWT expiration (1 hour)
+      expires_in: accessTokenTtl,
       scope: upstreamTokens.scope.join(" "),
       token_type: "Bearer",
     };
@@ -868,6 +1074,7 @@ export class OAuthProxy {
         clientId,
         upstreamTokens.scope,
         customClaims || undefined,
+        refreshTokenTtl,
       );
       const refreshJti = await this.extractJti(refreshToken);
 
@@ -877,12 +1084,92 @@ export class OAuthProxy {
         {
           clientId,
           createdAt: new Date(),
-          expiresAt: new Date(Date.now() + 2592000 * 1000), // 30 days
+          expiresAt: new Date(Date.now() + refreshTokenTtl * 1000),
           jti: refreshJti,
           scope: upstreamTokens.scope,
           upstreamTokenKey,
         },
-        2592000, // 30 days
+        refreshTokenTtl,
+      );
+
+      response.refresh_token = refreshToken;
+    }
+
+    return response;
+  }
+
+  /**
+   * Issue swapped tokens for refresh flow
+   */
+  private async issueSwappedTokensForRefresh(
+    clientId: string,
+    upstreamTokens: UpstreamTokenSet,
+    upstreamTokenKey: string,
+    oldJti: string,
+  ): Promise<TokenResponse> {
+    if (!this.jwtIssuer) {
+      throw new Error("JWT issuer not initialized");
+    }
+
+    await this.tokenStorage.delete(`mapping:${oldJti}`);
+
+    const customClaims = await this.extractUpstreamClaims(upstreamTokens);
+
+    const accessTokenTtl = this.calculateAccessTokenTtl(upstreamTokens);
+    const refreshTokenTtl = upstreamTokens.refreshToken
+      ? (upstreamTokens.refreshExpiresIn ??
+        this.config.refreshTokenTtl ??
+        DEFAULT_REFRESH_TOKEN_TTL)
+      : 0;
+
+    const accessToken = this.jwtIssuer.issueAccessToken(
+      clientId,
+      upstreamTokens.scope,
+      customClaims || undefined,
+      accessTokenTtl,
+    );
+
+    const accessJti = await this.extractJti(accessToken);
+    await this.tokenStorage.save(
+      `mapping:${accessJti}`,
+      {
+        clientId,
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + accessTokenTtl * 1000),
+        jti: accessJti,
+        scope: upstreamTokens.scope,
+        upstreamTokenKey,
+      },
+      accessTokenTtl,
+    );
+
+    const response: TokenResponse = {
+      access_token: accessToken,
+      expires_in: accessTokenTtl,
+      scope: upstreamTokens.scope.join(" "),
+      token_type: "Bearer",
+    };
+
+    if (upstreamTokens.refreshToken) {
+      const refreshToken = this.jwtIssuer.issueRefreshToken(
+        clientId,
+        upstreamTokens.scope,
+        customClaims || undefined,
+        refreshTokenTtl,
+      );
+      const refreshJti = await this.extractJti(refreshToken);
+
+      await this.tokenStorage.save(
+        `mapping:${refreshJti}`,
+        {
+          clientId,
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + refreshTokenTtl * 1000),
+          jti: refreshJti,
+          scope: upstreamTokens.scope,
+          upstreamTokenKey,
+        },
+        refreshTokenTtl,
       );
 
       response.refresh_token = refreshToken;
@@ -909,6 +1196,7 @@ export class OAuthProxy {
     access_token: string;
     expires_in?: number;
     id_token?: string;
+    refresh_expires_in?: number;
     refresh_token?: string;
     scope?: string;
     token_type?: string;
@@ -920,8 +1208,9 @@ export class OAuthProxy {
     // Define Zod schema for token response validation
     const tokenResponseSchema = z.object({
       access_token: z.string().min(1, "access_token cannot be empty"),
-      expires_in: z.number().int().positive().optional(),
+      expires_in: z.coerce.number().int().positive().optional(),
       id_token: z.string().optional(),
+      refresh_expires_in: z.coerce.number().int().positive().optional(),
       refresh_token: z.string().optional(),
       scope: z.string().optional(),
       token_type: z.string().optional(),
@@ -938,6 +1227,9 @@ export class OAuthProxy {
           ? parseInt(params.get("expires_in")!)
           : undefined,
         id_token: params.get("id_token") || undefined,
+        refresh_expires_in: params.get("refresh_expires_in")
+          ? parseInt(params.get("refresh_expires_in")!)
+          : undefined,
         refresh_token: params.get("refresh_token") || undefined,
         scope: params.get("scope") || undefined,
         token_type: params.get("token_type") || undefined,
@@ -984,6 +1276,76 @@ export class OAuthProxy {
       },
       status: 302,
     });
+  }
+
+  /**
+   * Refresh upstream tokens with provider
+   */
+  private async refreshUpstreamTokens(
+    upstreamRefreshToken: string,
+    requestedScope?: string,
+  ): Promise<UpstreamTokenSet> {
+    const useBasicAuth =
+      this.config.upstreamTokenEndpointAuthMethod === "client_secret_basic";
+
+    const bodyParams: Record<string, string> = {
+      grant_type: "refresh_token",
+      refresh_token: upstreamRefreshToken,
+      ...(requestedScope && { scope: requestedScope }),
+    };
+
+    // Include client credentials in body only for client_secret_post
+    if (!useBasicAuth) {
+      bodyParams.client_id = this.config.upstreamClientId;
+      bodyParams.client_secret = this.config.upstreamClientSecret;
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/x-www-form-urlencoded",
+    };
+
+    // Add Basic Auth header for client_secret_basic
+    if (useBasicAuth) {
+      headers["Authorization"] = this.getBasicAuthHeader();
+    }
+
+    // Exchange refresh token with upstream provider
+    const tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
+      body: new URLSearchParams(bodyParams),
+      headers,
+      method: "POST",
+    });
+
+    if (!tokenResponse.ok) {
+      let errorCode = "invalid_grant";
+      let errorDescription: string | undefined = "Upstream refresh failed";
+      try {
+        const error = (await tokenResponse.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+        errorCode = error.error || "invalid_grant";
+        errorDescription = error.error_description || "Upstream refresh failed";
+      } catch {
+        errorDescription = `Upstream returned HTTP ${tokenResponse.status} ${tokenResponse.statusText}`;
+      }
+      throw new OAuthProxyError(errorCode, errorDescription);
+    }
+
+    const tokens = await this.parseTokenResponse(tokenResponse);
+
+    // Handle token rotation: if upstream doesn't return new refresh token,
+    // preserve the original one
+    return {
+      accessToken: tokens.access_token,
+      expiresIn: tokens.expires_in || 3600,
+      idToken: tokens.id_token,
+      issuedAt: new Date(),
+      refreshExpiresIn: tokens.refresh_expires_in,
+      refreshToken: tokens.refresh_token || upstreamRefreshToken,
+      scope: tokens.scope ? tokens.scope.split(" ") : [],
+      tokenType: tokens.token_type || "Bearer",
+    };
   }
 
   /**

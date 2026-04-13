@@ -7,29 +7,21 @@
  * Run with: node dist/examples/oauth-integrated-server.js
  */
 
-import { GoogleProvider } from "../auth/index.js";
+import { getAuthSession, GoogleProvider, requireAuth } from "../auth/index.js";
 import { FastMCP } from "../FastMCP.js";
 
-// Create OAuth Proxy
-const authProxy = new GoogleProvider({
-  baseUrl: "http://localhost:4300",
-  clientId: process.env.GOOGLE_CLIENT_ID || "your-google-client-id",
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET || "your-google-client-secret",
-  consentRequired: true,
-  scopes: ["openid", "profile", "email"],
-});
-
-// Create FastMCP server with OAuth Proxy
-// Just pass the proxy - routes are automatically registered!
+// Create FastMCP server with OAuth Provider
+// Just pass the provider via `auth` - routes are automatically registered!
 const server = new FastMCP({
+  auth: new GoogleProvider({
+    baseUrl: "http://localhost:4300",
+    clientId: process.env.GOOGLE_CLIENT_ID || "your-google-client-id",
+    clientSecret:
+      process.env.GOOGLE_CLIENT_SECRET || "your-google-client-secret",
+    consentRequired: true,
+    scopes: ["openid", "profile", "email"],
+  }),
   name: "OAuth Integrated Server",
-  oauth: {
-    // Include authorization server metadata from the proxy
-    authorizationServer: authProxy.getAuthorizationServerMetadata(),
-    enabled: true,
-    // Pass the proxy instance - this enables automatic route registration
-    proxy: authProxy,
-  },
   version: "1.0.0",
 });
 
@@ -50,14 +42,14 @@ server.addTool({
 });
 
 server.addTool({
+  canAccess: requireAuth, // Only show this tool to authenticated users
   description: "Get user information (requires OAuth)",
-  execute: async (_args, { session }) => {
-    // In a real implementation, you would extract the access token
-    // from session headers and use it to call Google APIs
+  execute: async (_, { session }) => {
+    const { accessToken } = getAuthSession(session);
     return {
       content: [
         {
-          text: `Session ID: ${session?.id || "none"}\nThis tool would use the OAuth access token to fetch user data from Google.`,
+          text: `Authenticated! Token starts with: ${accessToken.slice(0, 8)}...`,
           type: "text" as const,
         },
       ],
@@ -112,5 +104,5 @@ Google OAuth App Setup:
 
 Python-Style Integration:
 This TypeScript server works exactly like Python FastMCP!
-No manual route setup - just pass the OAuth Proxy and go! 🎉
+Just use auth: new GoogleProvider({...}) and go! 🎉
 `);

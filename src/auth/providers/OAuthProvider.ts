@@ -1,40 +1,27 @@
 /**
- * Microsoft Azure/Entra ID OAuth Provider
- * Pre-configured OAuth provider for Microsoft Identity Platform
+ * Generic OAuth Provider
+ * For any OAuth 2.0 compliant authorization server
  */
 
 import { OAuthProxy } from "../OAuthProxy.js";
 import {
   AuthProvider,
-  type AuthProviderConfig,
+  type GenericOAuthProviderConfig,
   type OAuthSession,
 } from "./AuthProvider.js";
 
 /**
- * Azure-specific configuration
+ * Generic OAuth provider for any OAuth 2.0 compliant authorization server.
+ * Use when there's no built-in provider for your identity provider.
  */
-export interface AzureProviderConfig extends AuthProviderConfig {
-  /** Tenant ID or 'common', 'organizations', 'consumers' (default: 'common') */
-  tenantId?: string;
-}
+export class OAuthProvider<
+  TSession extends OAuthSession = OAuthSession,
+> extends AuthProvider<TSession> {
+  protected genericConfig: GenericOAuthProviderConfig;
 
-/**
- * Azure-specific session with additional user info
- */
-export interface AzureSession extends OAuthSession {
-  upn?: string;
-}
-
-/**
- * Microsoft Azure AD / Entra ID OAuth 2.0 Provider
- * Callback URL: {baseUrl}/oauth/callback
- */
-export class AzureProvider extends AuthProvider<AzureSession> {
-  private tenantId: string;
-
-  constructor(config: AzureProviderConfig) {
+  constructor(config: GenericOAuthProviderConfig) {
     super(config);
-    this.tenantId = config.tenantId ?? "common";
+    this.genericConfig = config;
   }
 
   protected createProxy(): OAuthProxy {
@@ -53,18 +40,20 @@ export class AzureProvider extends AuthProvider<AzureSession> {
       upstreamClientId: this.config.clientId,
       upstreamClientSecret: this.config.clientSecret,
       upstreamTokenEndpoint: this.getTokenEndpoint(),
+      upstreamTokenEndpointAuthMethod:
+        this.genericConfig.tokenEndpointAuthMethod ?? "client_secret_basic",
     });
   }
 
   protected getAuthorizationEndpoint(): string {
-    return `https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/authorize`;
+    return this.genericConfig.authorizationEndpoint;
   }
 
   protected getDefaultScopes(): string[] {
-    return ["openid", "profile", "email"];
+    return ["openid"];
   }
 
   protected getTokenEndpoint(): string {
-    return `https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/token`;
+    return this.genericConfig.tokenEndpoint;
   }
 }
