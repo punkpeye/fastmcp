@@ -379,6 +379,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
 
 describe("OAuthProxy - Upstream Token Endpoint Authentication", () => {
   const baseConfig = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
     baseUrl: "https://proxy.example.com",
     consentRequired: false,
     upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
@@ -529,6 +530,7 @@ describe("OAuthProxy - Upstream Token Endpoint Authentication", () => {
  */
 describe("OAuthProxy - Upstream Token Storage TTL", () => {
   const baseConfig = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
     baseUrl: "https://proxy.example.com",
     consentRequired: false,
     enableTokenSwap: true,
@@ -783,6 +785,7 @@ describe("OAuthProxy - Upstream Token Storage TTL", () => {
 
 describe("OAuthProxy - Swap Mode Refresh Token", () => {
   const baseConfig = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
     baseUrl: "https://proxy.example.com",
     consentRequired: false,
     enableTokenSwap: true,

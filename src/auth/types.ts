@@ -198,7 +198,8 @@ export interface OAuthProviderConfig {
  * Configuration for the OAuth Proxy
  */
 export interface OAuthProxyConfig {
-<<<<<<< HEAD
+  /** Access token TTL in seconds (default: 3600) */
+  accessTokenTtl?: number;
   /**
    * Allow-list of redirect URI patterns accepted by Dynamic Client Registration.
    *
@@ -216,11 +217,6 @@ export interface OAuthProxyConfig {
    * URL and then steal victim codes via /oauth/authorize. Do not loosen this
    * default without understanding that threat model.
    */
-=======
-  /** Access token TTL in seconds (default: 3600) */
-  accessTokenTtl?: number;
-  /** Allowed redirect URI patterns for client registration */
->>>>>>> 18a178bf360d4be40ba4cdb7d56444a90025bffe
   allowedRedirectUriPatterns?: string[];
   /** Authorization code TTL in seconds (default: 300) */
   authorizationCodeTtl?: number;

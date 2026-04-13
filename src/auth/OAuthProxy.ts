@@ -55,17 +55,12 @@ export class OAuthProxy {
 
   constructor(config: OAuthProxyConfig) {
     this.config = {
-<<<<<<< HEAD
       // Empty by default. Framework users must explicitly configure the URIs they
       // trust, per RFC 6819 §4.1.5. The previous default (`["https://*", "http://localhost:*"]`)
       // allowed open DCR registration of any https URL, enabling CWE-601 open-redirect
       // attacks against /oauth/authorize.
       allowedRedirectUriPatterns: [],
-      authorizationCodeTtl: 300, // 5 minutes
-=======
-      allowedRedirectUriPatterns: ["https://*", "http://localhost:*"],
       authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
->>>>>>> 18a178bf360d4be40ba4cdb7d56444a90025bffe
       consentRequired: true,
       enableTokenSwap: true, // Enabled by default for security
       redirectPath: "/oauth/callback",
