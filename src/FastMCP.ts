@@ -3036,28 +3036,31 @@ export class FastMCP<
       try {
         // DCR endpoint - POST /oauth/register
         if (req.method === "POST" && url.pathname === "/oauth/register") {
-          let body = "";
-          req.on("data", (chunk) => (body += chunk));
-          req.on("end", async () => {
-            try {
-              const request = JSON.parse(body);
-              const response = await oauthProxy.registerClient(request);
-              res
-                .writeHead(201, { "Content-Type": "application/json" })
-                .end(JSON.stringify(response));
-            } catch (error) {
-              const statusCode =
-                (error as { statusCode?: number }).statusCode || 400;
-              res
-                .writeHead(statusCode, { "Content-Type": "application/json" })
-                .end(
-                  JSON.stringify(
-                    (error as { toJSON?: () => unknown }).toJSON?.() || {
-                      error: "invalid_request",
-                    },
-                  ),
-                );
-            }
+          await new Promise<void>((resolve) => {
+            let body = "";
+            req.on("data", (chunk) => (body += chunk));
+            req.on("end", async () => {
+              try {
+                const request = JSON.parse(body);
+                const response = await oauthProxy.registerClient(request);
+                res
+                  .writeHead(201, { "Content-Type": "application/json" })
+                  .end(JSON.stringify(response));
+              } catch (error) {
+                const statusCode =
+                  (error as { statusCode?: number }).statusCode || 400;
+                res
+                  .writeHead(statusCode, { "Content-Type": "application/json" })
+                  .end(
+                    JSON.stringify(
+                      (error as { toJSON?: () => unknown }).toJSON?.() || {
+                        error: "invalid_request",
+                      },
+                    ),
+                  );
+              }
+              resolve();
+            });
           });
           return;
         }
@@ -3125,100 +3128,111 @@ export class FastMCP<
 
         // Consent endpoint - POST /oauth/consent
         if (req.method === "POST" && url.pathname === "/oauth/consent") {
-          let body = "";
-          req.on("data", (chunk) => (body += chunk));
-          req.on("end", async () => {
-            try {
-              const mockRequest = new Request(`http://${host}/oauth/consent`, {
-                body,
-                headers: {
-                  "Content-Type": "application/x-www-form-urlencoded",
-                },
-                method: "POST",
-              });
-              const response = await oauthProxy.handleConsent(mockRequest);
-
-              const location = response.headers.get("Location");
-              if (location) {
-                res.writeHead(response.status, { Location: location }).end();
-              } else {
-                const text = await response.text();
-                res.writeHead(response.status).end(text);
-              }
-            } catch (error) {
-              res.writeHead(400, { "Content-Type": "application/json" }).end(
-                JSON.stringify(
-                  (error as { toJSON?: () => unknown }).toJSON?.() || {
-                    error: "server_error",
+          await new Promise<void>((resolve) => {
+            let body = "";
+            req.on("data", (chunk) => (body += chunk));
+            req.on("end", async () => {
+              try {
+                const mockRequest = new Request(
+                  `http://${host}/oauth/consent`,
+                  {
+                    body,
+                    headers: {
+                      "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                    method: "POST",
                   },
-                ),
-              );
-            }
+                );
+                const response = await oauthProxy.handleConsent(mockRequest);
+
+                const location = response.headers.get("Location");
+                if (location) {
+                  res.writeHead(response.status, { Location: location }).end();
+                } else {
+                  const text = await response.text();
+                  res.writeHead(response.status).end(text);
+                }
+              } catch (error) {
+                res.writeHead(400, { "Content-Type": "application/json" }).end(
+                  JSON.stringify(
+                    (error as { toJSON?: () => unknown }).toJSON?.() || {
+                      error: "server_error",
+                    },
+                  ),
+                );
+              }
+              resolve();
+            });
           });
           return;
         }
 
         // Token endpoint - POST /oauth/token
         if (req.method === "POST" && url.pathname === "/oauth/token") {
-          let body = "";
-          req.on("data", (chunk) => (body += chunk));
-          req.on("end", async () => {
-            try {
-              const params = new URLSearchParams(body);
-              const grantType = params.get("grant_type");
+          await new Promise<void>((resolve) => {
+            let body = "";
+            req.on("data", (chunk) => (body += chunk));
+            req.on("end", async () => {
+              try {
+                const params = new URLSearchParams(body);
+                const grantType = params.get("grant_type");
 
-              // Parse Basic auth header (RFC 6749 Section 2.3.1)
-              const basicAuth = parseBasicAuthHeader(req.headers.authorization);
-
-              // Use Basic auth credentials if present, otherwise fall back to POST body
-              const clientId =
-                basicAuth?.clientId || params.get("client_id") || "";
-              const clientSecret =
-                basicAuth?.clientSecret ??
-                params.get("client_secret") ??
-                undefined;
-
-              let response;
-              if (grantType === "authorization_code") {
-                response = await oauthProxy.exchangeAuthorizationCode({
-                  client_id: clientId,
-                  client_secret: clientSecret,
-                  code: params.get("code") || "",
-                  code_verifier: params.get("code_verifier") || undefined,
-                  grant_type: "authorization_code",
-                  redirect_uri: params.get("redirect_uri") || "",
-                });
-              } else if (grantType === "refresh_token") {
-                response = await oauthProxy.exchangeRefreshToken({
-                  client_id: clientId,
-                  client_secret: clientSecret,
-                  grant_type: "refresh_token",
-                  refresh_token: params.get("refresh_token") || "",
-                  scope: params.get("scope") || undefined,
-                });
-              } else {
-                throw {
-                  statusCode: 400,
-                  toJSON: () => ({ error: "unsupported_grant_type" }),
-                };
-              }
-
-              res
-                .writeHead(200, { "Content-Type": "application/json" })
-                .end(JSON.stringify(response));
-            } catch (error) {
-              const statusCode =
-                (error as { statusCode?: number }).statusCode || 400;
-              res
-                .writeHead(statusCode, { "Content-Type": "application/json" })
-                .end(
-                  JSON.stringify(
-                    (error as { toJSON?: () => unknown }).toJSON?.() || {
-                      error: "invalid_request",
-                    },
-                  ),
+                // Parse Basic auth header (RFC 6749 Section 2.3.1)
+                const basicAuth = parseBasicAuthHeader(
+                  req.headers.authorization,
                 );
-            }
+
+                // Use Basic auth credentials if present, otherwise fall back to POST body
+                const clientId =
+                  basicAuth?.clientId || params.get("client_id") || "";
+                const clientSecret =
+                  basicAuth?.clientSecret ??
+                  params.get("client_secret") ??
+                  undefined;
+
+                let response;
+                if (grantType === "authorization_code") {
+                  response = await oauthProxy.exchangeAuthorizationCode({
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                    code: params.get("code") || "",
+                    code_verifier: params.get("code_verifier") || undefined,
+                    grant_type: "authorization_code",
+                    redirect_uri: params.get("redirect_uri") || "",
+                  });
+                } else if (grantType === "refresh_token") {
+                  response = await oauthProxy.exchangeRefreshToken({
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                    grant_type: "refresh_token",
+                    refresh_token: params.get("refresh_token") || "",
+                    scope: params.get("scope") || undefined,
+                  });
+                } else {
+                  throw {
+                    statusCode: 400,
+                    toJSON: () => ({ error: "unsupported_grant_type" }),
+                  };
+                }
+
+                res
+                  .writeHead(200, { "Content-Type": "application/json" })
+                  .end(JSON.stringify(response));
+              } catch (error) {
+                const statusCode =
+                  (error as { statusCode?: number }).statusCode || 400;
+                res
+                  .writeHead(statusCode, { "Content-Type": "application/json" })
+                  .end(
+                    JSON.stringify(
+                      (error as { toJSON?: () => unknown }).toJSON?.() || {
+                        error: "invalid_request",
+                      },
+                    ),
+                  );
+              }
+              resolve();
+            });
           });
           return;
         }
@@ -3229,8 +3243,6 @@ export class FastMCP<
       }
     }
 
-    // If the request was not handled above, return 404
-    res.writeHead(404).end();
   };
 
   /**
