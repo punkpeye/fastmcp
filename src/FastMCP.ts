@@ -3242,7 +3242,6 @@ export class FastMCP<
         return;
       }
     }
-
   };
 
   /**
