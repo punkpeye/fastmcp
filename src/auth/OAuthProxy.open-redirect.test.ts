@@ -86,10 +86,12 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
 
   describe("authorize() rejects unregistered redirect_uri", () => {
     it("rejects an arbitrary attacker host even when client_id is valid", async () => {
-      await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
 
       await expect(
-        proxy.authorize(buildAuthParams({ redirect_uri: EVIL_REDIRECT })),
+        proxy.authorize(
+          buildAuthParams({ client_id: dcr.client_id, redirect_uri: EVIL_REDIRECT }),
+        ),
       ).rejects.toMatchObject({
         code: "invalid_request",
         description: expect.stringContaining("redirect_uri"),
@@ -97,28 +99,30 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
     });
 
     it("rejects redirect_uri before any client has been registered", async () => {
-      // No DCR call at all — registeredClients is empty.
+      // No DCR call at all — registeredClientsByClientId is empty, so we get
+      // invalid_client (unknown client_id) rather than invalid_request.
       await expect(
         proxy.authorize(buildAuthParams({ redirect_uri: LEGIT_REDIRECT })),
-      ).rejects.toMatchObject({ code: "invalid_request" });
+      ).rejects.toMatchObject({ code: "invalid_client" });
     });
 
     it("rejects a URI that only differs by trailing slash (exact match required)", async () => {
-      await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
 
       await expect(
         proxy.authorize(
-          buildAuthParams({ redirect_uri: LEGIT_REDIRECT + "/" }),
+          buildAuthParams({ client_id: dcr.client_id, redirect_uri: LEGIT_REDIRECT + "/" }),
         ),
       ).rejects.toMatchObject({ code: "invalid_request" });
     });
 
     it("rejects a URI whose host only differs in casing (strict string compare)", async () => {
-      await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
 
       await expect(
         proxy.authorize(
           buildAuthParams({
+            client_id: dcr.client_id,
             redirect_uri: "https://CLIENT.example.com/callback",
           }),
         ),
@@ -127,7 +131,7 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
   });
 
   describe("authorize() rejects unknown client_id", () => {
-    it("rejects any client_id that is not the proxy's upstream identity", async () => {
+    it("rejects any client_id that was not issued by this proxy", async () => {
       await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
 
       await expect(
@@ -164,34 +168,44 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
       expect(transactionsField.size).toBe(0);
     });
 
-    it("an attacker cannot bypass the check by calling DCR first (empty patterns default)", async () => {
-      // Simulate a deployment that omitted allowedRedirectUriPatterns entirely.
-      // Under the new default ([]), DCR must reject every URI — so there is
-      // no way for an attacker to self-register evil.attacker.com.
-      const strictProxy = new OAuthProxy({
+    it("an attacker cannot self-register a non-localhost URI with the default config", async () => {
+      // When allowedRedirectUriPatterns is omitted (undefined), the proxy
+      // defaults to localhost-only.  An attacker who controls evil.attacker.com
+      // or a non-localhost https URI cannot self-register through DCR.
+      const defaultProxy = new OAuthProxy({
         ...baseConfig,
         allowedRedirectUriPatterns: undefined,
       });
 
       await expect(
-        strictProxy.registerClient({ redirect_uris: [EVIL_REDIRECT] }),
+        defaultProxy.registerClient({ redirect_uris: [EVIL_REDIRECT] }),
       ).rejects.toMatchObject({ code: "invalid_redirect_uri" });
 
+      // Non-localhost https URI is also rejected under the default.
       await expect(
-        strictProxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] }),
+        defaultProxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] }),
       ).rejects.toMatchObject({ code: "invalid_redirect_uri" });
 
-      strictProxy.destroy();
+      // A localhost URI IS accepted (needed for MCP clients with dynamic ports).
+      await expect(
+        defaultProxy.registerClient({
+          redirect_uris: ["http://localhost:54321/callback"],
+        }),
+      ).resolves.toBeDefined();
+
+      defaultProxy.destroy();
     });
   });
 
   describe("handleCallback() defense-in-depth", () => {
     it("refuses to 302 if the stored clientCallbackUrl is no longer registered", async () => {
-      await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
       mockUpstreamTokenEndpoint();
 
       // Start a legitimate transaction.
-      const authResp = await proxy.authorize(buildAuthParams());
+      const authResp = await proxy.authorize(
+        buildAuthParams({ client_id: dcr.client_id }),
+      );
       expect(authResp.status).toBe(302);
       const upstreamUrl = new URL(authResp.headers.get("Location")!);
       const transactionId = upstreamUrl.searchParams.get("state")!;
@@ -224,9 +238,11 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
         ...baseConfig,
         consentRequired: true,
       });
-      await consentProxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await consentProxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
 
-      const authResp = await consentProxy.authorize(buildAuthParams());
+      const authResp = await consentProxy.authorize(
+        buildAuthParams({ client_id: dcr.client_id }),
+      );
       // Consent HTML response is a 200, not a 302.
       expect(authResp.status).toBe(200);
 
@@ -257,7 +273,7 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
   });
 
   describe("exchangeAuthorizationCode() rejects unknown client_id", () => {
-    it("rejects a token exchange that does not name the upstream client_id", async () => {
+    it("rejects a token exchange with an unregistered client_id", async () => {
       await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
 
       await expect(
@@ -273,10 +289,12 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
 
   describe("happy path still works for registered clients", () => {
     it("a properly-registered client completes the full authorize -> callback flow", async () => {
-      await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
       mockUpstreamTokenEndpoint();
 
-      const authResp = await proxy.authorize(buildAuthParams());
+      const authResp = await proxy.authorize(
+        buildAuthParams({ client_id: dcr.client_id }),
+      );
       expect(authResp.status).toBe(302);
       const upstreamUrl = new URL(authResp.headers.get("Location")!);
       expect(upstreamUrl.origin + upstreamUrl.pathname).toBe(
@@ -305,7 +323,7 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
         ...baseConfig,
         allowedRedirectUriPatterns: ["https://client.example.com/*"],
       });
-      await multi.registerClient({
+      const dcr = await multi.registerClient({
         redirect_uris: [
           "https://client.example.com/a",
           "https://client.example.com/b",
@@ -314,7 +332,10 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
 
       await expect(
         multi.authorize(
-          buildAuthParams({ redirect_uri: "https://client.example.com/b" }),
+          buildAuthParams({
+            client_id: dcr.client_id,
+            redirect_uri: "https://client.example.com/b",
+          }),
         ),
       ).resolves.toBeDefined();
 
