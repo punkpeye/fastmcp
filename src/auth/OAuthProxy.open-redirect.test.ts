@@ -86,11 +86,16 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
 
   describe("authorize() rejects unregistered redirect_uri", () => {
     it("rejects an arbitrary attacker host even when client_id is valid", async () => {
-      const dcr = await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await proxy.registerClient({
+        redirect_uris: [LEGIT_REDIRECT],
+      });
 
       await expect(
         proxy.authorize(
-          buildAuthParams({ client_id: dcr.client_id, redirect_uri: EVIL_REDIRECT }),
+          buildAuthParams({
+            client_id: dcr.client_id,
+            redirect_uri: EVIL_REDIRECT,
+          }),
         ),
       ).rejects.toMatchObject({
         code: "invalid_request",
@@ -107,17 +112,24 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
     });
 
     it("rejects a URI that only differs by trailing slash (exact match required)", async () => {
-      const dcr = await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await proxy.registerClient({
+        redirect_uris: [LEGIT_REDIRECT],
+      });
 
       await expect(
         proxy.authorize(
-          buildAuthParams({ client_id: dcr.client_id, redirect_uri: LEGIT_REDIRECT + "/" }),
+          buildAuthParams({
+            client_id: dcr.client_id,
+            redirect_uri: LEGIT_REDIRECT + "/",
+          }),
         ),
       ).rejects.toMatchObject({ code: "invalid_request" });
     });
 
     it("rejects a URI whose host only differs in casing (strict string compare)", async () => {
-      const dcr = await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await proxy.registerClient({
+        redirect_uris: [LEGIT_REDIRECT],
+      });
 
       await expect(
         proxy.authorize(
@@ -199,7 +211,9 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
 
   describe("handleCallback() defense-in-depth", () => {
     it("refuses to 302 if the stored clientCallbackUrl is no longer registered", async () => {
-      const dcr = await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await proxy.registerClient({
+        redirect_uris: [LEGIT_REDIRECT],
+      });
       mockUpstreamTokenEndpoint();
 
       // Start a legitimate transaction.
@@ -238,7 +252,9 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
         ...baseConfig,
         consentRequired: true,
       });
-      const dcr = await consentProxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await consentProxy.registerClient({
+        redirect_uris: [LEGIT_REDIRECT],
+      });
 
       const authResp = await consentProxy.authorize(
         buildAuthParams({ client_id: dcr.client_id }),
@@ -289,7 +305,9 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
 
   describe("happy path still works for registered clients", () => {
     it("a properly-registered client completes the full authorize -> callback flow", async () => {
-      const dcr = await proxy.registerClient({ redirect_uris: [LEGIT_REDIRECT] });
+      const dcr = await proxy.registerClient({
+        redirect_uris: [LEGIT_REDIRECT],
+      });
       mockUpstreamTokenEndpoint();
 
       const authResp = await proxy.authorize(

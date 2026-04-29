@@ -1398,7 +1398,9 @@ export class OAuthProxy {
       "http://127.0.0.1:*",
     ];
 
-    return effectivePatterns.some((pattern) => this.matchesPattern(uri, pattern));
+    return effectivePatterns.some((pattern) =>
+      this.matchesPattern(uri, pattern),
+    );
   }
 }
 
