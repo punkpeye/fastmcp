@@ -1,3 +1,20 @@
+// Re-export commonly used auth utilities for convenience
+// Users can also import from "fastmcp/auth" for the full auth module
+export {
+  // Auth providers
+  AuthProvider,
+  AzureProvider,
+  // Auth helpers for canAccess
+  getAuthSession,
+  GitHubProvider,
+  GoogleProvider,
+  OAuthProvider,
+  requireAll,
+  requireAny,
+  requireAuth,
+  requireRole,
+  requireScopes,
+} from "./auth/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -1920,7 +1937,10 @@ export class FastMCPSession<
             annotations: tool.annotations,
             description: tool.description,
             inputSchema: (tool.parameters
-              ? await toJsonSchema(tool.parameters)
+              ? "__jsonSchema" in tool.parameters &&
+                tool.parameters.__jsonSchema
+                ? tool.parameters.__jsonSchema
+                : await toJsonSchema(tool.parameters)
               : {
                   additionalProperties: false,
                   properties: {},
@@ -3425,24 +3445,6 @@ export class FastMCP<
   }
 }
 
-// Re-export commonly used auth utilities for convenience
-// Users can also import from "fastmcp/auth" for the full auth module
-export {
-  // Auth providers
-  AuthProvider,
-  AzureProvider,
-  // Auth helpers for canAccess
-  getAuthSession,
-  GitHubProvider,
-  GoogleProvider,
-  OAuthProvider,
-  requireAll,
-  requireAny,
-  requireAuth,
-  requireRole,
-  requireScopes,
-} from "./auth/index.js";
-
 export type {
   AuthProviderConfig,
   AzureProviderConfig,
@@ -3454,6 +3456,11 @@ export type {
 } from "./auth/index.js";
 
 export { DiscoveryDocumentCache } from "./DiscoveryDocumentCache.js";
+
+export {
+  jsonSchemaAdapter,
+  type JsonSchemaObject,
+} from "./jsonSchemaAdapter.js";
 
 export type {
   AudioContent,
