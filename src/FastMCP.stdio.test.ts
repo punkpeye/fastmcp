@@ -44,7 +44,7 @@ describe("stdio stdin listener lifecycle", () => {
 
     stdinOffSpy = vi
       .spyOn(process.stdin, "off")
-      .mockImplementation((_: string, __: (...args: unknown[]) => void) => {
+      .mockImplementation(() => {
         return process.stdin;
       });
   });
