@@ -8,18 +8,25 @@ import { FastMCP } from "./FastMCP.js";
 
 /** Minimal fake transport that satisfies what FastMCP needs for stdio. */
 function makeFakeTransport() {
-  const transport = {
+  return {
     close: vi.fn().mockResolvedValue(undefined),
     onclose: undefined as (() => void) | undefined,
     onerror: undefined as ((e: Error) => void) | undefined,
     onmessage: undefined as ((msg: unknown) => void) | undefined,
-    // The SDK Server calls these
     send: vi.fn().mockResolvedValue(undefined),
-    // FastMCPSession.connect() calls start() on the transport
     start: vi.fn().mockResolvedValue(undefined),
   };
-  return transport;
 }
+
+// Module-level so the vi.mock factory can close over it.
+// Each test reassigns this in beforeEach before calling start().
+let fakeTransport: ReturnType<typeof makeFakeTransport>;
+
+// vi.mock is hoisted to module scope by Vitest — the factory must only
+// reference module-level variables, not test-body locals.
+vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
+  StdioServerTransport: vi.fn(() => fakeTransport),
+}));
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -31,6 +38,7 @@ describe("stdio stdin listener lifecycle", () => {
   let stdinListeners: Map<string, (...args: unknown[]) => void>;
 
   beforeEach(() => {
+    fakeTransport = makeFakeTransport();
     stdinListeners = new Map();
 
     stdinOnSpy = vi
@@ -52,12 +60,6 @@ describe("stdio stdin listener lifecycle", () => {
   });
 
   it("registers 'close' and 'end' listeners after start({ transportType: 'stdio' })", async () => {
-    const fakeTransport = makeFakeTransport();
-
-    vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
-      StdioServerTransport: vi.fn(() => fakeTransport),
-    }));
-
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
 
     // We don't await start() because stdio transport normally runs forever;
@@ -76,12 +78,6 @@ describe("stdio stdin listener lifecycle", () => {
   });
 
   it("calls transport.close() exactly once when 'close' fires", async () => {
-    const fakeTransport = makeFakeTransport();
-
-    vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
-      StdioServerTransport: vi.fn(() => fakeTransport),
-    }));
-
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
     const startPromise = server
       .start({ transportType: "stdio" })
@@ -98,12 +94,6 @@ describe("stdio stdin listener lifecycle", () => {
   });
 
   it("does NOT call transport.close() a second time when 'end' fires after 'close' (idempotency)", async () => {
-    const fakeTransport = makeFakeTransport();
-
-    vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
-      StdioServerTransport: vi.fn(() => fakeTransport),
-    }));
-
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
     const startPromise = server
       .start({ transportType: "stdio" })
@@ -125,12 +115,6 @@ describe("stdio stdin listener lifecycle", () => {
   });
 
   it("removes both listeners after the handler fires", async () => {
-    const fakeTransport = makeFakeTransport();
-
-    vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
-      StdioServerTransport: vi.fn(() => fakeTransport),
-    }));
-
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
     const startPromise = server
       .start({ transportType: "stdio" })
