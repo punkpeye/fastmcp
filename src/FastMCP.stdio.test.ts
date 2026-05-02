@@ -11,12 +11,12 @@ function makeFakeTransport() {
   const transport = {
     close: vi.fn().mockResolvedValue(undefined),
     onclose: undefined as (() => void) | undefined,
-    // FastMCPSession.connect() calls start() on the transport
-    start: vi.fn().mockResolvedValue(undefined),
-    // The SDK Server calls these
-    send: vi.fn().mockResolvedValue(undefined),
     onerror: undefined as ((e: Error) => void) | undefined,
     onmessage: undefined as ((msg: unknown) => void) | undefined,
+    // The SDK Server calls these
+    send: vi.fn().mockResolvedValue(undefined),
+    // FastMCPSession.connect() calls start() on the transport
+    start: vi.fn().mockResolvedValue(undefined),
   };
   return transport;
 }
@@ -44,11 +44,9 @@ describe("stdio stdin listener lifecycle", () => {
 
     stdinOffSpy = vi
       .spyOn(process.stdin, "off")
-      .mockImplementation(
-        (_event: string, _listener: (...args: unknown[]) => void) => {
-          return process.stdin;
-        },
-      );
+      .mockImplementation((_: string, __: (...args: unknown[]) => void) => {
+        return process.stdin;
+      });
   });
 
   afterEach(() => {
