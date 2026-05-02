@@ -2625,7 +2625,9 @@ export class FastMCP<
       // linger as a zombie/orphan. The upstream SDK fix (PR #2003) handles
       // this inside StdioServerTransport itself, but adding the listener here
       // means older SDK versions are also protected.
-      const onStdinClose = () => { transport.close().catch(() => {}); };
+      const onStdinClose = () => {
+        transport.close().catch(() => {});
+      };
       process.stdin.on("close", onStdinClose);
       process.stdin.on("end", onStdinClose);
 
