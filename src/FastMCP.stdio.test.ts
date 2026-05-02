@@ -18,7 +18,7 @@ function makeFakeTransport() {
   };
 }
 
-// Module-level so the vi.mock factory can close over it.
+// Module-level so the vi.mock factory (which is hoisted) can close over it.
 // Each test reassigns this in beforeEach before calling start().
 let fakeTransport: ReturnType<typeof makeFakeTransport>;
 
@@ -38,6 +38,10 @@ describe("stdio stdin listener lifecycle", () => {
   let stdinListeners: Map<string, (...args: unknown[]) => void>;
 
   beforeEach(() => {
+    // FastMCPSession.connect() retries getClientCapabilities() up to 10×100ms.
+    // Use fake timers so tests don't actually wait ~1 s.
+    vi.useFakeTimers();
+
     fakeTransport = makeFakeTransport();
     stdinListeners = new Map();
 
@@ -56,20 +60,21 @@ describe("stdio stdin listener lifecycle", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
   it("registers 'close' and 'end' listeners after start({ transportType: 'stdio' })", async () => {
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
 
-    // We don't await start() because stdio transport normally runs forever;
-    // we just need to verify the listeners were registered.
+    // We don't await start() because stdio transport normally runs forever.
     const startPromise = server
       .start({ transportType: "stdio" })
       .catch(() => {});
 
-    // Give the microtask queue a turn so the synchronous listener registration runs
-    await Promise.resolve();
+    // Advance through the 10×100ms capability-retry loop so session.connect()
+    // resolves and the stdin listeners are registered.
+    await vi.advanceTimersByTimeAsync(1100);
 
     expect(stdinOnSpy).toHaveBeenCalledWith("close", expect.any(Function));
     expect(stdinOnSpy).toHaveBeenCalledWith("end", expect.any(Function));
@@ -82,7 +87,7 @@ describe("stdio stdin listener lifecycle", () => {
     const startPromise = server
       .start({ transportType: "stdio" })
       .catch(() => {});
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1100);
 
     const closeListener = stdinListeners.get("close");
     expect(closeListener).toBeDefined();
@@ -98,7 +103,7 @@ describe("stdio stdin listener lifecycle", () => {
     const startPromise = server
       .start({ transportType: "stdio" })
       .catch(() => {});
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1100);
 
     const closeListener = stdinListeners.get("close");
     const endListener = stdinListeners.get("end");
@@ -119,7 +124,7 @@ describe("stdio stdin listener lifecycle", () => {
     const startPromise = server
       .start({ transportType: "stdio" })
       .catch(() => {});
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1100);
 
     const closeListener = stdinListeners.get("close");
     expect(closeListener).toBeDefined();
