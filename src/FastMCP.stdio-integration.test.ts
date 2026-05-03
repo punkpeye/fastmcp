@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Integration test: verifies the actual zombie-process fix works end-to-end.
@@ -28,8 +28,8 @@ describe("stdio zombie-process prevention (integration)", () => {
     // Use tsx/jiti to run inline TypeScript. Falls back to node with --loader.
     const child = spawn("npx", ["--yes", "tsx", "--eval", FIXTURE_SCRIPT], {
       cwd: resolve(__dirname, ".."),
-      stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, NODE_OPTIONS: "" },
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
     // Wait for the server to signal readiness (or timeout)
@@ -53,7 +53,7 @@ describe("stdio zombie-process prevention (integration)", () => {
     child.stdin?.destroy();
 
     // Child must exit within 5 seconds (previously it would zombie forever)
-    const exitCode = await new Promise<number | null>((resolve) => {
+    const exitCode = await new Promise<null | number>((resolve) => {
       const timeout = setTimeout(() => {
         child.kill("SIGKILL");
         resolve(null);
