@@ -26,15 +26,11 @@ server.start({ transportType: "stdio" }).catch(() => process.exit(1));
 describe("stdio zombie-process prevention (integration)", () => {
   it("child exits cleanly when stdin is destroyed", async () => {
     // Use tsx/jiti to run inline TypeScript. Falls back to node with --loader.
-    const child = spawn(
-      "npx",
-      ["--yes", "tsx", "--eval", FIXTURE_SCRIPT],
-      {
-        cwd: resolve(__dirname, ".."),
-        stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, NODE_OPTIONS: "" },
-      },
-    );
+    const child = spawn("npx", ["--yes", "tsx", "--eval", FIXTURE_SCRIPT], {
+      cwd: resolve(__dirname, ".."),
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, NODE_OPTIONS: "" },
+    });
 
     // Wait for the server to signal readiness (or timeout)
     const ready = await new Promise<boolean>((resolve) => {
