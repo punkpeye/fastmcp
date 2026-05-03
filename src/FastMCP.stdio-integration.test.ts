@@ -56,7 +56,9 @@ describe("stdio zombie-process prevention (integration)", () => {
     });
 
     if (!ready) child.kill("SIGKILL");
-    try { unlinkSync(fixtureFile); } catch {}
+    try {
+      unlinkSync(fixtureFile);
+    } catch {}
     expect(ready).toBe(true);
 
     // Simulate client disconnect by destroying stdin
@@ -74,7 +76,9 @@ describe("stdio zombie-process prevention (integration)", () => {
       });
     });
 
-    try { unlinkSync(fixtureFile); } catch {}
+    try {
+      unlinkSync(fixtureFile);
+    } catch {}
 
     // null means we had to kill it — that's the bug this PR fixes
     expect(exitCode).not.toBeNull();
