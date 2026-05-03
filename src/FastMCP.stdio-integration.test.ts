@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -58,7 +58,9 @@ describe("stdio zombie-process prevention (integration)", () => {
     if (!ready) child.kill("SIGKILL");
     try {
       unlinkSync(fixtureFile);
-    } catch {}
+    } catch {
+      /* file may already be gone */
+    }
     expect(ready).toBe(true);
 
     // Simulate client disconnect by destroying stdin
@@ -78,7 +80,9 @@ describe("stdio zombie-process prevention (integration)", () => {
 
     try {
       unlinkSync(fixtureFile);
-    } catch {}
+    } catch {
+      /* file may already be gone */
+    }
 
     // null means we had to kill it — that's the bug this PR fixes
     expect(exitCode).not.toBeNull();
