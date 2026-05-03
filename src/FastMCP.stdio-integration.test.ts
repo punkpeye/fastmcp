@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { writeFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -19,18 +20,25 @@ server.addTool({
 });
 
 // Signal readiness
-process.stdout.write("READY\\n");
+process.stdout.write("READY\n");
 server.start({ transportType: "stdio" }).catch(() => process.exit(1));
 `;
 
 describe("stdio zombie-process prevention (integration)", () => {
   it("child exits cleanly when stdin is destroyed", async () => {
-    // Use tsx/jiti to run inline TypeScript. Falls back to node with --loader.
-    const child = spawn("tsx", ["--eval", FIXTURE_SCRIPT], {
-      cwd: resolve(__dirname, ".."),
-      env: { ...process.env, NODE_OPTIONS: "" },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    // Write fixture to a .ts file in src/ so imports resolve correctly via tsx
+    const fixtureFile = resolve(__dirname, `_fastmcp-fixture-${Date.now()}.ts`);
+    writeFileSync(fixtureFile, FIXTURE_SCRIPT);
+
+    const child = spawn(
+      resolve(__dirname, "../node_modules/.bin/tsx"),
+      [fixtureFile],
+      {
+        cwd: resolve(__dirname, ".."),
+        env: { ...process.env, NODE_OPTIONS: "" },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
 
     // Wait for the server to signal readiness (or timeout)
     const ready = await new Promise<boolean>((resolve) => {
@@ -47,6 +55,8 @@ describe("stdio zombie-process prevention (integration)", () => {
       });
     });
 
+    if (!ready) child.kill("SIGKILL");
+    try { unlinkSync(fixtureFile); } catch {}
     expect(ready).toBe(true);
 
     // Simulate client disconnect by destroying stdin
@@ -64,9 +74,11 @@ describe("stdio zombie-process prevention (integration)", () => {
       });
     });
 
+    try { unlinkSync(fixtureFile); } catch {}
+
     // null means we had to kill it — that's the bug this PR fixes
     expect(exitCode).not.toBeNull();
     // Process should exit cleanly (0) or with a graceful signal exit
     expect(exitCode === 0 || exitCode === 143).toBe(true);
-  }, 30_000); // tsx is a devDep so no download — 30s covers slow CI runners
+  }, 30_000);
 });
