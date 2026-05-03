@@ -34,7 +34,7 @@ describe("stdio zombie-process prevention (integration)", () => {
 
     // Wait for the server to signal readiness (or timeout)
     const ready = await new Promise<boolean>((resolve) => {
-      const timeout = setTimeout(() => resolve(false), 10_000);
+      const timeout = setTimeout(() => resolve(false), 60_000);
       child.stdout?.on("data", (chunk: Buffer) => {
         if (chunk.toString().includes("READY")) {
           clearTimeout(timeout);
@@ -68,5 +68,5 @@ describe("stdio zombie-process prevention (integration)", () => {
     expect(exitCode).not.toBeNull();
     // Process should exit cleanly (0) or with a graceful signal exit
     expect(exitCode === 0 || exitCode === 143).toBe(true);
-  }, 20_000); // generous timeout for CI
+  }, 90_000); // generous timeout for CI (npx tsx cold-download can take 30s+)
 });
