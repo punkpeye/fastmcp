@@ -2270,4 +2270,5 @@ Refer to this [issue](https://github.com/punkpeye/fastmcp/issues/25#issuecomment
 - FastMCP is inspired by the [Python implementation](https://github.com/jlowin/fastmcp) by [Jonathan Lowin](https://github.com/jlowin).
 - Parts of codebase were adopted from [LiteMCP](https://github.com/wong2/litemcp).
 - Parts of codebase were adopted from [Model Context protocolでSSEをやってみる](https://dev.classmethod.jp/articles/mcp-sse/).
-- This project is tested with BrowserStack
+
+This project is tested with BrowserStack.
