@@ -219,6 +219,46 @@ openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -node
 
 See the [https-server example](src/examples/https-server.ts) for a complete demonstration.
 
+##### CORS Configuration
+
+By default, FastMCP enables CORS with a standard set of allowed headers. You can customize the CORS behavior by passing a `cors` option:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8080,
+    cors: {
+      origin: "http://localhost:3000",
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Mcp-Session-Id",
+        "Mcp-Protocol-Version",
+        "Last-Event-Id",
+        "X-Custom-Header",
+      ],
+      credentials: true,
+    },
+  },
+});
+```
+
+The `cors` option accepts:
+
+- `true` (default) - enable CORS with default settings
+- `false` - disable CORS entirely
+- An object with these fields:
+  - `origin` - a string, array of strings, or a function `(origin: string) => boolean`
+  - `allowedHeaders` - a string or array of strings
+  - `methods` - array of allowed HTTP methods
+  - `exposedHeaders` - array of headers to expose
+  - `credentials` - boolean to allow credentials
+  - `maxAge` - preflight cache duration in seconds
+
+The `CorsOptions` type is exported from `fastmcp` for convenience.
+
 #### Custom HTTP Routes
 
 FastMCP allows you to add custom HTTP routes alongside MCP endpoints, enabling you to build comprehensive HTTP services that include REST APIs, webhooks, admin interfaces, and more - all within the same server process.
