@@ -34,7 +34,7 @@ import { readFile } from "fs/promises";
 import Fuse from "fuse.js";
 import { Hono } from "hono";
 import http from "http";
-import { startHTTPServer } from "mcp-proxy";
+import { type CorsOptions, startHTTPServer } from "mcp-proxy";
 import { StrictEventEmitter } from "strict-event-emitter-types";
 import { setTimeout as delay } from "timers/promises";
 import { fetch } from "undici";
@@ -2565,6 +2565,7 @@ export class FastMCP<
   public async start(
     options?: Partial<{
       httpStream: {
+        cors?: boolean | CorsOptions;
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
         eventStore?: EventStore;
@@ -2660,6 +2661,7 @@ export class FastMCP<
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
           ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
+          cors: httpConfig.cors,
           createServer: async (request) => {
             let auth: T | undefined;
 
@@ -2725,6 +2727,7 @@ export class FastMCP<
         // Regular mode with session management
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
           ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
+          cors: httpConfig.cors,
           createServer: async (request) => {
             let auth: T | undefined;
 
@@ -3287,6 +3290,7 @@ export class FastMCP<
   #parseRuntimeConfig(
     overrides?: Partial<{
       httpStream: {
+        cors?: boolean | CorsOptions;
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
         eventStore?: EventStore;
@@ -3302,6 +3306,7 @@ export class FastMCP<
   ):
     | {
         httpStream: {
+          cors?: boolean | CorsOptions;
           enableJsonResponse?: boolean;
           endpoint: `/${string}`;
           eventStore?: EventStore;
@@ -3357,6 +3362,7 @@ export class FastMCP<
         statelessArg === "true" ||
         envStateless === "true" ||
         false;
+      const cors = overrides?.httpStream?.cors;
       const eventStore = overrides?.httpStream?.eventStore;
       const sslCa = overrides?.httpStream?.sslCa;
       const sslCert = overrides?.httpStream?.sslCert;
@@ -3364,6 +3370,7 @@ export class FastMCP<
 
       return {
         httpStream: {
+          cors,
           enableJsonResponse,
           endpoint: endpoint as `/${string}`,
           eventStore,
@@ -3460,6 +3467,7 @@ export type {
   Content,
   ContentResult,
   Context,
+  CorsOptions,
   FastMCPEvents,
   FastMCPSessionAuth,
   FastMCPSessionEvents,

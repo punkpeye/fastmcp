@@ -4731,3 +4731,78 @@ test("tools without outputSchema omit it from listing", async () => {
     },
   });
 });
+
+test("httpStream forwards custom cors allowedHeaders to mcp-proxy", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      cors: {
+        allowedHeaders: [
+          "Content-Type",
+          "Authorization",
+          "Accept",
+          "Mcp-Session-Id",
+          "Mcp-Protocol-Version",
+          "Last-Event-Id",
+          "X-Custom-Header",
+        ],
+      },
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      headers: {
+        "Access-Control-Request-Headers": "X-Custom-Header, Content-Type",
+        "Access-Control-Request-Method": "POST",
+        Origin: "http://example.com",
+      },
+      method: "OPTIONS",
+    });
+
+    const allowHeaders = response.headers.get("access-control-allow-headers");
+
+    expect(allowHeaders).toContain("X-Custom-Header");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("httpStream respects cors: false by not setting CORS headers", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      cors: false,
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      headers: {
+        "Access-Control-Request-Method": "POST",
+        Origin: "http://example.com",
+      },
+      method: "OPTIONS",
+    });
+
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  } finally {
+    await server.stop();
+  }
+});
