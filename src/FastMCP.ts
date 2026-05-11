@@ -1114,13 +1114,13 @@ export class FastMCPSession<
 
   #server: Server;
 
-  #stateless: boolean;
-
   /**
    * Session ID from the Mcp-Session-Id header (HTTP transports only).
    * Used to track per-session state across multiple requests.
    */
   #sessionId?: string;
+
+  #stateless: boolean;
 
   #utils?: ServerOptions<T>["utils"];
 
