@@ -11,7 +11,7 @@ import {
   Root,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createEventSource, EventSourceClient } from "eventsource-client";
-import { getRandomPort } from "get-port-please";
+import { getRandomPort as _getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "timers/promises";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
@@ -26,6 +26,24 @@ import {
   type TextContent,
   UserError,
 } from "./FastMCP.js";
+
+// Wraps `get-port-please`'s `getRandomPort` with a retry loop. Under parallel
+// test load on macOS, the underlying multi-host (IPv4 + IPv6) port-0 probe
+// occasionally fails on one interface and throws `GetPortError`, even though
+// thousands of ports are actually free. Retrying with a small backoff is
+// enough to eliminate the flake.
+const getRandomPort = async (attempts = 5): Promise<number> => {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await _getRandomPort();
+    } catch (error) {
+      lastError = error;
+      await delay(50 * (i + 1));
+    }
+  }
+  throw lastError;
+};
 
 const runWithTestServer = async ({
   client: createClient,
