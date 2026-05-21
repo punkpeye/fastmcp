@@ -42,7 +42,7 @@ await yargs(hideBin(process.argv))
           console.log(`[FastMCP] Starting server: ${command}`);
           console.log(`[FastMCP] File: ${argv.file}`);
           console.log(
-            `[FastMCP] Watch mode: ${argv.watch ? "enabled" : "disabled"}`,
+            `[FastMCP] Watch mode: ${argv.watch ? "enabled" : "disabled"}`
           );
         }
 
@@ -55,7 +55,7 @@ await yargs(hideBin(process.argv))
       } catch (error) {
         console.error(
           "[FastMCP Error] Failed to start development server:",
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? error.message : String(error)
         );
 
         if (argv.verbose && error instanceof Error && error.stack) {
@@ -64,7 +64,7 @@ await yargs(hideBin(process.argv))
 
         process.exit(1);
       }
-    },
+    }
   )
 
   .command(
@@ -87,12 +87,12 @@ await yargs(hideBin(process.argv))
       } catch (error) {
         console.error(
           "[FastMCP Error] Failed to inspect server:",
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? error.message : String(error)
         );
 
         process.exit(1);
       }
-    },
+    }
   )
 
   .command(
@@ -174,17 +174,17 @@ await yargs(hideBin(process.argv))
         }
 
         console.log(
-          "[FastMCP] ✓ All validations passed! Server file looks good.",
+          "[FastMCP] ✓ All validations passed! Server file looks good."
         );
       } catch (error) {
         console.error(
           "[FastMCP Error] Validation failed:",
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? error.message : String(error)
         );
 
         process.exit(1);
       }
-    },
+    }
   )
 
   .help()

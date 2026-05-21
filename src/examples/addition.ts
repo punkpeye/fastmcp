@@ -272,7 +272,7 @@ if (transportType === "httpStream") {
   });
 
   console.log(
-    `HTTP Stream MCP server is running at http://localhost:${PORT}/mcp`,
+    `HTTP Stream MCP server is running at http://localhost:${PORT}/mcp`
   );
   console.log("Use StreamableHTTPClientTransport to connect to this server");
   console.log("For example:");
@@ -302,7 +302,7 @@ if (transportType === "httpStream") {
   });
 
   console.log(
-    "Started stdio transport with explicit ping configuration from server options",
+    "Started stdio transport with explicit ping configuration from server options"
   );
 } else if (process.argv.includes("--disable-roots")) {
   // Example of disabling roots at runtime

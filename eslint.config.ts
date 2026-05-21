@@ -10,5 +10,5 @@ export default tseslint.config(
   eslintConfigPrettier,
   {
     ignores: ["**/*.js", "dist/**"],
-  },
+  }
 );
