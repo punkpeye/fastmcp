@@ -3,6 +3,23 @@ import { describe, expect, it } from "vitest";
 
 import { FastMCP } from "./FastMCP.js";
 
+const createInitializeRequest = () => ({
+  body: JSON.stringify({
+    id: 1,
+    jsonrpc: "2.0",
+    method: "initialize",
+    params: {
+      capabilities: {},
+      clientInfo: { name: "test-client", version: "1.0.0" },
+      protocolVersion: "2025-06-18",
+    },
+  }),
+  headers: {
+    "Content-Type": "application/json",
+  },
+  method: "POST",
+});
+
 describe("FastMCP OAuth Support", () => {
   it("should serve OAuth authorization server metadata", async () => {
     const port = await getRandomPort();
@@ -249,27 +266,98 @@ describe("FastMCP OAuth Support", () => {
     });
 
     try {
-      const response = await fetch(`http://localhost:${port}/mcp`, {
-        body: JSON.stringify({
-          id: 1,
-          jsonrpc: "2.0",
-          method: "initialize",
-          params: {
-            capabilities: {},
-            clientInfo: { name: "test-client", version: "1.0.0" },
-            protocolVersion: "2025-06-18",
-          },
-        }),
-        headers: {
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
+      const response = await fetch(
+        `http://localhost:${port}/mcp`,
+        createInitializeRequest()
+      );
 
       expect(response.status).toBe(401);
       expect(response.headers.get("www-authenticate")).toBe(
         'Bearer resource_metadata="https://auth.example.com/.well-known/oauth-protected-resource", error="invalid_token", error_description="Missing bearer token"'
       );
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("should preserve explicit auth responses when OAuth is not configured", async () => {
+    const port = await getRandomPort();
+
+    const server = new FastMCP({
+      authenticate: async () => {
+        throw new Response("custom unauthorized", {
+          headers: {
+            "X-Custom-Auth": "api-key",
+          },
+          status: 401,
+          statusText: "Unauthorized",
+        });
+      },
+      name: "Test Server",
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { port },
+      transportType: "httpStream",
+    });
+
+    try {
+      const response = await fetch(
+        `http://localhost:${port}/mcp`,
+        createInitializeRequest()
+      );
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("www-authenticate")).toBeNull();
+      expect(response.headers.get("x-custom-auth")).toBe("api-key");
+      expect(await response.text()).toBe("custom unauthorized");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("should preserve explicit auth responses when OAuth is configured", async () => {
+    const port = await getRandomPort();
+
+    const server = new FastMCP({
+      authenticate: async () => {
+        throw new Response("forbidden by custom auth", {
+          headers: {
+            "X-Custom-Auth": "policy",
+          },
+          status: 403,
+          statusText: "Forbidden",
+        });
+      },
+      name: "Test Server",
+      oauth: {
+        enabled: true,
+        protectedResource: {
+          authorizationServers: ["https://auth.example.com"],
+          resource: "https://mcp.example.com/v2/mcp",
+        },
+        protectedResourceMetadataUrl:
+          "https://auth.example.com/.well-known/oauth-protected-resource",
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { port },
+      transportType: "httpStream",
+    });
+
+    try {
+      const response = await fetch(
+        `http://localhost:${port}/mcp`,
+        createInitializeRequest()
+      );
+
+      expect(response.status).toBe(403);
+      expect(response.headers.get("www-authenticate")).toBeNull();
+      expect(response.headers.get("x-custom-auth")).toBe("policy");
+      expect(await response.text()).toBe("forbidden by custom auth");
     } finally {
       await server.stop();
     }

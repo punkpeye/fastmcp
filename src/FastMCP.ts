@@ -2254,6 +2254,12 @@ export class FastMCP<
   }
 
   #createOAuthChallengeResponse(error: unknown): Response | undefined {
+    // Preserve caller-provided HTTP responses, such as custom API-key auth
+    // failures. Only synthesize an OAuth challenge for ordinary thrown errors.
+    if (error instanceof Response) {
+      return undefined;
+    }
+
     const resourceMetadataUrl =
       this.#options.oauth?.protectedResourceMetadataUrl;
 
@@ -2320,6 +2326,15 @@ export class FastMCP<
     isStateless = false,
     host: string
   ) => {
+    const url = new URL(req.url || "", `http://${host}`);
+
+    // mcp-proxy's legacy SSE transport still advertises /messages as the
+    // client POST endpoint. Leave it for the proxy handler instead of
+    // treating it as an app-level 404.
+    if (url.pathname === "/messages") {
+      return;
+    }
+
     const healthConfig = this.#options.health ?? {};
 
     const enabled =
@@ -2327,8 +2342,6 @@ export class FastMCP<
 
     if (enabled) {
       const path = healthConfig.path ?? "/health";
-      const url = new URL(req.url || "", `http://${host}`);
-
       try {
         if (req.method === "GET" && url.pathname === path) {
           res
@@ -2391,8 +2404,6 @@ export class FastMCP<
     // Handle OAuth well-known endpoints
     const oauthConfig = this.#options.oauth;
     if (oauthConfig?.enabled && req.method === "GET") {
-      const url = new URL(req.url || "", `http://${host}`);
-
       if (
         url.pathname === "/.well-known/oauth-authorization-server" &&
         oauthConfig.authorizationServer

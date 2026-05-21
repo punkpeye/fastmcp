@@ -2825,7 +2825,7 @@ test("blocks unauthorized requests", async () => {
     new URL(`http://localhost:${port}/sse`),
   );
 
-  expect(async () => {
+  await expect(async () => {
     await client.connect(transport);
   }).rejects.toThrow("SSE error: Non-200 status code (401)");
 });
