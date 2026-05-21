@@ -2164,6 +2164,7 @@ export class FastMCP<
             await this.#handleUnhandledRequest(req, res, true, httpConfig.host);
           },
           port: httpConfig.port,
+          sseEndpoint: "/sse", // Server-Sent Events endpoint for streaming events
           stateless: true,
           streamEndpoint: httpConfig.endpoint,
         });
@@ -2207,6 +2208,7 @@ export class FastMCP<
             );
           },
           port: httpConfig.port,
+          sseEndpoint: "/sse",
           streamEndpoint: httpConfig.endpoint,
         });
 
