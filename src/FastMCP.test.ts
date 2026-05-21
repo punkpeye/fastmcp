@@ -13,7 +13,6 @@ import {
 import { createEventSource, EventSourceClient } from "eventsource-client";
 import { getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "timers/promises";
-import { fetch } from "undici";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
 import { z as z4 } from "zod/v4";
