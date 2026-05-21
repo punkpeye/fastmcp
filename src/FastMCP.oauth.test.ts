@@ -222,4 +222,56 @@ describe("FastMCP OAuth Support", () => {
       await server.stop();
     }
   });
+
+  it("should return a WWW-Authenticate challenge with an explicit resource metadata URL", async () => {
+    const port = await getRandomPort();
+
+    const server = new FastMCP({
+      authenticate: async () => {
+        throw new Error("Missing bearer token");
+      },
+      name: "Test Server",
+      oauth: {
+        enabled: true,
+        protectedResource: {
+          authorizationServers: ["https://auth.example.com"],
+          resource: "https://mcp.example.com/v2/mcp",
+        },
+        protectedResourceMetadataUrl:
+          "https://auth.example.com/.well-known/oauth-protected-resource",
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { port },
+      transportType: "httpStream",
+    });
+
+    try {
+      const response = await fetch(`http://localhost:${port}/mcp`, {
+        body: JSON.stringify({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "initialize",
+          params: {
+            capabilities: {},
+            clientInfo: { name: "test-client", version: "1.0.0" },
+            protocolVersion: "2025-06-18",
+          },
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("www-authenticate")).toBe(
+        'Bearer resource_metadata="https://auth.example.com/.well-known/oauth-protected-resource", error="invalid_token", error_description="Missing bearer token"',
+      );
+    } finally {
+      await server.stop();
+    }
+  });
 });

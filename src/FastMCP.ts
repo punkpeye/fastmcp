@@ -796,6 +796,18 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
        */
       tlsClientCertificateBoundAccessTokens?: boolean;
     };
+
+    /**
+     * Explicit Protected Resource Metadata URL to advertise in
+     * `WWW-Authenticate` challenges.
+     *
+     * By default, `mcp-proxy` derives this from `protectedResource.resource`
+     * by appending `/.well-known/oauth-protected-resource`. Set this when the
+     * metadata is hosted on a different origin than the MCP endpoint.
+     *
+     * @example "https://auth.example.com/.well-known/oauth-protected-resource"
+     */
+    protectedResourceMetadataUrl?: string;
   };
 
   ping?: {
@@ -914,6 +926,10 @@ const FastMCPSessionEventEmitterBase: {
 type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
 
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
+
+const escapeWWWAuthenticateValue = (value: string) => {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+};
 
 class FastMCPSessionEventEmitter extends FastMCPSessionEventEmitterBase {}
 
@@ -2126,11 +2142,7 @@ export class FastMCP<
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
           createServer: async (request) => {
-            let auth: T | undefined;
-
-            if (this.#authenticate) {
-              auth = await this.#authenticate(request);
-            }
+            const auth = await this.#authenticateRequest(request);
 
             // In stateless mode, create a new session for each request
             // without persisting it in the sessions array
@@ -2139,6 +2151,7 @@ export class FastMCP<
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
           host: httpConfig.host,
+          oauth: this.#options.oauth,
           // In stateless mode, we don't track sessions
           onClose: async () => {
             // No session tracking in stateless mode
@@ -2160,17 +2173,14 @@ export class FastMCP<
         // Regular mode with session management
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
           createServer: async (request) => {
-            let auth: T | undefined;
-
-            if (this.#authenticate) {
-              auth = await this.#authenticate(request);
-            }
+            const auth = await this.#authenticateRequest(request);
 
             return this.#createSession(auth);
           },
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
           host: httpConfig.host,
+          oauth: this.#options.oauth,
           onClose: async (session) => {
             const sessionIndex = this.#sessions.indexOf(session);
 
@@ -2221,6 +2231,57 @@ export class FastMCP<
     if (this.#httpStreamServer) {
       await this.#httpStreamServer.close();
     }
+  }
+
+  async #authenticateRequest(
+    request: http.IncomingMessage,
+  ): Promise<T | undefined> {
+    if (!this.#authenticate) {
+      return undefined;
+    }
+
+    try {
+      return await this.#authenticate(request);
+    } catch (error) {
+      const response = this.#createOAuthChallengeResponse(error);
+
+      if (response) {
+        throw response;
+      }
+
+      throw error;
+    }
+  }
+
+  #createOAuthChallengeResponse(error: unknown): Response | undefined {
+    const resourceMetadataUrl =
+      this.#options.oauth?.protectedResourceMetadataUrl;
+
+    if (!this.#options.oauth?.enabled || !resourceMetadataUrl) {
+      return undefined;
+    }
+
+    const errorMessage =
+      error instanceof Error ? error.message : String(error || "Unauthorized");
+    const wwwAuthenticate = [
+      `resource_metadata="${escapeWWWAuthenticateValue(resourceMetadataUrl)}"`,
+      `error="invalid_token"`,
+      `error_description="${escapeWWWAuthenticateValue(errorMessage)}"`,
+    ].join(", ");
+
+    return new Response(
+      JSON.stringify({
+        error: "invalid_token",
+        error_description: errorMessage,
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": `Bearer ${wwwAuthenticate}`,
+        },
+        status: 401,
+      },
+    );
   }
 
   /**
