@@ -33,7 +33,7 @@ describe("FastMCP OAuth Support", () => {
     try {
       // Test the OAuth authorization server endpoint
       const response = await fetch(
-        `http://localhost:${port}/.well-known/oauth-authorization-server`,
+        `http://localhost:${port}/.well-known/oauth-authorization-server`
       );
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe("application/json");
@@ -43,14 +43,14 @@ describe("FastMCP OAuth Support", () => {
       // Check that camelCase was converted to snake_case
       expect(metadata.issuer).toBe("https://auth.example.com");
       expect(metadata.authorization_endpoint).toBe(
-        "https://auth.example.com/oauth/authorize",
+        "https://auth.example.com/oauth/authorize"
       );
       expect(metadata.token_endpoint).toBe(
-        "https://auth.example.com/oauth/token",
+        "https://auth.example.com/oauth/token"
       );
       expect(metadata.response_types_supported).toEqual(["code"]);
       expect(metadata.jwks_uri).toBe(
-        "https://auth.example.com/.well-known/jwks.json",
+        "https://auth.example.com/.well-known/jwks.json"
       );
       expect(metadata.scopes_supported).toEqual(["read", "write"]);
       expect(metadata.grant_types_supported).toEqual([
@@ -108,7 +108,7 @@ describe("FastMCP OAuth Support", () => {
 
     try {
       const response = await fetch(
-        `http://localhost:${port}/.well-known/oauth-protected-resource`,
+        `http://localhost:${port}/.well-known/oauth-protected-resource`
       );
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe("application/json");
@@ -121,11 +121,11 @@ describe("FastMCP OAuth Support", () => {
         "https://auth.example.com",
       ]);
       expect(metadata.jwks_uri).toBe(
-        "https://test-server.example.com/.well-known/jwks.json",
+        "https://test-server.example.com/.well-known/jwks.json"
       );
       expect(metadata.bearer_methods_supported).toEqual(["header"]);
       expect(metadata.resource_documentation).toBe(
-        "https://docs.example.com/api",
+        "https://docs.example.com/api"
       );
 
       // New fields added for RFC 9728 compliance
@@ -139,15 +139,15 @@ describe("FastMCP OAuth Support", () => {
       ]);
       expect(metadata.resource_name).toBe("Test API");
       expect(metadata.resource_policy_uri).toBe(
-        "https://test-server.example.com/policy",
+        "https://test-server.example.com/policy"
       );
       expect(metadata.resource_signing_alg_values_supported).toEqual(["RS256"]);
       expect(metadata.resource_tos_uri).toBe(
-        "https://test-server.example.com/tos",
+        "https://test-server.example.com/tos"
       );
       expect(metadata.scopes_supported).toEqual(["read", "write", "admin"]);
       expect(metadata.service_documentation).toBe(
-        "https://developer.example.com/api",
+        "https://developer.example.com/api"
       );
       expect(metadata.tls_client_certificate_bound_access_tokens).toBe(false);
 
@@ -181,12 +181,12 @@ describe("FastMCP OAuth Support", () => {
 
     try {
       const authServerResponse = await fetch(
-        `http://localhost:${port}/.well-known/oauth-authorization-server`,
+        `http://localhost:${port}/.well-known/oauth-authorization-server`
       );
       expect(authServerResponse.status).toBe(404);
 
       const protectedResourceResponse = await fetch(
-        `http://localhost:${port}/.well-known/oauth-protected-resource`,
+        `http://localhost:${port}/.well-known/oauth-protected-resource`
       );
       expect(protectedResourceResponse.status).toBe(404);
     } finally {
@@ -210,12 +210,12 @@ describe("FastMCP OAuth Support", () => {
 
     try {
       const authServerResponse = await fetch(
-        `http://localhost:${port}/.well-known/oauth-authorization-server`,
+        `http://localhost:${port}/.well-known/oauth-authorization-server`
       );
       expect(authServerResponse.status).toBe(404);
 
       const protectedResourceResponse = await fetch(
-        `http://localhost:${port}/.well-known/oauth-protected-resource`,
+        `http://localhost:${port}/.well-known/oauth-protected-resource`
       );
       expect(protectedResourceResponse.status).toBe(404);
     } finally {
@@ -268,7 +268,7 @@ describe("FastMCP OAuth Support", () => {
 
       expect(response.status).toBe(401);
       expect(response.headers.get("www-authenticate")).toBe(
-        'Bearer resource_metadata="https://auth.example.com/.well-known/oauth-protected-resource", error="invalid_token", error_description="Missing bearer token"',
+        'Bearer resource_metadata="https://auth.example.com/.well-known/oauth-protected-resource", error="invalid_token", error_description="Missing bearer token"'
       );
     } finally {
       await server.stop();
