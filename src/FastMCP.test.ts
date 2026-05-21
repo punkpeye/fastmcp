@@ -670,12 +670,20 @@ test("sends logging messages to the client", async () => {
       client.setNotificationHandler(
         LoggingMessageNotificationSchema,
         (message) => {
-          if (message.method === "notifications/message") {
-            onLog({
-              level: message.params.level,
-              ...(message.params.data ?? {}),
-            });
+          if (message.method !== "notifications/message") {
+            return;
           }
+
+          // Ignore the transport-level "SSE Connection established"
+          // notification emitted by mcp-proxy on SSE handshake.
+          if (message.params.data === "SSE Connection established") {
+            return;
+          }
+
+          onLog({
+            level: message.params.level,
+            ...(message.params.data ?? {}),
+          });
         },
       );
 
