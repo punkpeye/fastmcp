@@ -149,11 +149,11 @@ const client = new Client(
   },
   {
     capabilities: {},
-  },
+  }
 );
 
 const transport = new StreamableHTTPClientTransport(
-  new URL(`http://localhost:8080/mcp`),
+  new URL(`http://localhost:8080/mcp`)
 );
 
 await client.connect(transport);
@@ -171,7 +171,7 @@ const client = new Client(
   },
   {
     capabilities: {},
-  },
+  }
 );
 
 const transport = new SSEClientTransport(new URL(`http://localhost:8080/sse`));
@@ -1477,7 +1477,7 @@ const transport = new StreamableHTTPClientTransport(
         Authorization: "Test 123",
       },
     },
-  },
+  }
 );
 
 const client = new Client({
@@ -1627,7 +1627,7 @@ await session.requestSampling(
 
     // Maximum total timeout regardless of progress (no default)
     maxTotalTimeout: 60000,
-  },
+  }
 );
 ```
 

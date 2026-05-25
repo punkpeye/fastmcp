@@ -68,7 +68,7 @@ describe("FastMCP Session Context", () => {
 
       expect(mockLogger.error).toHaveBeenCalledWith(
         "[FastMCP error] Authentication failed for stdio transport:",
-        "Auth failed",
+        "Auth failed"
       );
     });
 

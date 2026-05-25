@@ -25,7 +25,7 @@ const server = new FastMCP<UserSession>({
   authenticate: async (request) => {
     if (!request) {
       console.log(
-        "[Auth] Authenticating stdio transport using environment variables",
+        "[Auth] Authenticating stdio transport using environment variables"
       );
 
       const userId = process.env.USER_ID || "default-user";
@@ -163,7 +163,7 @@ server.addResource({
           },
 
           null,
-          2,
+          2
         ),
       };
     }
@@ -182,7 +182,7 @@ server.addResource({
         },
 
         null,
-        2,
+        2
       ),
     };
   },

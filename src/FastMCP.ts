@@ -61,7 +61,7 @@ type FastMCPSessionEvents = {
 };
 
 export const imageContent = async (
-  input: { buffer: Buffer } | { path: string } | { url: string },
+  input: { buffer: Buffer } | { path: string } | { url: string }
 ): Promise<ImageContent> => {
   let rawData: Buffer;
 
@@ -72,7 +72,7 @@ export const imageContent = async (
 
         if (!response.ok) {
           throw new Error(
-            `Server responded with status: ${response.status} - ${response.statusText}`,
+            `Server responded with status: ${response.status} - ${response.statusText}`
           );
         }
 
@@ -81,7 +81,7 @@ export const imageContent = async (
         throw new Error(
           `Failed to fetch image from URL (${input.url}): ${
             error instanceof Error ? error.message : String(error)
-          }`,
+          }`
         );
       }
     } else if ("path" in input) {
@@ -91,14 +91,14 @@ export const imageContent = async (
         throw new Error(
           `Failed to read image from path (${input.path}): ${
             error instanceof Error ? error.message : String(error)
-          }`,
+          }`
         );
       }
     } else if ("buffer" in input) {
       rawData = input.buffer;
     } else {
       throw new Error(
-        "Invalid input: Provide a valid 'url', 'path', or 'buffer'",
+        "Invalid input: Provide a valid 'url', 'path', or 'buffer'"
       );
     }
 
@@ -109,7 +109,7 @@ export const imageContent = async (
       console.warn(
         `Warning: Content may not be a valid image. Detected MIME: ${
           mimeType?.mime || "unknown"
-        }`,
+        }`
       );
     }
 
@@ -130,7 +130,7 @@ export const imageContent = async (
 };
 
 export const audioContent = async (
-  input: { buffer: Buffer } | { path: string } | { url: string },
+  input: { buffer: Buffer } | { path: string } | { url: string }
 ): Promise<AudioContent> => {
   let rawData: Buffer;
 
@@ -141,7 +141,7 @@ export const audioContent = async (
 
         if (!response.ok) {
           throw new Error(
-            `Server responded with status: ${response.status} - ${response.statusText}`,
+            `Server responded with status: ${response.status} - ${response.statusText}`
           );
         }
 
@@ -150,7 +150,7 @@ export const audioContent = async (
         throw new Error(
           `Failed to fetch audio from URL (${input.url}): ${
             error instanceof Error ? error.message : String(error)
-          }`,
+          }`
         );
       }
     } else if ("path" in input) {
@@ -160,14 +160,14 @@ export const audioContent = async (
         throw new Error(
           `Failed to read audio from path (${input.path}): ${
             error instanceof Error ? error.message : String(error)
-          }`,
+          }`
         );
       }
     } else if ("buffer" in input) {
       rawData = input.buffer;
     } else {
       throw new Error(
-        "Invalid input: Provide a valid 'url', 'path', or 'buffer'",
+        "Invalid input: Provide a valid 'url', 'path', or 'buffer'"
       );
     }
 
@@ -178,7 +178,7 @@ export const audioContent = async (
       console.warn(
         `Warning: Content may not be a valid audio file. Detected MIME: ${
           mimeType?.mime || "unknown"
-        }`,
+        }`
       );
     }
 
@@ -425,7 +425,7 @@ type InputResourceTemplate<
   description?: string;
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
-    auth?: T,
+    auth?: T
   ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
@@ -515,7 +515,7 @@ type ResourceTemplate<
   description?: string;
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
-    auth?: T,
+    auth?: T
   ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
@@ -796,6 +796,18 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
        */
       tlsClientCertificateBoundAccessTokens?: boolean;
     };
+
+    /**
+     * Explicit Protected Resource Metadata URL to advertise in
+     * `WWW-Authenticate` challenges.
+     *
+     * By default, `mcp-proxy` derives this from `protectedResource.resource`
+     * by appending `/.well-known/oauth-protected-resource`. Set this when the
+     * metadata is hosted on a different origin than the MCP endpoint.
+     *
+     * @example "https://auth.example.com/.well-known/oauth-protected-resource"
+     */
+    protectedResourceMetadataUrl?: string;
   };
 
   ping?: {
@@ -832,7 +844,7 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
    */
   utils?: {
     formatInvalidParamsErrorMessage?: (
-      issues: readonly StandardSchemaV1.Issue[],
+      issues: readonly StandardSchemaV1.Issue[]
     ) => string;
   };
   version: `${number}.${number}.${number}`;
@@ -854,7 +866,7 @@ type Tool<
 
   execute: (
     args: StandardSchemaV1.InferOutput<Params>,
-    context: Context<T>,
+    context: Context<T>
   ) => Promise<
     | AudioContent
     | ContentResult
@@ -914,6 +926,10 @@ const FastMCPSessionEventEmitterBase: {
 type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
 
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
+
+const escapeWWWAuthenticateValue = (value: string) => {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+};
 
 class FastMCPSessionEventEmitter extends FastMCPSessionEventEmitterBase {}
 
@@ -1017,7 +1033,7 @@ export class FastMCPSession<
 
     this.#server = new Server(
       { name: name, version: version },
-      { capabilities: this.#capabilities, instructions: instructions },
+      { capabilities: this.#capabilities, instructions: instructions }
     );
 
     this.#utils = utils;
@@ -1093,7 +1109,7 @@ export class FastMCPSession<
 
       if (!this.#clientCapabilities) {
         this.#logger.warn(
-          `[FastMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`,
+          `[FastMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`
         );
       }
 
@@ -1107,13 +1123,13 @@ export class FastMCPSession<
         } catch (e) {
           if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
             this.#logger.debug(
-              "[FastMCP debug] listRoots method not supported by client",
+              "[FastMCP debug] listRoots method not supported by client"
             );
           } else {
             this.#logger.error(
               `[FastMCP error] received error listing roots.\n\n${
                 e instanceof Error ? e.stack : JSON.stringify(e)
-              }`,
+              }`
             );
           }
         }
@@ -1136,11 +1152,11 @@ export class FastMCPSession<
                 this.#logger.debug("[FastMCP debug] server ping failed");
               } else if (logLevel === "warning") {
                 this.#logger.warn(
-                  "[FastMCP warning] server is not responding to ping",
+                  "[FastMCP warning] server is not responding to ping"
                 );
               } else if (logLevel === "error") {
                 this.#logger.error(
-                  "[FastMCP error] server is not responding to ping",
+                  "[FastMCP error] server is not responding to ping"
                 );
               } else {
                 this.#logger.info("[FastMCP info] server ping failed");
@@ -1165,7 +1181,7 @@ export class FastMCPSession<
 
   public async requestSampling(
     message: z.infer<typeof CreateMessageRequestSchema>["params"],
-    options?: RequestOptions,
+    options?: RequestOptions
   ): Promise<SamplingResponse> {
     return this.#server.createMessage(message, options);
   }
@@ -1180,7 +1196,7 @@ export class FastMCPSession<
       this.#connectionState === "closed"
     ) {
       return Promise.reject(
-        new Error(`Connection is in ${this.#connectionState} state`),
+        new Error(`Connection is in ${this.#connectionState} state`)
       );
     }
 
@@ -1188,8 +1204,8 @@ export class FastMCPSession<
       const timeout = setTimeout(() => {
         reject(
           new Error(
-            "Connection timeout: Session failed to become ready within 5 seconds",
-          ),
+            "Connection timeout: Session failed to become ready within 5 seconds"
+          )
         );
       }, 5000);
 
@@ -1306,7 +1322,7 @@ export class FastMCPSession<
     this.#server.setRequestHandler(CompleteRequestSchema, async (request) => {
       if (request.params.ref.type === "ref/prompt") {
         const prompt = this.#prompts.find(
-          (prompt) => prompt.name === request.params.ref.name,
+          (prompt) => prompt.name === request.params.ref.name
         );
 
         if (!prompt) {
@@ -1325,8 +1341,8 @@ export class FastMCPSession<
           await prompt.complete(
             request.params.argument.name,
             request.params.argument.value,
-            this.#auth,
-          ),
+            this.#auth
+          )
         );
 
         return {
@@ -1336,7 +1352,7 @@ export class FastMCPSession<
 
       if (request.params.ref.type === "ref/resource") {
         const resource = this.#resourceTemplates.find(
-          (resource) => resource.uriTemplate === request.params.ref.uri,
+          (resource) => resource.uriTemplate === request.params.ref.uri
         );
 
         if (!resource) {
@@ -1354,7 +1370,7 @@ export class FastMCPSession<
             "Resource does not support completion",
             {
               request,
-            },
+            }
           );
         }
 
@@ -1362,8 +1378,8 @@ export class FastMCPSession<
           await resource.complete(
             request.params.argument.name,
             request.params.argument.value,
-            this.#auth,
-          ),
+            this.#auth
+          )
         );
 
         return {
@@ -1407,13 +1423,13 @@ export class FastMCPSession<
 
     this.#server.setRequestHandler(GetPromptRequestSchema, async (request) => {
       const prompt = prompts.find(
-        (prompt) => prompt.name === request.params.name,
+        (prompt) => prompt.name === request.params.name
       );
 
       if (!prompt) {
         throw new McpError(
           ErrorCode.MethodNotFound,
-          `Unknown prompt: ${request.params.name}`,
+          `Unknown prompt: ${request.params.name}`
         );
       }
 
@@ -1425,7 +1441,7 @@ export class FastMCPSession<
             ErrorCode.InvalidRequest,
             `Prompt '${request.params.name}' requires argument '${arg.name}': ${
               arg.description || "No description provided"
-            }`,
+            }`
           );
         }
       }
@@ -1435,14 +1451,14 @@ export class FastMCPSession<
       try {
         result = await prompt.load(
           args as Record<string, string | undefined>,
-          this.#auth,
+          this.#auth
         );
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         throw new McpError(
           ErrorCode.InternalError,
-          `Failed to load prompt '${request.params.name}': ${errorMessage}`,
+          `Failed to load prompt '${request.params.name}': ${errorMessage}`
         );
       }
 
@@ -1483,13 +1499,13 @@ export class FastMCPSession<
         if ("uri" in request.params) {
           const resource = resources.find(
             (resource) =>
-              "uri" in resource && resource.uri === request.params.uri,
+              "uri" in resource && resource.uri === request.params.uri
           );
 
           if (!resource) {
             for (const resourceTemplate of this.#resourceTemplates) {
               const uriTemplate = parseURITemplate(
-                resourceTemplate.uriTemplate,
+                resourceTemplate.uriTemplate
               );
 
               const match = uriTemplate.fromUri(request.params.uri);
@@ -1518,7 +1534,7 @@ export class FastMCPSession<
               ErrorCode.MethodNotFound,
               `Resource not found: '${request.params.uri}'. Available resources: ${
                 resources.map((r) => r.uri).join(", ") || "none"
-              }`,
+              }`
             );
           }
 
@@ -1538,7 +1554,7 @@ export class FastMCPSession<
               `Failed to load resource '${resource.name}' (${resource.uri}): ${errorMessage}`,
               {
                 uri: resource.uri,
-              },
+              }
             );
           }
 
@@ -1559,12 +1575,12 @@ export class FastMCPSession<
         throw new UnexpectedStateError("Unknown resource request", {
           request,
         });
-      },
+      }
     );
   }
 
   private setupResourceTemplateHandlers(
-    resourceTemplates: ResourceTemplate<T>[],
+    resourceTemplates: ResourceTemplate<T>[]
   ) {
     this.#server.setRequestHandler(
       ListResourceTemplatesRequestSchema,
@@ -1577,14 +1593,14 @@ export class FastMCPSession<
             uriTemplate: resourceTemplate.uriTemplate,
           })),
         } satisfies ListResourceTemplatesResult;
-      },
+      }
     );
   }
 
   private setupRootsHandlers() {
     if (this.#rootsConfig?.enabled === false) {
       this.#logger.debug(
-        "[FastMCP debug] roots capability explicitly disabled via config",
+        "[FastMCP debug] roots capability explicitly disabled via config"
       );
       return;
     }
@@ -1609,21 +1625,21 @@ export class FastMCPSession<
                 error.code === ErrorCode.MethodNotFound
               ) {
                 this.#logger.debug(
-                  "[FastMCP debug] listRoots method not supported by client",
+                  "[FastMCP debug] listRoots method not supported by client"
                 );
               } else {
                 this.#logger.error(
                   `[FastMCP error] received error listing roots.\n\n${
                     error instanceof Error ? error.stack : JSON.stringify(error)
-                  }`,
+                  }`
                 );
               }
             });
-        },
+        }
       );
     } else {
       this.#logger.debug(
-        "[FastMCP debug] roots capability not available, not setting up notification handler",
+        "[FastMCP debug] roots capability not available, not setting up notification handler"
       );
     }
   }
@@ -1645,7 +1661,7 @@ export class FastMCPSession<
                   }, // More complete schema for Cursor compatibility
               name: tool.name,
             };
-          }),
+          })
         ),
       };
     });
@@ -1656,7 +1672,7 @@ export class FastMCPSession<
       if (!tool) {
         throw new McpError(
           ErrorCode.MethodNotFound,
-          `Unknown tool: ${request.params.name}`,
+          `Unknown tool: ${request.params.name}`
         );
       }
 
@@ -1664,7 +1680,7 @@ export class FastMCPSession<
 
       if (tool.parameters) {
         const parsed = await tool.parameters["~standard"].validate(
-          request.params.arguments,
+          request.params.arguments
         );
 
         if (parsed.issues) {
@@ -1679,7 +1695,7 @@ export class FastMCPSession<
 
           throw new McpError(
             ErrorCode.InvalidParams,
-            `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`,
+            `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`
           );
         }
 
@@ -1709,7 +1725,7 @@ export class FastMCPSession<
               `[FastMCP warning] Failed to report progress for tool '${request.params.name}':`,
               progressError instanceof Error
                 ? progressError.message
-                : String(progressError),
+                : String(progressError)
             );
           }
         };
@@ -1776,7 +1792,7 @@ export class FastMCPSession<
               `[FastMCP warning] Failed to stream content for tool '${request.params.name}':`,
               streamError instanceof Error
                 ? streamError.message
-                : String(streamError),
+                : String(streamError)
             );
           }
         };
@@ -1799,8 +1815,8 @@ export class FastMCPSession<
                 const timeoutId = setTimeout(() => {
                   reject(
                     new UserError(
-                      `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
-                    ),
+                      `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`
+                    )
                   );
                 }, tool.timeoutMs);
 
@@ -1875,7 +1891,7 @@ function camelToSnakeCase(str: string): string {
  * Converts an object with camelCase keys to snake_case keys
  */
 function convertObjectToSnakeCase(
-  obj: Record<string, unknown>,
+  obj: Record<string, unknown>
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
@@ -1922,7 +1938,7 @@ export class FastMCP<
    * Adds a prompt to the server.
    */
   public addPrompt<const Args extends InputPromptArgument<T>[]>(
-    prompt: InputPrompt<T, Args>,
+    prompt: InputPrompt<T, Args>
   ) {
     this.#prompts.push(prompt);
   }
@@ -1959,7 +1975,7 @@ export class FastMCP<
   public async embedded(uri: string): Promise<ResourceContent["resource"]> {
     // First, try to find a direct resource match
     const directResource = this.#resources.find(
-      (resource) => resource.uri === uri,
+      (resource) => resource.uri === uri
     );
 
     if (directResource) {
@@ -2007,9 +2023,7 @@ export class FastMCP<
         }
 
         const result = await template.load(
-          params as ResourceTemplateArgumentsToObject<
-            typeof template.arguments
-          >,
+          params as ResourceTemplateArgumentsToObject<typeof template.arguments>
         );
 
         const resourceData: ResourceContent["resource"] = {
@@ -2046,7 +2060,7 @@ export class FastMCP<
         stateless?: boolean;
       };
       transportType: "httpStream" | "stdio";
-    }>,
+    }>
   ) {
     const config = this.#parseRuntimeConfig(options);
 
@@ -2060,12 +2074,12 @@ export class FastMCP<
       if (this.#authenticate) {
         try {
           auth = await this.#authenticate(
-            undefined as unknown as http.IncomingMessage,
+            undefined as unknown as http.IncomingMessage
           );
         } catch (error) {
           this.#logger.error(
             "[FastMCP error] Authentication failed for stdio transport:",
-            error instanceof Error ? error.message : String(error),
+            error instanceof Error ? error.message : String(error)
           );
           // Continue without auth if authentication fails
         }
@@ -2121,16 +2135,12 @@ export class FastMCP<
       if (httpConfig.stateless) {
         // Stateless mode - create new server instance for each request
         this.#logger.info(
-          `[FastMCP info] Starting server in stateless mode on HTTP Stream at http://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
+          `[FastMCP info] Starting server in stateless mode on HTTP Stream at http://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`
         );
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
           createServer: async (request) => {
-            let auth: T | undefined;
-
-            if (this.#authenticate) {
-              auth = await this.#authenticate(request);
-            }
+            const auth = await this.#authenticateRequest(request);
 
             // In stateless mode, create a new session for each request
             // without persisting it in the sessions array
@@ -2139,6 +2149,7 @@ export class FastMCP<
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
           host: httpConfig.host,
+          oauth: this.#options.oauth,
           // In stateless mode, we don't track sessions
           onClose: async () => {
             // No session tracking in stateless mode
@@ -2146,13 +2157,14 @@ export class FastMCP<
           onConnect: async () => {
             // No persistent session tracking in stateless mode
             this.#logger.debug(
-              `[FastMCP debug] Stateless HTTP Stream request handled`,
+              `[FastMCP debug] Stateless HTTP Stream request handled`
             );
           },
           onUnhandledRequest: async (req, res) => {
             await this.#handleUnhandledRequest(req, res, true, httpConfig.host);
           },
           port: httpConfig.port,
+          sseEndpoint: "/sse", // Server-Sent Events endpoint for streaming events
           stateless: true,
           streamEndpoint: httpConfig.endpoint,
         });
@@ -2160,17 +2172,14 @@ export class FastMCP<
         // Regular mode with session management
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
           createServer: async (request) => {
-            let auth: T | undefined;
-
-            if (this.#authenticate) {
-              auth = await this.#authenticate(request);
-            }
+            const auth = await this.#authenticateRequest(request);
 
             return this.#createSession(auth);
           },
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
           host: httpConfig.host,
+          oauth: this.#options.oauth,
           onClose: async (session) => {
             const sessionIndex = this.#sessions.indexOf(session);
 
@@ -2195,18 +2204,19 @@ export class FastMCP<
               req,
               res,
               false,
-              httpConfig.host,
+              httpConfig.host
             );
           },
           port: httpConfig.port,
+          sseEndpoint: "/sse",
           streamEndpoint: httpConfig.endpoint,
         });
 
         this.#logger.info(
-          `[FastMCP info] server is running on HTTP Stream at http://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
+          `[FastMCP info] server is running on HTTP Stream at http://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`
         );
         this.#logger.info(
-          `[FastMCP info] Transport type: httpStream (Streamable HTTP, not SSE)`,
+          `[FastMCP info] Transport type: httpStream (Streamable HTTP, not SSE)`
         );
       }
     } else {
@@ -2223,6 +2233,63 @@ export class FastMCP<
     }
   }
 
+  async #authenticateRequest(
+    request: http.IncomingMessage
+  ): Promise<T | undefined> {
+    if (!this.#authenticate) {
+      return undefined;
+    }
+
+    try {
+      return await this.#authenticate(request);
+    } catch (error) {
+      const response = this.#createOAuthChallengeResponse(error);
+
+      if (response) {
+        throw response;
+      }
+
+      throw error;
+    }
+  }
+
+  #createOAuthChallengeResponse(error: unknown): Response | undefined {
+    // Preserve caller-provided HTTP responses, such as custom API-key auth
+    // failures. Only synthesize an OAuth challenge for ordinary thrown errors.
+    if (error instanceof Response) {
+      return undefined;
+    }
+
+    const resourceMetadataUrl =
+      this.#options.oauth?.protectedResourceMetadataUrl;
+
+    if (!this.#options.oauth?.enabled || !resourceMetadataUrl) {
+      return undefined;
+    }
+
+    const errorMessage =
+      error instanceof Error ? error.message : String(error || "Unauthorized");
+    const wwwAuthenticate = [
+      `resource_metadata="${escapeWWWAuthenticateValue(resourceMetadataUrl)}"`,
+      `error="invalid_token"`,
+      `error_description="${escapeWWWAuthenticateValue(errorMessage)}"`,
+    ].join(", ");
+
+    return new Response(
+      JSON.stringify({
+        error: "invalid_token",
+        error_description: errorMessage,
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": `Bearer ${wwwAuthenticate}`,
+        },
+        status: 401,
+      }
+    );
+  }
+
   /**
    * Creates a new FastMCPSession instance with the current configuration.
    * Used both for regular sessions and stateless requests.
@@ -2230,7 +2297,7 @@ export class FastMCP<
   #createSession(auth?: T): FastMCPSession<T> {
     const allowedTools = auth
       ? this.#tools.filter((tool) =>
-          tool.canAccess ? tool.canAccess(auth) : true,
+          tool.canAccess ? tool.canAccess(auth) : true
         )
       : this.#tools;
     return new FastMCPSession<T>({
@@ -2257,8 +2324,17 @@ export class FastMCP<
     req: http.IncomingMessage,
     res: http.ServerResponse,
     isStateless = false,
-    host: string,
+    host: string
   ) => {
+    const url = new URL(req.url || "", `http://${host}`);
+
+    // mcp-proxy's legacy SSE transport still advertises /messages as the
+    // client POST endpoint. Leave it for the proxy handler instead of
+    // treating it as an app-level 404.
+    if (url.pathname === "/messages") {
+      return;
+    }
+
     const healthConfig = this.#options.health ?? {};
 
     const enabled =
@@ -2266,8 +2342,6 @@ export class FastMCP<
 
     if (enabled) {
       const path = healthConfig.path ?? "/health";
-      const url = new URL(req.url || "", `http://${host}`);
-
       try {
         if (req.method === "GET" && url.pathname === path) {
           res
@@ -2297,7 +2371,7 @@ export class FastMCP<
               .end(JSON.stringify(response));
           } else {
             const readySessions = this.#sessions.filter(
-              (s) => s.isReady,
+              (s) => s.isReady
             ).length;
             const totalSessions = this.#sessions.length;
             const allReady =
@@ -2330,14 +2404,12 @@ export class FastMCP<
     // Handle OAuth well-known endpoints
     const oauthConfig = this.#options.oauth;
     if (oauthConfig?.enabled && req.method === "GET") {
-      const url = new URL(req.url || "", `http://${host}`);
-
       if (
         url.pathname === "/.well-known/oauth-authorization-server" &&
         oauthConfig.authorizationServer
       ) {
         const metadata = convertObjectToSnakeCase(
-          oauthConfig.authorizationServer,
+          oauthConfig.authorizationServer
         );
         res
           .writeHead(200, {
@@ -2352,7 +2424,7 @@ export class FastMCP<
         oauthConfig.protectedResource
       ) {
         const metadata = convertObjectToSnakeCase(
-          oauthConfig.protectedResource,
+          oauthConfig.protectedResource
         );
         res
           .writeHead(200, {
@@ -2377,7 +2449,7 @@ export class FastMCP<
         stateless?: boolean;
       };
       transportType: "httpStream" | "stdio";
-    }>,
+    }>
   ):
     | {
         httpStream: {
@@ -2420,7 +2492,7 @@ export class FastMCP<
 
     if (transportType === "httpStream") {
       const port = parseInt(
-        overrides?.httpStream?.port?.toString() || portArg || envPort || "8080",
+        overrides?.httpStream?.port?.toString() || portArg || envPort || "8080"
       );
       const host =
         overrides?.httpStream?.host || hostArg || envHost || "localhost";
