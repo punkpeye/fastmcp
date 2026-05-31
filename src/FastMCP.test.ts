@@ -4701,6 +4701,56 @@ test("adds tools with outputSchema", async () => {
   });
 });
 
+test("returns structuredContent alongside content", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      // The SDK client validates structuredContent against the tool's
+      // outputSchema, so this round-trip also exercises that validation.
+      expect(
+        await client.callTool({
+          arguments: { city: "Paris" },
+          name: "get-weather",
+        }),
+      ).toEqual({
+        content: [
+          {
+            text: JSON.stringify({ humidity: 65, temperature: 72 }),
+            type: "text",
+          },
+        ],
+        structuredContent: { humidity: 65, temperature: 72 },
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          const data = { humidity: 65, temperature: 72 };
+          return {
+            content: [{ text: JSON.stringify(data), type: "text" }],
+            structuredContent: data,
+          };
+        },
+        name: "get-weather",
+        outputSchema: z.object({
+          humidity: z.number(),
+          temperature: z.number(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("tools without outputSchema omit it from listing", async () => {
   await runWithTestServer({
     run: async ({ client }) => {

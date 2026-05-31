@@ -383,12 +383,20 @@ const ContentZodSchema = z.discriminatedUnion("type", [
 type ContentResult = {
   content: Content[];
   isError?: boolean;
+  /**
+   * Structured tool output that conforms to the tool's `outputSchema`.
+   * Surfaced to MCP clients alongside `content` so the model receives a typed
+   * object instead of having to parse it out of the text block.
+   * See https://github.com/modelcontextprotocol/typescript-sdk/pull/454
+   */
+  structuredContent?: { [key: string]: unknown };
 };
 
 const ContentResultZodSchema = z
   .object({
     content: ContentZodSchema.array(),
     isError: z.boolean().optional(),
+    structuredContent: z.record(z.string(), z.unknown()).optional(),
   })
   .strict() satisfies z.ZodType<ContentResult>;
 

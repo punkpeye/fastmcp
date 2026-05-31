@@ -940,6 +940,39 @@ server.addTool({
 });
 ```
 
+#### Returning structured content
+
+Declare an `outputSchema` and return `structuredContent` to give clients a typed
+object in addition to the human-readable `content`. MCP clients surface
+`structuredContent` to the model directly, so it does not have to parse data out of
+a text block. For backward compatibility you should still return a `content` block
+(typically the serialized JSON), as the MCP specification recommends.
+
+```js
+server.addTool({
+  name: "get_weather",
+  description: "Get the weather for a city",
+  parameters: z.object({
+    city: z.string(),
+  }),
+  outputSchema: z.object({
+    humidity: z.number(),
+    temperature: z.number(),
+  }),
+  execute: async (args) => {
+    const data = { humidity: 65, temperature: 72 };
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(data) }],
+      structuredContent: data,
+    };
+  },
+});
+```
+
+When `outputSchema` is provided, MCP clients validate the returned
+`structuredContent` against it.
+
 #### Custom Logger
 
 FastMCP allows you to provide a custom logger implementation to control how the server logs messages. This is useful for integrating with existing logging infrastructure or customizing log formatting.
