@@ -243,6 +243,33 @@ test("health and ready endpoints respond to HEAD requests", async () => {
   }
 });
 
+test("ready endpoint returns 503 for HEAD when not ready", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  // A non-stateless server with no connected sessions reports not-ready.
+  await server.start({
+    httpStream: { port },
+    transportType: "httpStream",
+  });
+
+  try {
+    // HEAD must preserve the 503 status (with an empty body) so load-balancer
+    // probes still see the not-ready signal, not just a 200 from /health.
+    const response = await fetch(`http://localhost:${port}/ready`, {
+      method: "HEAD",
+    });
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe("");
+  } finally {
+    await server.stop();
+  }
+});
+
 test("calls a tool", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
