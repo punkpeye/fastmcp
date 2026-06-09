@@ -210,6 +210,39 @@ test("health endpoint returns ok", async () => {
   }
 });
 
+test("health and ready endpoints respond to HEAD requests", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    health: { message: "healthy", path: "/healthz" },
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: { port, stateless: true },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Load balancers and uptime probes commonly issue HEAD requests against
+    // health endpoints; they must return the same status as GET with no body.
+    const healthResponse = await fetch(`http://localhost:${port}/healthz`, {
+      method: "HEAD",
+    });
+    expect(healthResponse.status).toBe(200);
+    expect(await healthResponse.text()).toBe("");
+
+    const readyResponse = await fetch(`http://localhost:${port}/ready`, {
+      method: "HEAD",
+    });
+    expect(readyResponse.status).toBe(200);
+    expect(await readyResponse.text()).toBe("");
+  } finally {
+    await server.stop();
+  }
+});
+
 test("calls a tool", async () => {
   await runWithTestServer({
     run: async ({ client }) => {

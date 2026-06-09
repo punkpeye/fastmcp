@@ -2915,18 +2915,28 @@ export class FastMCP<
       const url = new URL(req.url || "", `http://${host}`);
 
       try {
-        if (req.method === "GET" && url.pathname === path) {
+        if (
+          (req.method === "GET" || req.method === "HEAD") &&
+          url.pathname === path
+        ) {
           res
             .writeHead(healthConfig.status ?? 200, {
               "Content-Type": "text/plain",
             })
-            .end(healthConfig.message ?? "✓ Ok");
+            .end(
+              req.method === "HEAD"
+                ? undefined
+                : (healthConfig.message ?? "✓ Ok"),
+            );
 
           return;
         }
 
         // Enhanced readiness check endpoint
-        if (req.method === "GET" && url.pathname === "/ready") {
+        if (
+          (req.method === "GET" || req.method === "HEAD") &&
+          url.pathname === "/ready"
+        ) {
           if (isStateless) {
             // In stateless mode, we're always ready if the server is running
             const response = {
@@ -2940,7 +2950,9 @@ export class FastMCP<
               .writeHead(200, {
                 "Content-Type": "application/json",
               })
-              .end(JSON.stringify(response));
+              .end(
+                req.method === "HEAD" ? undefined : JSON.stringify(response),
+              );
           } else {
             const readySessions = this.#sessions.filter(
               (s) => s.isReady,
@@ -2963,7 +2975,9 @@ export class FastMCP<
               .writeHead(allReady ? 200 : 503, {
                 "Content-Type": "application/json",
               })
-              .end(JSON.stringify(response));
+              .end(
+                req.method === "HEAD" ? undefined : JSON.stringify(response),
+              );
           }
 
           return;
