@@ -383,12 +383,14 @@ const ContentZodSchema = z.discriminatedUnion("type", [
 type ContentResult = {
   content: Content[];
   isError?: boolean;
+  structuredContent?: Record<string, unknown>;
 };
 
 const ContentResultZodSchema = z
   .object({
     content: ContentZodSchema.array(),
     isError: z.boolean().optional(),
+    structuredContent: z.record(z.string(), z.unknown()).optional(),
   })
   .strict() satisfies z.ZodType<ContentResult>;
 
@@ -944,6 +946,7 @@ type Tool<
     | ImageContent
     | ResourceContent
     | ResourceLink
+    | StandardSchemaV1.InferOutput<OutputParams>
     | string
     | TextContent
     | void
@@ -1443,6 +1446,17 @@ export class FastMCPSession<
     });
   }
 
+  #formatSchemaIssues(issues: readonly StandardSchemaV1.Issue[]): string {
+    return this.#utils?.formatInvalidParamsErrorMessage
+      ? this.#utils.formatInvalidParamsErrorMessage(issues)
+      : issues
+          .map((issue) => {
+            const path = issue.path?.join(".") || "root";
+            return `${path}: ${issue.message}`;
+          })
+          .join(", ");
+  }
+
   #getPingConfig(transport: Transport): {
     enabled: boolean;
     intervalMs: number;
@@ -1465,6 +1479,26 @@ export class FastMCPSession<
       intervalMs: pingConfig.intervalMs || 5000,
       logLevel: pingConfig.logLevel || "debug",
     };
+  }
+
+  async #validateStructuredContent(
+    tool: Tool<T>,
+    value: Record<string, unknown>,
+    toolName: string,
+  ): Promise<Record<string, unknown>> {
+    if (!tool.outputSchema) {
+      return value;
+    }
+
+    const parsed = await tool.outputSchema["~standard"].validate(value);
+
+    if (parsed.issues) {
+      throw new UserError(
+        `Tool '${toolName}' structured output validation failed: ${this.#formatSchemaIssues(parsed.issues)}. Please check the result matches the tool's outputSchema.`,
+      );
+    }
+
+    return parsed.value as Record<string, unknown>;
   }
 
   private addPrompt(inputPrompt: InputPrompt<T>) {
@@ -1626,13 +1660,11 @@ export class FastMCPSession<
       });
     });
   }
-
   private setupErrorHandling() {
     this.#server.onerror = (error) => {
       this.#logger.error("[FastMCP error]", error);
     };
   }
-
   private setupLoggingHandlers() {
     this.#server.setRequestHandler(SetLevelRequestSchema, (request) => {
       this.#loggingLevel = request.params.level;
@@ -1721,6 +1753,7 @@ export class FastMCPSession<
       }
     });
   }
+
   private setupResourceHandlers() {
     let cachedResourcesList: ListResourcesResult["resources"] | null = null;
 
@@ -1829,6 +1862,7 @@ export class FastMCPSession<
       },
     );
   }
+
   private setupResourceTemplateHandlers() {
     let cachedResourceTemplatesList:
       | ListResourceTemplatesResult["resourceTemplates"]
@@ -1858,6 +1892,7 @@ export class FastMCPSession<
       },
     );
   }
+
   private setupRootsHandlers() {
     if (this.#rootsConfig?.enabled === false) {
       this.#logger.debug(
@@ -1904,6 +1939,7 @@ export class FastMCPSession<
       );
     }
   }
+
   private setupToolHandlers(tools: Tool<T>[]) {
     const toolsMap = new Map(tools.map((tool) => [tool.name, tool]));
     let cachedToolsList: ListToolsResult["tools"] | null = null;
@@ -1961,14 +1997,7 @@ export class FastMCPSession<
         );
 
         if (parsed.issues) {
-          const friendlyErrors = this.#utils?.formatInvalidParamsErrorMessage
-            ? this.#utils.formatInvalidParamsErrorMessage(parsed.issues)
-            : parsed.issues
-                .map((issue) => {
-                  const path = issue.path?.join(".") || "root";
-                  return `${path}: ${issue.message}`;
-                })
-                .join(", ");
+          const friendlyErrors = this.#formatSchemaIssues(parsed.issues);
 
           throw new McpError(
             ErrorCode.InvalidParams,
@@ -2121,6 +2150,7 @@ export class FastMCPSession<
           | ContentResult
           | ImageContent
           | null
+          | Record<string, unknown>
           | ResourceContent
           | ResourceLink
           | string
@@ -2142,6 +2172,30 @@ export class FastMCPSession<
         } else if ("type" in maybeStringResult) {
           result = ContentResultZodSchema.parse({
             content: [maybeStringResult],
+          });
+        } else if ("content" in maybeStringResult) {
+          result = ContentResultZodSchema.parse(maybeStringResult);
+          if (result.structuredContent !== undefined && tool.outputSchema) {
+            result.structuredContent = await this.#validateStructuredContent(
+              tool,
+              result.structuredContent,
+              request.params.name,
+            );
+          }
+        } else if (tool.outputSchema) {
+          const structuredContent = await this.#validateStructuredContent(
+            tool,
+            maybeStringResult,
+            request.params.name,
+          );
+          result = ContentResultZodSchema.parse({
+            content: [
+              {
+                text: JSON.stringify(structuredContent),
+                type: "text",
+              },
+            ],
+            structuredContent,
           });
         } else {
           result = ContentResultZodSchema.parse(maybeStringResult);
