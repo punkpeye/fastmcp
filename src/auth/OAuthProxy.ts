@@ -49,17 +49,15 @@ export class OAuthProxy {
   private config: OAuthProxyConfig;
   private consentManager: ConsentManager;
   private jwtIssuer?: JWTIssuer;
+  /** Keyed by redirect_uri for defence-in-depth checks in handleCallback/handleConsent */
   private registeredClients: Map<string, ProxyDCRClient> = new Map();
+  /** Keyed by proxy-issued client_id for authorize/token-exchange lookups */
+  private registeredClientsByClientId: Map<string, ProxyDCRClient> = new Map();
   private tokenStorage: TokenStorage;
   private transactions: Map<string, OAuthTransaction> = new Map();
 
   constructor(config: OAuthProxyConfig) {
     this.config = {
-      // Empty by default. Framework users must explicitly configure the URIs they
-      // trust, per RFC 6819 §4.1.5. The previous default (`["https://*", "http://localhost:*"]`)
-      // allowed open DCR registration of any https URL, enabling CWE-601 open-redirect
-      // attacks against /oauth/authorize.
-      allowedRedirectUriPatterns: [],
       authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
       consentRequired: true,
       enableTokenSwap: true, // Enabled by default for security
@@ -138,16 +136,20 @@ export class OAuthProxy {
     }
 
     // RFC 6749 §5.2 - reject unknown clients with invalid_client.
-    // The proxy exposes a single upstream identity; any other client_id is rejected.
-    if (params.client_id !== this.config.upstreamClientId) {
+    // MCP clients receive a proxy-issued client_id during DCR (not the upstream
+    // provider's credentials), so we look up by that proxy client_id.
+    const registeredClient = this.registeredClientsByClientId.get(
+      params.client_id,
+    );
+    if (!registeredClient) {
       throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
 
-    // RFC 6749 §3.1.2.3 / RFC 6819 §4.1.5 - the redirect_uri MUST match one
-    // previously registered by the client (exact string comparison). Skipping
-    // this check is CWE-601: an attacker can steal an authorization code by
-    // passing their own URL as redirect_uri.
-    if (!this.registeredClients.has(params.redirect_uri)) {
+    // RFC 6749 §3.1.2.3 / RFC 6819 §4.1.5 - the redirect_uri MUST be one
+    // that was registered by this specific client. Skipping this check is
+    // CWE-601: an attacker can steal an authorization code by passing their
+    // own URL as redirect_uri.
+    if (!registeredClient.redirectUris.includes(params.redirect_uri)) {
       throw new OAuthProxyError(
         "invalid_request",
         "redirect_uri is not registered for this client",
@@ -189,6 +191,7 @@ export class OAuthProxy {
     this.transactions.clear();
     this.clientCodes.clear();
     this.registeredClients.clear();
+    this.registeredClientsByClientId.clear();
   }
 
   /**
@@ -204,10 +207,10 @@ export class OAuthProxy {
       );
     }
 
-    // RFC 6749 §5.2 - reject unknown clients. The proxy exposes a single
-    // upstream identity; any other client_id is rejected here as well as at
-    // authorize(), so stolen codes cannot be exchanged by arbitrary callers.
-    if (request.client_id !== this.config.upstreamClientId) {
+    // RFC 6749 §5.2 - reject unknown clients. Only proxy-issued client_ids
+    // (obtained via DCR) are accepted, so stolen codes cannot be exchanged by
+    // arbitrary callers.
+    if (!this.registeredClientsByClientId.has(request.client_id)) {
       throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
 
@@ -521,12 +524,17 @@ export class OAuthProxy {
       }
     }
 
-    // Store client registration (indexed by primary redirect URI)
-    const clientId = this.config.upstreamClientId;
+    // Generate proxy-specific credentials for this MCP client.
+    // We deliberately do NOT return the upstream provider's client_id/secret here:
+    // exposing those would (a) leak credentials to every MCP client and (b) let a
+    // client bypass the proxy and talk directly to the upstream provider.
+    const proxyClientId = randomBytes(16).toString("hex");
+    const proxyClientSecret = randomBytes(32).toString("base64url");
+
     const client: ProxyDCRClient = {
       callbackUrl: request.redirect_uris[0],
-      clientId,
-      clientSecret: this.config.upstreamClientSecret,
+      clientId: proxyClientId,
+      clientSecret: proxyClientSecret,
       metadata: {
         client_name: request.client_name,
         client_uri: request.client_uri,
@@ -540,23 +548,26 @@ export class OAuthProxy {
         software_version: request.software_version,
         tos_uri: request.tos_uri,
       },
+      redirectUris: request.redirect_uris,
       registeredAt: new Date(),
     };
 
-    // Store registration under every presented redirect_uri so that authorize()
-    // can validate each one exactly (RFC 6749 §3.1.2.3). The previous code only
-    // stored the first URI, silently dropping the rest.
+    // Index by proxy client_id for authorize/token-exchange lookups.
+    this.registeredClientsByClientId.set(proxyClientId, client);
+
+    // Also index by every redirect_uri for defence-in-depth checks in
+    // handleCallback/handleConsent (RFC 6749 §3.1.2.3).
     for (const uri of request.redirect_uris) {
       this.registeredClients.set(uri, client);
     }
 
-    // Return RFC 7591 compliant response
+    // Return RFC 7591 compliant response with proxy-issued credentials.
     const response: DCRResponse = {
-      client_id: clientId,
+      client_id: proxyClientId,
       client_id_issued_at: Math.floor(Date.now() / 1000),
       // Echo back optional metadata
       client_name: request.client_name,
-      client_secret: this.config.upstreamClientSecret,
+      client_secret: proxyClientSecret,
       client_secret_expires_at: 0, // Never expires
       client_uri: request.client_uri,
       contacts: request.contacts,
@@ -1355,14 +1366,17 @@ export class OAuthProxy {
   /**
    * Validate a redirect URI against the configured allow-list.
    *
-   * Returns `true` only if the URI is syntactically valid AND matches one of
-   * the explicitly configured `allowedRedirectUriPatterns`. An empty or unset
-   * pattern list means DCR will reject every URI — framework users must
-   * opt-in by listing the exact URIs (or wildcards) they trust.
+   * Behaviour by configuration value:
+   *   - `undefined` (not set): allow localhost/127.0.0.1 only — safe default
+   *     that covers the common MCP use-case of dynamic loopback ports without
+   *     opening the proxy to arbitrary redirect URIs.
+   *   - `[]` (empty array): reject every URI — opt-in strict mode for deployments
+   *     that want full control and will configure patterns explicitly.
+   *   - `["pattern", ...]`: accept URIs matching any of the glob patterns.
    *
-   * Prior versions also fell back to allowing any https URL or localhost,
-   * which enabled attackers to DCR an arbitrary URL and then abuse it via
-   * /oauth/authorize (CWE-601). Do not re-introduce that fallback.
+   * Prior versions defaulted to `["https://*", "http://localhost:*"]` which
+   * matched any https URL, enabling CWE-601 open-redirect / authorization-code
+   * theft. Do not loosen the default beyond loopback addresses.
    */
   private validateRedirectUri(uri: string): boolean {
     try {
@@ -1371,12 +1385,22 @@ export class OAuthProxy {
       return false;
     }
 
-    const patterns = this.config.allowedRedirectUriPatterns || [];
-    if (patterns.length === 0) {
+    const patterns = this.config.allowedRedirectUriPatterns;
+
+    // Explicitly set to empty array → strict mode, reject everything.
+    if (Array.isArray(patterns) && patterns.length === 0) {
       return false;
     }
 
-    return patterns.some((pattern) => this.matchesPattern(uri, pattern));
+    // Not configured → localhost-only default (covers MCP dynamic loopback ports).
+    const effectivePatterns = patterns ?? [
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+    ];
+
+    return effectivePatterns.some((pattern) =>
+      this.matchesPattern(uri, pattern),
+    );
   }
 }
 
