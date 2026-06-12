@@ -241,6 +241,18 @@ export interface OAuthProxyConfig {
   enableTokenSwap?: boolean;
   /** Encryption key for token storage (default: auto-generated). Set to false to disable encryption. */
   encryptionKey?: false | string;
+  /**
+   * Extra query parameters appended to the upstream authorization URL.
+   * Required by providers such as Google, which only issues a refresh_token
+   * when the authorization request carries `access_type=offline` (and
+   * re-issues it on re-auth with `prompt=consent`). Without these, access
+   * expires after the upstream token TTL and can never be renewed.
+   *
+   * Core OAuth parameters managed by the proxy (client_id, redirect_uri,
+   * response_type, state, scope, code_challenge, code_challenge_method)
+   * cannot be overridden — entries with those keys are ignored.
+   */
+  extraAuthorizationParams?: Record<string, string>;
   /** Forward client's PKCE to upstream (default: false) */
   forwardPkce?: boolean;
   /** Secret key for signing JWTs when token swap is enabled */
