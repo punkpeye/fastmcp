@@ -153,18 +153,19 @@ describe("FastMCP OAuth Proxy Integration", () => {
     });
 
     try {
-      // First register a client
-      await fetch(`http://localhost:${port}/oauth/register`, {
+      // First register a client and capture the proxy-issued client_id
+      const dcrResp = await fetch(`http://localhost:${port}/oauth/register`, {
         body: JSON.stringify({
           redirect_uris: ["https://client.example.com/callback"],
         }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
+      const dcrData = (await dcrResp.json()) as { client_id: string };
 
       // Test authorization endpoint - should redirect
       const authParams = new URLSearchParams({
-        client_id: "test-client-id",
+        client_id: dcrData.client_id,
         code_challenge: "test-challenge",
         code_challenge_method: "S256",
         redirect_uri: "https://client.example.com/callback",
