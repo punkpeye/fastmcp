@@ -265,6 +265,7 @@ interface OAuthProxyConfig {
   consentRequired?: boolean; // default: true
   consentSigningKey?: string; // auto-generated if not provided
   allowedRedirectUriPatterns?: string[];
+  extraAuthorizationParams?: Record<string, string>; // provider-specific params
   transactionTtl?: number; // seconds, default: 600
   authorizationCodeTtl?: number; // seconds, default: 300
 
@@ -279,6 +280,28 @@ interface OAuthProxyConfig {
   tokenVerifier?: TokenVerifier; // custom JWT verification
 }
 ```
+
+### Extra Authorization Parameters
+
+Some providers require non-standard parameters on the authorization request.
+Google, for example, only issues a `refresh_token` when the request includes
+`access_type=offline` — without it, access expires after one hour and can
+never be renewed:
+
+```typescript
+const authProxy = new OAuthProxy({
+  // ... other config
+  extraAuthorizationParams: {
+    access_type: "offline", // Google: issue a refresh_token
+    prompt: "consent", // Google: re-issue refresh_token on re-auth
+  },
+});
+```
+
+These parameters are appended to the upstream authorization URL. Core OAuth
+parameters managed by the proxy (`client_id`, `redirect_uri`, `response_type`,
+`state`, `scope`, `code_challenge`, `code_challenge_method`) cannot be
+overridden — entries with those keys are ignored.
 
 ### Redirect URI Patterns
 

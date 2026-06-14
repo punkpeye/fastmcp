@@ -39,6 +39,21 @@ import {
 } from "./utils/tokenStore.js";
 
 /**
+ * Authorization request parameters owned by the proxy. Entries in
+ * `extraAuthorizationParams` with these keys are ignored so configuration
+ * can never override the security-critical core of the upstream request.
+ */
+const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
+  "client_id",
+  "code_challenge",
+  "code_challenge_method",
+  "redirect_uri",
+  "response_type",
+  "scope",
+  "state",
+]);
+
+/**
  * OAuth 2.1 Proxy
  * Acts as transparent intermediary between MCP clients and upstream OAuth providers
  */
@@ -1254,6 +1269,18 @@ export class OAuthProxy {
    */
   private redirectToUpstream(transaction: OAuthTransaction): Response {
     const authUrl = new URL(this.config.upstreamAuthorizationEndpoint);
+
+    // Provider-specific extras (e.g. Google's access_type=offline) go first
+    // so the proxy-controlled core parameters below always win on conflict.
+    if (this.config.extraAuthorizationParams) {
+      for (const [key, value] of Object.entries(
+        this.config.extraAuthorizationParams,
+      )) {
+        if (!RESERVED_AUTHORIZATION_PARAMS.has(key)) {
+          authUrl.searchParams.set(key, value);
+        }
+      }
+    }
 
     authUrl.searchParams.set("client_id", this.config.upstreamClientId);
     authUrl.searchParams.set(
