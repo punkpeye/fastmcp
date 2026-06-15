@@ -606,6 +606,66 @@ When creating tools that don't require parameters, you have two options:
 >
 > Both approaches are fully compatible with all MCP clients, including Cursor. FastMCP automatically generates the proper schema in both cases.
 
+#### Structured Tool Output
+
+Tools can declare an `outputSchema` and return structured data. FastMCP exposes that value as MCP `structuredContent`, while also returning a JSON text fallback for clients that only render text content.
+
+```typescript
+server.addTool({
+  name: "get-weather",
+  description: "Get weather for a city",
+  parameters: z.object({
+    city: z.string(),
+  }),
+  outputSchema: z.object({
+    temperature: z.number(),
+    humidity: z.number(),
+  }),
+  execute: async ({ city }) => {
+    const weather = await getWeather(city);
+
+    return {
+      temperature: weather.temperature,
+      humidity: weather.humidity,
+    };
+  },
+});
+```
+
+You can also return explicit text content and structured content together:
+
+```typescript
+server.addTool({
+  name: "get-weather",
+  description: "Get weather for a city",
+  parameters: z.object({
+    city: z.string(),
+  }),
+  outputSchema: z.object({
+    temperature: z.number(),
+    humidity: z.number(),
+  }),
+  execute: async ({ city }) => {
+    const weather = await getWeather(city);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${city}: ${weather.temperature}F`,
+        },
+      ],
+      structuredContent: {
+        temperature: weather.temperature,
+        humidity: weather.humidity,
+      },
+    };
+  },
+});
+```
+
+When `outputSchema` is provided, FastMCP validates `structuredContent` before sending the tool result. Invalid structured output is returned to the client as a tool error instead of silently violating the advertised schema.
+
 #### Tool Authorization
 
 You can control which tools are available to authenticated users by adding an optional `canAccess` function to a tool's definition. This function receives the authentication context and should return `true` if the user is allowed to access the tool.
@@ -2310,3 +2370,5 @@ Refer to this [issue](https://github.com/punkpeye/fastmcp/issues/25#issuecomment
 - FastMCP is inspired by the [Python implementation](https://github.com/jlowin/fastmcp) by [Jonathan Lowin](https://github.com/jlowin).
 - Parts of codebase were adopted from [LiteMCP](https://github.com/wong2/litemcp).
 - Parts of codebase were adopted from [Model Context protocolでSSEをやってみる](https://dev.classmethod.jp/articles/mcp-sse/).
+
+This project is tested with BrowserStack.

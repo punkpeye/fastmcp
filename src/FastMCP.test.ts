@@ -210,6 +210,66 @@ test("health endpoint returns ok", async () => {
   }
 });
 
+test("health and ready endpoints respond to HEAD requests", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    health: { message: "healthy", path: "/healthz" },
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: { port, stateless: true },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Load balancers and uptime probes commonly issue HEAD requests against
+    // health endpoints; they must return the same status as GET with no body.
+    const healthResponse = await fetch(`http://localhost:${port}/healthz`, {
+      method: "HEAD",
+    });
+    expect(healthResponse.status).toBe(200);
+    expect(await healthResponse.text()).toBe("");
+
+    const readyResponse = await fetch(`http://localhost:${port}/ready`, {
+      method: "HEAD",
+    });
+    expect(readyResponse.status).toBe(200);
+    expect(await readyResponse.text()).toBe("");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("ready endpoint returns 503 for HEAD when not ready", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  // A non-stateless server with no connected sessions reports not-ready.
+  await server.start({
+    httpStream: { port },
+    transportType: "httpStream",
+  });
+
+  try {
+    // HEAD must preserve the 503 status (with an empty body) so load-balancer
+    // probes still see the not-ready signal, not just a 200 from /health.
+    const response = await fetch(`http://localhost:${port}/ready`, {
+      method: "HEAD",
+    });
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe("");
+  } finally {
+    await server.stop();
+  }
+});
+
 test("calls a tool", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
@@ -4685,6 +4745,150 @@ test("adds tools with outputSchema", async () => {
         description: "Get weather for a city",
         execute: async () => {
           return JSON.stringify({ humidity: 65, temperature: 72 });
+        },
+        name: "get-weather",
+        outputSchema: z.object({
+          humidity: z.number(),
+          temperature: z.number(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("returns structuredContent for tool output that matches outputSchema", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            city: "San Francisco",
+          },
+          name: "get-weather",
+        }),
+      ).toEqual({
+        content: [
+          {
+            text: JSON.stringify({ humidity: 65, temperature: 72 }),
+            type: "text",
+          },
+        ],
+        structuredContent: {
+          humidity: 65,
+          temperature: 72,
+        },
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          return { humidity: 65, temperature: 72 };
+        },
+        name: "get-weather",
+        outputSchema: z.object({
+          humidity: z.number(),
+          temperature: z.number(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("validates explicit structuredContent against outputSchema", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            city: "San Francisco",
+          },
+          name: "get-weather",
+        }),
+      ).toEqual({
+        content: [{ text: "Weather: 72F", type: "text" }],
+        structuredContent: {
+          humidity: 65,
+          temperature: 72,
+        },
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          return {
+            content: [{ text: "Weather: 72F", type: "text" }],
+            structuredContent: { humidity: 65, temperature: 72 },
+          };
+        },
+        name: "get-weather",
+        outputSchema: z.object({
+          humidity: z.number(),
+          temperature: z.number(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("returns an error when structuredContent fails outputSchema validation", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            city: "San Francisco",
+          },
+          name: "get-weather",
+        }),
+      ).toEqual({
+        content: [
+          {
+            text: expect.stringContaining(
+              "structured output validation failed",
+            ),
+            type: "text",
+          },
+        ],
+        isError: true,
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          return { humidity: "65", temperature: 72 };
         },
         name: "get-weather",
         outputSchema: z.object({
