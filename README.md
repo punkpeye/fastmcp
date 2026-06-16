@@ -33,6 +33,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Health-check endpoint](#health-check-endpoint)
 - [Roots](#roots-management)
 - CLI for [testing](#test-with-mcp-cli) and [debugging](#inspect-with-mcp-inspector)
+- [Pay-per-call billing](docs/billing.md) via `@lemon-cake/mcp-sdk` (USDC micropayments)
 
 ## When to use FastMCP over the official SDK?
 
