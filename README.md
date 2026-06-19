@@ -219,6 +219,46 @@ openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -node
 
 See the [https-server example](src/examples/https-server.ts) for a complete demonstration.
 
+##### CORS Configuration
+
+By default, FastMCP enables CORS with a standard set of allowed headers. You can customize the CORS behavior by passing a `cors` option:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8080,
+    cors: {
+      origin: "http://localhost:3000",
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Mcp-Session-Id",
+        "Mcp-Protocol-Version",
+        "Last-Event-Id",
+        "X-Custom-Header",
+      ],
+      credentials: true,
+    },
+  },
+});
+```
+
+The `cors` option accepts:
+
+- `true` (default) - enable CORS with default settings
+- `false` - disable CORS entirely
+- An object with these fields:
+  - `origin` - a string, array of strings, or a function `(origin: string) => boolean`
+  - `allowedHeaders` - a string or array of strings
+  - `methods` - array of allowed HTTP methods
+  - `exposedHeaders` - array of headers to expose
+  - `credentials` - boolean to allow credentials
+  - `maxAge` - preflight cache duration in seconds
+
+The `CorsOptions` type is exported from `fastmcp` for convenience.
+
 #### Custom HTTP Routes
 
 FastMCP allows you to add custom HTTP routes alongside MCP endpoints, enabling you to build comprehensive HTTP services that include REST APIs, webhooks, admin interfaces, and more - all within the same server process.
@@ -565,6 +605,66 @@ When creating tools that don't require parameters, you have two options:
 > [!NOTE]
 >
 > Both approaches are fully compatible with all MCP clients, including Cursor. FastMCP automatically generates the proper schema in both cases.
+
+#### Structured Tool Output
+
+Tools can declare an `outputSchema` and return structured data. FastMCP exposes that value as MCP `structuredContent`, while also returning a JSON text fallback for clients that only render text content.
+
+```typescript
+server.addTool({
+  name: "get-weather",
+  description: "Get weather for a city",
+  parameters: z.object({
+    city: z.string(),
+  }),
+  outputSchema: z.object({
+    temperature: z.number(),
+    humidity: z.number(),
+  }),
+  execute: async ({ city }) => {
+    const weather = await getWeather(city);
+
+    return {
+      temperature: weather.temperature,
+      humidity: weather.humidity,
+    };
+  },
+});
+```
+
+You can also return explicit text content and structured content together:
+
+```typescript
+server.addTool({
+  name: "get-weather",
+  description: "Get weather for a city",
+  parameters: z.object({
+    city: z.string(),
+  }),
+  outputSchema: z.object({
+    temperature: z.number(),
+    humidity: z.number(),
+  }),
+  execute: async ({ city }) => {
+    const weather = await getWeather(city);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${city}: ${weather.temperature}F`,
+        },
+      ],
+      structuredContent: {
+        temperature: weather.temperature,
+        humidity: weather.humidity,
+      },
+    };
+  },
+});
+```
+
+When `outputSchema` is provided, FastMCP validates `structuredContent` before sending the tool result. Invalid structured output is returned to the client as a tool error instead of silently violating the advertised schema.
 
 #### Tool Authorization
 
