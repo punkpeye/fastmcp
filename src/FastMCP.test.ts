@@ -227,6 +227,34 @@ test("health endpoint returns ok", async () => {
   }
 });
 
+test("openai apps challenge endpoint returns token", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    openaiAppsChallenge: {
+      token: "test-challenge-token",
+    },
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: { port },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(
+      `http://localhost:${port}/.well-known/openai-apps-challenge`
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    expect(await response.text()).toBe("test-challenge-token");
+  } finally {
+    await server.stop();
+  }
+});
+
 test("calls a tool", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
