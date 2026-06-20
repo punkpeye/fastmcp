@@ -30,6 +30,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
+import { strictJsonSchema } from "xsschema";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -575,20 +576,24 @@ export class EdgeFastMCP {
   ): Record<string, unknown> {
     try {
       // Zod 4+: use native toJSONSchema if available
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      /* eslint-disable @typescript-eslint/no-explicit-any */
       if (typeof (z as any).toJSONSchema === "function") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return (z as any).toJSONSchema(schema) as Record<string, unknown>;
+        return strictJsonSchema(
+          (z as any).toJSONSchema(schema) as Record<string, unknown>,
+        ) as Record<string, unknown>;
       }
+      /* eslint-enable @typescript-eslint/no-explicit-any */
       // Zod 3 fallback: use zod-to-json-schema
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      /* eslint-disable @typescript-eslint/no-explicit-any */
       if ("_def" in (schema as any) || schema instanceof z.ZodType) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<
-          string,
-          unknown
-        >;
+        return strictJsonSchema(
+          zodToJsonSchema(schema as any, { target: "openApi3" }) as Record<
+            string,
+            unknown
+          >,
+        ) as Record<string, unknown>;
       }
+      /* eslint-enable @typescript-eslint/no-explicit-any */
       // For StandardSchema, fall back to a generic object schema
       return { type: "object" };
     } catch {

@@ -39,7 +39,7 @@ import { StrictEventEmitter } from "strict-event-emitter-types";
 import { setTimeout as delay } from "timers/promises";
 import { fetch } from "undici";
 import parseURITemplate from "uri-templates";
-import { toJsonSchema } from "xsschema";
+import { strictJsonSchema, toJsonSchema } from "xsschema";
 import { z } from "zod";
 
 import type { OAuthProxy } from "./auth/OAuthProxy.js";
@@ -1956,7 +1956,7 @@ export class FastMCPSession<
             annotations: tool.annotations,
             description: tool.description,
             inputSchema: (tool.parameters
-              ? await toJsonSchema(tool.parameters)
+              ? strictJsonSchema(await toJsonSchema(tool.parameters))
               : {
                   additionalProperties: false,
                   properties: {},
@@ -1964,9 +1964,9 @@ export class FastMCPSession<
                 }) as SDKTool["inputSchema"],
             name: tool.name,
             ...(tool.outputSchema && {
-              outputSchema: (await toJsonSchema(
-                tool.outputSchema,
-              )) as SDKTool["inputSchema"],
+              outputSchema: strictJsonSchema(
+                await toJsonSchema(tool.outputSchema),
+              ) as SDKTool["inputSchema"],
             }),
             // Pass through _meta for MCP ext-apps UI support (issue #229)
             ...(tool._meta && { _meta: tool._meta }),
