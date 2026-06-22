@@ -2014,6 +2014,14 @@ export class FastMCPSession<
 
       try {
         const reportProgress = async (progress: Progress) => {
+          // Progress notifications must reference the progressToken supplied by
+          // the client in the initiating request. If the client did not request
+          // progress, there is nothing to associate the update with, and sending
+          // a notification without a token produces an invalid message.
+          if (progressToken === undefined) {
+            return;
+          }
+
           try {
             await this.#server.notification({
               method: "notifications/progress",

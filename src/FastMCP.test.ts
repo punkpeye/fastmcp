@@ -710,6 +710,48 @@ test(
   },
 );
 
+test("reportProgress is a no-op when the client did not request progress", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const onError = vi.fn();
+      client.onerror = onError;
+
+      // No onprogress is passed, so the client sends no progressToken.
+      const result = (await client.callTool({
+        arguments: { a: 1, b: 2 },
+        name: "add",
+      })) as ContentResult;
+
+      await delay(100);
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(result.content).toEqual([{ text: "3", type: "text" }]);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Add two numbers",
+        execute: async (args, { reportProgress }) => {
+          await reportProgress({ progress: 0, total: 10 });
+
+          return String(args.a + args.b);
+        },
+        name: "add",
+        parameters: z.object({
+          a: z.number(),
+          b: z.number(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("sets logging levels", async () => {
   await runWithTestServer({
     run: async ({ client, session }) => {
