@@ -2310,6 +2310,14 @@ npx fastmcp dev server.ts
 
 This will run your server with [`mcp-cli`](https://github.com/wong2/mcp-cli) for testing and debugging your MCP server in the terminal.
 
+To call a tool non-interactively (for example, in scripts or automated tests), pass `--tool` and optional JSON `--args`:
+
+```bash
+npx fastmcp dev server.ts --tool add --args '{"a":1,"b":2}'
+```
+
+This prints the tool result as JSON and exits, instead of opening the interactive inspector.
+
 ### Inspect with `MCP Inspector`
 
 Another way is to use the official [`MCP Inspector`](https://modelcontextprotocol.io/docs/tools/inspector) to inspect your server with a Web UI:

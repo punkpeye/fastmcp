@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 
 import { execa } from "execa";
+import { mkdtemp, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
+
+import { buildDevCommand, buildDevConfig } from "./devCommand.js";
 
 await yargs(hideBin(process.argv))
   .scriptName("fastmcp")
@@ -14,6 +19,19 @@ await yargs(hideBin(process.argv))
         .positional("file", {
           demandOption: true,
           describe: "The path to the server file",
+          type: "string",
+        })
+
+        .option("args", {
+          describe:
+            "JSON arguments passed to the tool (requires --tool), e.g. '{\"a\":1}'",
+          type: "string",
+        })
+
+        .option("tool", {
+          alias: "t",
+          describe:
+            "Call a tool non-interactively instead of launching the inspector",
           type: "string",
         })
 
@@ -33,10 +51,33 @@ await yargs(hideBin(process.argv))
     },
 
     async (argv) => {
+      let configDir: string | undefined;
+
       try {
-        const command = argv.watch
-          ? `npx @wong2/mcp-cli npx tsx --watch ${argv.file}`
-          : `npx @wong2/mcp-cli npx tsx ${argv.file}`;
+        if (argv.args !== undefined && !argv.tool) {
+          console.error("[FastMCP Error] --args requires --tool");
+          process.exit(1);
+        }
+
+        let configPath: string | undefined;
+
+        if (argv.tool) {
+          configDir = await mkdtemp(join(tmpdir(), "fastmcp-dev-"));
+          configPath = join(configDir, "mcp-cli.json");
+          await writeFile(
+            configPath,
+            buildDevConfig(argv.file, argv.watch),
+            "utf8",
+          );
+        }
+
+        const command = buildDevCommand({
+          configPath,
+          file: argv.file,
+          tool: argv.tool,
+          toolArgs: argv.args,
+          watch: argv.watch,
+        });
 
         if (argv.verbose) {
           console.log(`[FastMCP] Starting server: ${command}`);
@@ -44,6 +85,10 @@ await yargs(hideBin(process.argv))
           console.log(
             `[FastMCP] Watch mode: ${argv.watch ? "enabled" : "disabled"}`,
           );
+
+          if (argv.tool) {
+            console.log(`[FastMCP] Tool: ${argv.tool}`);
+          }
         }
 
         await execa({
@@ -63,6 +108,10 @@ await yargs(hideBin(process.argv))
         }
 
         process.exit(1);
+      } finally {
+        if (configDir) {
+          await rm(configDir, { force: true, recursive: true });
+        }
       }
     },
   )
