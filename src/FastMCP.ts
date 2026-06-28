@@ -3506,6 +3506,273 @@ export class FastMCP<
       session.toolsListChanged(tools);
     }
   }
+
+  /**
+   * Test MCP tools against a local Ollama instance.
+   *
+   * Connects to Ollama's OpenAI-compatible `/v1/chat/completions` endpoint,
+   * sends tool definitions + prompt, and runs the agentic tool-call loop
+   * until the LLM produces a final text response.
+   *
+   * @example
+   * ```ts
+   * await server.testWithOllama({
+   *   model: "qwen3:8b",
+   *   prompt: "Check the weather in Tokyo",
+   * });
+   * ```
+   */
+  public async testWithOllama(options: {
+    /** Ollama model name (e.g. "qwen3:8b", "llama3.1:8b") */
+    model: string;
+    /** The user prompt to send */
+    prompt: string;
+    /** Ollama host URL (default: "http://localhost:11434") */
+    host?: string;
+    /** Maximum tool-call iterations before stopping (default: 10) */
+    maxIterations?: number;
+    /** System message (default: "You are a helpful assistant. Use the available tools when needed.") */
+    system?: string;
+    /** Enable verbose logging (default: false) */
+    verbose?: boolean;
+  }): Promise<{
+    /** The final text response from the LLM */
+    response: string;
+    /** All tool calls that were made during the conversation */
+    toolCalls: Array<{
+      name: string;
+      arguments: Record<string, unknown>;
+      result: string;
+    }>;
+    /** Full conversation messages */
+    messages: Array<{
+      role: string;
+      content?: string;
+      tool_calls?: unknown[];
+      tool_call_id?: string;
+    }>;
+  }> {
+    const {
+      model,
+      prompt,
+      host = "http://localhost:11434",
+      maxIterations = 10,
+      system = "You are a helpful assistant. Use the available tools when needed.",
+      verbose = false,
+    } = options;
+
+    const log = verbose ? this.#logger.info.bind(this.#logger) : () => {};
+
+    // Convert internal tools to OpenAI function-calling format
+    const tools = await Promise.all(
+      this.#tools.map(async (tool) => {
+        const schema = tool.parameters
+          ? strictJsonSchema(await toJsonSchema(tool.parameters))
+          : { type: "object" as const, properties: {} };
+
+        return {
+          type: "function" as const,
+          function: {
+            name: tool.name,
+            description: tool.description || "",
+            parameters: schema,
+          },
+        };
+      }),
+    );
+
+    log(`[testWithOllama] Model: ${model}, Tools: ${tools.length}`);
+    log(`[testWithOllama] Host: ${host}`);
+
+    // Build tool name → handler map
+    const toolMap = new Map(this.#tools.map((t) => [t.name, t]));
+
+    // Helper: call a tool and return its stringified result
+    const callTool = async (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<string> => {
+      const tool = toolMap.get(name);
+      if (!tool) {
+        return JSON.stringify({ error: `Unknown tool: ${name}` });
+      }
+      try {
+        const context = {
+          client: { version: undefined },
+          log: {
+            debug: (msg: string) => log(`[tool:${name}:debug] ${msg}`),
+            error: (msg: string) =>
+              this.#logger.error(`[tool:${name}:error] ${msg}`),
+            info: (msg: string) => log(`[tool:${name}:info] ${msg}`),
+            warn: (msg: string) =>
+              this.#logger.warn(`[tool:${name}:warn] ${msg}`),
+          },
+          reportProgress: async () => {},
+          session: undefined,
+          streamContent: async () => {},
+        } as unknown as Parameters<typeof tool.execute>[1];
+
+        const result = await tool.execute(
+          args as Parameters<typeof tool.execute>[0],
+          context,
+        );
+
+        if (result === undefined || result === null) {
+          return JSON.stringify({ success: true });
+        }
+        if (typeof result === "string") {
+          return result;
+        }
+        if ("text" in (result as { text?: string })) {
+          return (result as { text: string }).text;
+        }
+        return JSON.stringify(result);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.#logger.error(`[testWithOllama] Tool ${name} error: ${msg}`);
+        return JSON.stringify({ error: msg });
+      }
+    };
+
+    // Helper: call Ollama chat completions
+    const chat = async (
+      messages: Array<{
+        role: string;
+        content?: string;
+        tool_calls?: unknown[];
+        tool_call_id?: string;
+      }>,
+    ) => {
+      const url = `${host.replace(/\/$/, "")}/v1/chat/completions`;
+      const body = {
+        model,
+        messages,
+        tools: tools.length > 0 ? tools : undefined,
+        stream: false,
+      };
+
+      log(`[testWithOllama] Calling ${url} with ${messages.length} messages`);
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Ollama API error ${response.status}: ${text}`);
+      }
+
+      return (await response.json()) as {
+        choices: Array<{
+          message: {
+            role: string;
+            content?: string;
+            tool_calls?: Array<{
+              id: string;
+              type: "function";
+              function: { name: string; arguments: string };
+            }>;
+          };
+        }>;
+      };
+    };
+
+    // Main tool-call loop
+    const messages: Array<{
+      role: string;
+      content?: string;
+      tool_calls?: unknown[];
+      tool_call_id?: string;
+    }> = [
+      { role: "system", content: system },
+      { role: "user", content: prompt },
+    ];
+
+    const toolCallsLog: Array<{
+      name: string;
+      arguments: Record<string, unknown>;
+      result: string;
+    }> = [];
+
+    let iterations = 0;
+
+    while (iterations < maxIterations) {
+      iterations++;
+      const completion = await chat(messages);
+      const choice = completion.choices[0];
+
+      if (!choice) {
+        throw new Error("Ollama returned no choices");
+      }
+
+      const assistantMsg = choice.message;
+
+      // If no tool calls, we're done
+      if (!assistantMsg.tool_calls || assistantMsg.tool_calls.length === 0) {
+        messages.push({
+          role: "assistant",
+          content: assistantMsg.content || "",
+        });
+
+        log(`[testWithOllama] Final response after ${iterations} iteration(s)`);
+        return {
+          response: assistantMsg.content || "",
+          toolCalls: toolCallsLog,
+          messages,
+        };
+      }
+
+      // Process tool calls
+      messages.push({
+        role: "assistant",
+        content: assistantMsg.content || undefined,
+        tool_calls: assistantMsg.tool_calls as unknown[],
+      });
+
+      for (const tc of assistantMsg.tool_calls) {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(tc.function.arguments);
+        } catch {
+          log(
+            `[testWithOllama] Malformed JSON in tool args: ${tc.function.arguments}`,
+          );
+        }
+
+        log(
+          `[testWithOllama] Calling tool: ${tc.function.name}(${JSON.stringify(args)})`,
+        );
+
+        const result = await callTool(tc.function.name, args);
+
+        toolCallsLog.push({
+          name: tc.function.name,
+          arguments: args,
+          result,
+        });
+
+        messages.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: result,
+        });
+      }
+    }
+
+    // Max iterations reached
+    const lastMsg = messages[messages.length - 1];
+    this.#logger.warn(
+      `[testWithOllama] Max iterations (${maxIterations}) reached. Last response: ${lastMsg.content?.slice(0, 200)}`,
+    );
+
+    return {
+      response: lastMsg.content || "",
+      toolCalls: toolCallsLog,
+      messages,
+    };
+  }
 }
 
 // Re-export commonly used auth utilities for convenience
