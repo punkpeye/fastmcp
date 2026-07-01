@@ -3713,6 +3713,73 @@ test("stateless mode works correctly", async () => {
   }
 });
 
+test("stateless mode does not warn when client capabilities are unavailable", async () => {
+  const port = await getRandomPort();
+  const logger = {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    log: vi.fn(),
+    warn: vi.fn(),
+  };
+
+  const server = new FastMCP({
+    logger,
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Add two numbers",
+    execute: async (args) => {
+      return String(args.a + args.b);
+    },
+    name: "add",
+    parameters: z.object({
+      a: z.number(),
+      b: z.number(),
+    }),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const client = new Client(
+      {
+        name: "Test client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+
+    await client.connect(transport);
+    await client.callTool({
+      arguments: { a: 5, b: 7 },
+      name: "add",
+    });
+
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("could not infer client capabilities"),
+    );
+
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
 test("stateless mode health check includes mode indicator", async () => {
   const port = await getRandomPort();
 
