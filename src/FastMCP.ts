@@ -2258,6 +2258,25 @@ function convertObjectToSnakeCase(
   return result;
 }
 
+function joinPaths(basePath: "" | `/${string}`, path: string): `/${string}` {
+  return `${basePath}${normalizePath(path)}` as `/${string}`;
+}
+
+function normalizeBasePath(path: string | undefined): "" | `/${string}` {
+  if (!path || path === "/") {
+    return "";
+  }
+
+  const withLeadingSlash = path.startsWith("/") ? path : `/${path}`;
+  const withoutTrailingSlash = withLeadingSlash.replace(/\/+$/, "");
+
+  return withoutTrailingSlash ? (withoutTrailingSlash as `/${string}`) : "";
+}
+
+function normalizePath(path: string): `/${string}` {
+  return (path.startsWith("/") ? path : `/${path}`) as `/${string}`;
+}
+
 /**
  * Parses Basic auth header (RFC 6749 Section 2.3.1)
  */
@@ -2276,6 +2295,25 @@ function parseBasicAuthHeader(
   } catch {
     return null;
   }
+}
+
+function stripBasePath(
+  path: string,
+  basePath: "" | `/${string}`,
+): null | string {
+  if (!basePath) {
+    return path;
+  }
+
+  if (path === basePath) {
+    return "/";
+  }
+
+  if (path.startsWith(`${basePath}/`)) {
+    return path.slice(basePath.length);
+  }
+
+  return null;
 }
 
 const FastMCPEventEmitterBase: {
@@ -2627,6 +2665,7 @@ export class FastMCP<
   public async start(
     options?: Partial<{
       httpStream: {
+        basePath?: `/${string}`;
         cors?: boolean | CorsOptions;
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
@@ -2714,11 +2753,15 @@ export class FastMCP<
       const httpConfig = config.httpStream;
       const protocol =
         httpConfig.sslCert || httpConfig.sslKey ? "https" : "http";
+      const streamEndpoint = joinPaths(
+        httpConfig.basePath,
+        httpConfig.endpoint,
+      );
 
       if (httpConfig.stateless) {
         // Stateless mode - create new server instance for each request
         this.#logger.info(
-          `[FastMCP info] Starting server in stateless mode on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
+          `[FastMCP info] Starting server in stateless mode on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
         );
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
@@ -2775,7 +2818,8 @@ export class FastMCP<
               res,
               true,
               httpConfig.host,
-              httpConfig.endpoint,
+              streamEndpoint,
+              httpConfig.basePath,
             );
           },
           port: httpConfig.port,
@@ -2783,7 +2827,7 @@ export class FastMCP<
           sslCert: httpConfig.sslCert,
           sslKey: httpConfig.sslKey,
           stateless: true,
-          streamEndpoint: httpConfig.endpoint,
+          streamEndpoint,
         });
       } else {
         // Regular mode with session management
@@ -2842,7 +2886,8 @@ export class FastMCP<
               res,
               false,
               httpConfig.host,
-              httpConfig.endpoint,
+              streamEndpoint,
+              httpConfig.basePath,
             );
           },
           port: httpConfig.port,
@@ -2850,11 +2895,11 @@ export class FastMCP<
           sslCert: httpConfig.sslCert,
           sslKey: httpConfig.sslKey,
           stateless: httpConfig.stateless,
-          streamEndpoint: httpConfig.endpoint,
+          streamEndpoint,
         });
 
         this.#logger.info(
-          `[FastMCP info] server is running on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
+          `[FastMCP info] server is running on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
         );
       }
       this.#serverState = ServerState.Running;
@@ -2926,8 +2971,10 @@ export class FastMCP<
     isStateless = false,
     host: string,
     streamEndpoint?: string,
+    basePath: "" | `/${string}` = "",
   ) => {
     const url = new URL(req.url || "", `http://${host}`);
+    const basePathRelativePath = stripBasePath(url.pathname, basePath);
 
     // Try Hono routes first - users may have added routes via getApp()
     try {
@@ -2977,12 +3024,11 @@ export class FastMCP<
 
     if (enabled) {
       const path = healthConfig.path ?? "/health";
-      const url = new URL(req.url || "", `http://${host}`);
 
       try {
         if (
           (req.method === "GET" || req.method === "HEAD") &&
-          url.pathname === path
+          url.pathname === joinPaths(basePath, path)
         ) {
           res
             .writeHead(healthConfig.status ?? 200, {
@@ -3000,7 +3046,7 @@ export class FastMCP<
         // Enhanced readiness check endpoint
         if (
           (req.method === "GET" || req.method === "HEAD") &&
-          url.pathname === "/ready"
+          url.pathname === joinPaths(basePath, "/ready")
         ) {
           if (isStateless) {
             // In stateless mode, we're always ready if the server is running
@@ -3056,9 +3102,13 @@ export class FastMCP<
     const oauthConfig = this.#options.oauth;
     if (oauthConfig?.enabled && req.method === "GET") {
       const url = new URL(req.url || "", `http://${host}`);
+      const authorizationServerMetadataPath = joinPaths(
+        "",
+        `/.well-known/oauth-authorization-server${basePath}`,
+      );
 
       if (
-        url.pathname === "/.well-known/oauth-authorization-server" &&
+        url.pathname === authorizationServerMetadataPath &&
         oauthConfig.authorizationServer
       ) {
         const metadata = convertObjectToSnakeCase(
@@ -3111,10 +3161,11 @@ export class FastMCP<
     const oauthProxy = oauthConfig?.proxy;
     if (oauthProxy && oauthConfig?.enabled) {
       const url = new URL(req.url || "", `http://${host}`);
+      const oauthPath = basePathRelativePath;
 
       try {
         // DCR endpoint - POST /oauth/register
-        if (req.method === "POST" && url.pathname === "/oauth/register") {
+        if (req.method === "POST" && oauthPath === "/oauth/register") {
           await new Promise<void>((resolve) => {
             let body = "";
             req.on("data", (chunk) => (body += chunk));
@@ -3145,7 +3196,7 @@ export class FastMCP<
         }
 
         // Authorization endpoint - GET /oauth/authorize
-        if (req.method === "GET" && url.pathname === "/oauth/authorize") {
+        if (req.method === "GET" && oauthPath === "/oauth/authorize") {
           try {
             const params = Object.fromEntries(url.searchParams.entries());
             const response = await oauthProxy.authorize(
@@ -3181,7 +3232,7 @@ export class FastMCP<
         }
 
         // Callback endpoint - GET /oauth/callback
-        if (req.method === "GET" && url.pathname === "/oauth/callback") {
+        if (req.method === "GET" && oauthPath === "/oauth/callback") {
           try {
             const mockRequest = new Request(`http://${host}${req.url}`);
             const response = await oauthProxy.handleCallback(mockRequest);
@@ -3206,14 +3257,14 @@ export class FastMCP<
         }
 
         // Consent endpoint - POST /oauth/consent
-        if (req.method === "POST" && url.pathname === "/oauth/consent") {
+        if (req.method === "POST" && oauthPath === "/oauth/consent") {
           await new Promise<void>((resolve) => {
             let body = "";
             req.on("data", (chunk) => (body += chunk));
             req.on("end", async () => {
               try {
                 const mockRequest = new Request(
-                  `http://${host}/oauth/consent`,
+                  `http://${host}${url.pathname}${url.search}`,
                   {
                     body,
                     headers: {
@@ -3247,7 +3298,7 @@ export class FastMCP<
         }
 
         // Token endpoint - POST /oauth/token
-        if (req.method === "POST" && url.pathname === "/oauth/token") {
+        if (req.method === "POST" && oauthPath === "/oauth/token") {
           await new Promise<void>((resolve) => {
             let body = "";
             req.on("data", (chunk) => (body += chunk));
@@ -3366,6 +3417,7 @@ export class FastMCP<
   #parseRuntimeConfig(
     overrides?: Partial<{
       httpStream: {
+        basePath?: `/${string}`;
         cors?: boolean | CorsOptions;
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
@@ -3382,6 +3434,7 @@ export class FastMCP<
   ):
     | {
         httpStream: {
+          basePath: "" | `/${string}`;
           cors?: boolean | CorsOptions;
           enableJsonResponse?: boolean;
           endpoint: `/${string}`;
@@ -3408,12 +3461,14 @@ export class FastMCP<
     const transportArg = getArg("transport");
     const portArg = getArg("port");
     const endpointArg = getArg("endpoint");
+    const basePathArg = getArg("base-path");
     const statelessArg = getArg("stateless");
     const hostArg = getArg("host");
 
     const envTransport = process.env.FASTMCP_TRANSPORT;
     const envPort = process.env.FASTMCP_PORT;
     const envEndpoint = process.env.FASTMCP_ENDPOINT;
+    const envBasePath = process.env.FASTMCP_BASE_PATH;
     const envStateless = process.env.FASTMCP_STATELESS;
     const envHost = process.env.FASTMCP_HOST;
     // Overrides > CLI > env > defaults
@@ -3431,6 +3486,9 @@ export class FastMCP<
         overrides?.httpStream?.host || hostArg || envHost || "localhost";
       const endpoint =
         overrides?.httpStream?.endpoint || endpointArg || envEndpoint || "/mcp";
+      const basePath = normalizeBasePath(
+        overrides?.httpStream?.basePath || basePathArg || envBasePath,
+      );
       const enableJsonResponse =
         overrides?.httpStream?.enableJsonResponse || false;
       const stateless =
@@ -3446,6 +3504,7 @@ export class FastMCP<
 
       return {
         httpStream: {
+          basePath,
           cors,
           enableJsonResponse,
           endpoint: endpoint as `/${string}`,

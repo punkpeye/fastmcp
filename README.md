@@ -139,6 +139,8 @@ This will start the server and listen for HTTP streaming connections on `http://
 
 > **Note:** You can also customize the endpoint path using the `httpStream.endpoint` option (default is `/mcp`).
 
+> **Note:** To serve HTTP streaming and built-in OAuth routes under an issuer path, set `httpStream.basePath` (for example, `/issuer1`). This exposes authorization server metadata at `/.well-known/oauth-authorization-server/issuer1` per RFC 8414.
+
 > **Note:** This also starts an SSE server on `http://localhost:8080/sse`.
 
 You can connect to these servers using the appropriate client transport.
@@ -1926,6 +1928,7 @@ const server = new FastMCP({
 This configuration automatically exposes OAuth discovery endpoints:
 
 - `/.well-known/oauth-authorization-server` - Authorization server metadata (RFC 8414)
+- `/.well-known/oauth-authorization-server<basePath>` - Authorization server metadata when `httpStream.basePath` is set (RFC 8414 Section 3)
 - `/.well-known/oauth-protected-resource` - Protected resource metadata (RFC 9728)
 - `/.well-known/oauth-protected-resource<endpoint>` - Protected resource metadata at sub-path (MCP 2025-11-25)
 
