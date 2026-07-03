@@ -1925,6 +1925,25 @@ const server = new FastMCP({
 });
 ```
 
+If your MCP server is published below an issuer path, configure the HTTP
+stream base path as well:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    basePath: "/issuer1",
+    endpoint: "/mcp",
+    port: 8080,
+  },
+});
+```
+
+With this configuration, FastMCP serves the issuer-path authorization server
+metadata at `/.well-known/oauth-authorization-server/issuer1`, while protected
+resource metadata remains available for the MCP endpoint at
+`/.well-known/oauth-protected-resource/issuer1/mcp`.
+
 This configuration automatically exposes OAuth discovery endpoints:
 
 - `/.well-known/oauth-authorization-server` - Authorization server metadata (RFC 8414)
