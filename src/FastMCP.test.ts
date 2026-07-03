@@ -210,6 +210,37 @@ test("health endpoint returns ok", async () => {
   }
 });
 
+test("health and ready endpoints respect httpStream basePath", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    health: { message: "healthy", path: "/healthz" },
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: { basePath: "/issuer1", port, stateless: true },
+    transportType: "httpStream",
+  });
+
+  try {
+    const healthResponse = await fetch(
+      `http://localhost:${port}/issuer1/healthz`,
+    );
+    expect(healthResponse.status).toBe(200);
+    expect(await healthResponse.text()).toBe("healthy");
+
+    const readyResponse = await fetch(`http://localhost:${port}/issuer1/ready`);
+    expect(readyResponse.status).toBe(200);
+
+    const rootHealthResponse = await fetch(`http://localhost:${port}/healthz`);
+    expect(rootHealthResponse.status).toBe(404);
+  } finally {
+    await server.stop();
+  }
+});
+
 test("health and ready endpoints respond to HEAD requests", async () => {
   const port = await getRandomPort();
 

@@ -66,6 +66,67 @@ describe("FastMCP OAuth Support", () => {
     }
   });
 
+  it("should serve OAuth metadata under an issuer path base", async () => {
+    const port = await getRandomPort();
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        authorizationServer: {
+          authorizationEndpoint:
+            "https://auth.example.com/issuer1/oauth/authorize",
+          issuer: "https://auth.example.com/issuer1",
+          responseTypesSupported: ["code"],
+          tokenEndpoint: "https://auth.example.com/issuer1/oauth/token",
+        },
+        enabled: true,
+        protectedResource: {
+          authorizationServers: ["https://auth.example.com/issuer1"],
+          resource: "https://mcp.example.com/issuer1/mcp",
+        },
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { basePath: "/issuer1", endpoint: "/mcp", port },
+      transportType: "httpStream",
+    });
+
+    try {
+      const authServerResponse = await fetch(
+        `http://localhost:${port}/.well-known/oauth-authorization-server/issuer1`,
+      );
+      expect(authServerResponse.status).toBe(200);
+
+      const authServerMetadata = (await authServerResponse.json()) as Record<
+        string,
+        unknown
+      >;
+      expect(authServerMetadata.issuer).toBe(
+        "https://auth.example.com/issuer1",
+      );
+
+      const protectedResourceResponse = await fetch(
+        `http://localhost:${port}/.well-known/oauth-protected-resource/issuer1/mcp`,
+      );
+      expect(protectedResourceResponse.status).toBe(200);
+
+      const protectedResourceMetadata =
+        (await protectedResourceResponse.json()) as Record<string, unknown>;
+      expect(protectedResourceMetadata.resource).toBe(
+        "https://mcp.example.com/issuer1/mcp",
+      );
+
+      const rootAuthServerResponse = await fetch(
+        `http://localhost:${port}/.well-known/oauth-authorization-server`,
+      );
+      expect(rootAuthServerResponse.status).toBe(404);
+    } finally {
+      await server.stop();
+    }
+  });
+
   it("should serve OAuth protected resource metadata", async () => {
     const port = await getRandomPort();
 
