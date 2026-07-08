@@ -4569,6 +4569,69 @@ test("authentication failure handling: should not create session for authenticat
   }
 });
 
+// See https://github.com/punkpeye/fastmcp/issues/180
+test("authentication failure handling: returns 401 with WWW-Authenticate even when the error message has no auth-related keywords", async () => {
+  const port = await getRandomPort();
+  let callCount = 0;
+
+  // Regression test for a session-mode (non-stateless) request where
+  // `authenticate()` is invoked twice for the same request -- once by the
+  // transport layer and once internally by FastMCP when building the
+  // session. If the second call reports a failure whose message doesn't
+  // happen to contain a magic keyword (e.g. "Authentication", "Token",
+  // "Unauthorized"), the response must still be 401, not a generic 500.
+  const server = new FastMCP<{ authenticated: boolean; error?: string }>({
+    authenticate: async () => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return { authenticated: true };
+      }
+
+      return { authenticated: false, error: "Access denied" };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0" },
+          protocolVersion: "2024-11-05",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("WWW-Authenticate")).toContain("Bearer");
+
+    const body = (await response.json()) as {
+      error?: { code?: number; message?: string };
+    };
+    expect(body.error?.message).toBe("Access denied");
+  } finally {
+    await server.stop();
+  }
+});
+
 test("host configuration works with 0.0.0.0", async () => {
   const port = await getRandomPort();
 
