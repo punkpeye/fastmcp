@@ -2977,7 +2977,15 @@ export class FastMCP<
    * clients can distinguish "unauthenticated" from a malformed request.
    */
   #createUnauthorizedResponse(message: string): Response {
-    const resource = this.#options.oauth?.protectedResource?.resource;
+    // Only advertise resource_metadata when OAuth is enabled: the
+    // `/.well-known/oauth-protected-resource` endpoint is served only under
+    // `oauth.enabled` (and this matches how the oauth config is forwarded to
+    // mcp-proxy at the httpStream call sites), so gating here avoids pointing
+    // clients at an endpoint that would 404.
+    const oauth = this.#options.oauth;
+    const resource = oauth?.enabled
+      ? oauth.protectedResource?.resource
+      : undefined;
     const wwwAuthenticateParts = [
       'error="invalid_token"',
       `error_description="${message.replace(/"/g, '\\"')}"`,
