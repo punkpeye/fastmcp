@@ -8,6 +8,9 @@ import {
   ClientCapabilities,
   CompleteRequestSchema,
   CreateMessageRequestSchema,
+  ElicitRequestFormParams,
+  ElicitRequestURLParams,
+  ElicitResult,
   ErrorCode,
   GetPromptRequestSchema,
   GetPromptResult,
@@ -213,6 +216,15 @@ type Context<T extends FastMCPSessionAuth> = {
   client: {
     version: ReturnType<Server["getClientVersion"]>;
   };
+  /**
+   * Requests additional information from the user via the client
+   * (see https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation).
+   * The client must declare the `elicitation` capability.
+   */
+  elicit: (
+    params: ElicitRequestFormParams | ElicitRequestURLParams,
+    options?: RequestOptions,
+  ) => Promise<ElicitResult>;
   log: {
     debug: (message: string, data?: SerializableValue) => void;
     error: (message: string, data?: SerializableValue) => void;
@@ -1356,6 +1368,13 @@ export class FastMCPSession<
     this.triggerListChangedNotification("notifications/prompts/list_changed");
   }
 
+  public async requestElicitation(
+    params: ElicitRequestFormParams | ElicitRequestURLParams,
+    options?: RequestOptions,
+  ): Promise<ElicitResult> {
+    return this.#server.elicitInput(params, options);
+  }
+
   public async requestSampling(
     message: z.infer<typeof CreateMessageRequestSchema>["params"],
     options?: RequestOptions,
@@ -2122,6 +2141,10 @@ export class FastMCPSession<
           client: {
             version: this.#server.getClientVersion(),
           },
+          elicit: (
+            params: ElicitRequestFormParams | ElicitRequestURLParams,
+            options?: RequestOptions,
+          ) => this.#server.elicitInput(params, options),
           log,
           reportProgress,
           requestId:

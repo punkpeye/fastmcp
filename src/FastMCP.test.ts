@@ -3,6 +3,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   CreateMessageRequestSchema,
+  ElicitRequestSchema,
   ErrorCode,
   ListRootsRequestSchema,
   LoggingMessageNotificationSchema,
@@ -2303,6 +2304,169 @@ test("makes a sampling request", async () => {
   });
 });
 
+const elicitationTestClient = async () => {
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {
+        elicitation: { form: {} },
+      },
+    },
+  );
+  return client;
+};
+
+const elicitationTestServer = async () => {
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Greets the user by the name collected via elicitation",
+    async execute(_args, { elicit }) {
+      const response = await elicit({
+        message: "What is your name?",
+        requestedSchema: {
+          properties: {
+            name: { type: "string" },
+          },
+          required: ["name"],
+          type: "object",
+        },
+      });
+
+      if (response.action !== "accept") {
+        return `No name provided (${response.action})`;
+      }
+
+      return `Hello, ${response.content?.name}!`;
+    },
+    name: "greet-user",
+  });
+
+  return server;
+};
+
+test("makes an elicitation request from a tool", async () => {
+  const onElicitRequest = vi.fn(
+    (request: z.infer<typeof ElicitRequestSchema>) => {
+      expect(request.params.message).toBe("What is your name?");
+
+      return {
+        action: "accept" as const,
+        content: {
+          name: "Alice",
+        },
+      };
+    },
+  );
+
+  await runWithTestServer({
+    client: elicitationTestClient,
+    run: async ({ client }) => {
+      client.setRequestHandler(ElicitRequestSchema, onElicitRequest);
+
+      const result = await client.callTool({
+        arguments: {},
+        name: "greet-user",
+      });
+
+      expect(result.content).toEqual([
+        {
+          text: "Hello, Alice!",
+          type: "text",
+        },
+      ]);
+
+      expect(onElicitRequest).toHaveBeenCalledTimes(1);
+    },
+    server: elicitationTestServer,
+  });
+});
+
+test("handles a declined elicitation request", async () => {
+  await runWithTestServer({
+    client: elicitationTestClient,
+    run: async ({ client }) => {
+      client.setRequestHandler(ElicitRequestSchema, () => {
+        return {
+          action: "decline" as const,
+        };
+      });
+
+      const result = await client.callTool({
+        arguments: {},
+        name: "greet-user",
+      });
+
+      expect(result.content).toEqual([
+        {
+          text: "No name provided (decline)",
+          type: "text",
+        },
+      ]);
+    },
+    server: elicitationTestServer,
+  });
+});
+
+test("makes an elicitation request via session.requestElicitation", async () => {
+  await runWithTestServer({
+    client: elicitationTestClient,
+    run: async ({ client, session }) => {
+      client.setRequestHandler(ElicitRequestSchema, () => {
+        return {
+          action: "accept" as const,
+          content: {
+            name: "Alice",
+          },
+        };
+      });
+
+      const response = await session.requestElicitation({
+        message: "What is your name?",
+        requestedSchema: {
+          properties: {
+            name: { type: "string" },
+          },
+          required: ["name"],
+          type: "object",
+        },
+      });
+
+      expect(response).toEqual({
+        action: "accept",
+        content: {
+          name: "Alice",
+        },
+      });
+    },
+  });
+});
+
+test("rejects elicitation when the client does not declare the capability", async () => {
+  await runWithTestServer({
+    run: async ({ session }) => {
+      await expect(
+        session.requestElicitation({
+          message: "What is your name?",
+          requestedSchema: {
+            properties: {
+              name: { type: "string" },
+            },
+            required: ["name"],
+            type: "object",
+          },
+        }),
+      ).rejects.toThrow("Client does not support form elicitation");
+    },
+  });
+});
+
 test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
@@ -2662,6 +2826,7 @@ test("provides auth to tools", async () => {
     },
     {
       client: expect.any(Object),
+      elicit: expect.any(Function),
       log: {
         debug: expect.any(Function),
         error: expect.any(Function),
