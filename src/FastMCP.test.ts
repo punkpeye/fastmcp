@@ -4930,6 +4930,46 @@ test("validates explicit structuredContent against outputSchema", async () => {
   });
 });
 
+test("passes through result _meta from tool execute", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          name: "get-weather",
+        }),
+      ).toEqual({
+        _meta: {
+          requestId: "req_123",
+          retryable: true,
+        },
+        content: [{ text: "Weather: 72F", type: "text" }],
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          return {
+            _meta: {
+              requestId: "req_123",
+              retryable: true,
+            },
+            content: [{ text: "Weather: 72F", type: "text" }],
+          };
+        },
+        name: "get-weather",
+      });
+
+      return server;
+    },
+  });
+});
+
 test("returns an error when structuredContent fails outputSchema validation", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
