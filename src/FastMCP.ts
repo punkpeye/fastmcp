@@ -219,7 +219,9 @@ type Context<T extends FastMCPSessionAuth> = {
   /**
    * Requests additional information from the user via the client
    * (see https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation).
-   * The client must declare the `elicitation` capability.
+   * The client must advertise the matching `elicitation` capability mode —
+   * `elicitation: { form: {} }` for form requests (the default) and/or
+   * `elicitation: { url: {} }` for url requests.
    */
   elicit: (
     params: ElicitRequestFormParams | ElicitRequestURLParams,

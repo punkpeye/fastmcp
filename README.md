@@ -1247,7 +1247,7 @@ server.addTool({
 
 #### Elicitation
 
-Tools can request additional information from the user mid-execution via [elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation), using the `elicit` method in the context object. The client must declare the `elicitation` capability.
+Tools can request additional information from the user mid-execution via [elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation), using the `elicit` method in the context object. The client must advertise the matching `elicitation` capability mode — `elicitation: { form: {} }` for form requests (the default) and/or `elicitation: { url: {} }` for url requests.
 
 ```js
 server.addTool({
@@ -2244,7 +2244,7 @@ Refer to [Sessions](#sessions) for examples of how to obtain a `FastMCPSession` 
 
 ### `requestElicitation`
 
-`requestElicitation` creates an [elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation) request to collect additional information from the user via the client and returns the response. The client must declare the `elicitation` capability.
+`requestElicitation` creates an [elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation) request to collect additional information from the user via the client and returns the response. The client must advertise the matching `elicitation` capability mode — `elicitation: { form: {} }` for form requests (the default) and/or `elicitation: { url: {} }` for url requests.
 
 ```ts
 await session.requestElicitation({
