@@ -2912,10 +2912,13 @@ test("provides auth to resources", async () => {
   });
 
   expect(resourceLoad).toHaveBeenCalledTimes(1);
-  expect(resourceLoad).toHaveBeenCalledWith({
-    role: "admin",
-    userId: 42,
-  });
+  expect(resourceLoad).toHaveBeenCalledWith(
+    {
+      role: "admin",
+      userId: 42,
+    },
+    expect.anything(),
+  );
 
   expect(result).toEqual({
     contents: [
@@ -3007,6 +3010,7 @@ test("provides auth to resource templates", async () => {
   expect(templateLoad).toHaveBeenCalledWith(
     { resourceId: "resource-123" },
     { permissions: ["read", "write"], userId: 99 },
+    expect.anything(),
   );
 
   expect(result).toEqual({
@@ -3104,6 +3108,7 @@ test("provides auth to resource templates returning arrays", async () => {
   expect(templateLoad).toHaveBeenCalledWith(
     { category: "reports" },
     { accessLevel: 3, teamId: "team-alpha" },
+    expect.anything(),
   );
 
   expect(result).toEqual({
@@ -3299,6 +3304,7 @@ test("provides auth to prompt load function", async () => {
   expect(promptLoad).toHaveBeenCalledWith(
     { option: "dashboard" },
     { level: "admin", username: "testuser" },
+    expect.anything(),
   );
 
   expect(result).toEqual({
@@ -4789,6 +4795,151 @@ test("tools can access client info", async () => {
           return `Client name: ${clientInfo?.name || "unknown"}\nClient version: ${clientInfo?.version || "unknown"}`;
         },
         name: "get-client-info",
+      });
+
+      return server;
+    },
+  });
+});
+
+test("resources can access client info via load context", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const result = await client.readResource({
+        uri: "file:///logs/app.log",
+      });
+
+      expect(result.contents).toHaveLength(1);
+      const text = (result.contents[0] as { text: string } | undefined)
+        ?.text as string;
+      expect(text).toContain("Client name:");
+      expect(text).toContain("Client version:");
+      expect(text).toMatch(/Client name:\s+\w+/);
+      expect(text).toMatch(/Client version:\s+[\d.]+/);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResource({
+        async load(_auth, context) {
+          expect(context).toBeDefined();
+          expect(context?.log.debug).toBeInstanceOf(Function);
+          expect(context?.log.info).toBeInstanceOf(Function);
+          expect(context?.log.warn).toBeInstanceOf(Function);
+          expect(context?.log.error).toBeInstanceOf(Function);
+          expect(context).not.toHaveProperty("reportProgress");
+          expect(context).not.toHaveProperty("streamContent");
+
+          const clientInfo = context?.client.version;
+          return {
+            text: `Client name: ${clientInfo?.name || "unknown"}\nClient version: ${clientInfo?.version || "unknown"}`,
+          };
+        },
+        mimeType: "text/plain",
+        name: "Application Logs",
+        uri: "file:///logs/app.log",
+      });
+
+      return server;
+    },
+  });
+});
+
+test("resource templates can access client info via load context", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const result = await client.readResource({
+        uri: "user://profile/123",
+      });
+
+      expect(result.contents).toHaveLength(1);
+      const text = (result.contents[0] as { text: string } | undefined)
+        ?.text as string;
+      expect(text).toContain("Client name:");
+      expect(text).toContain("Client version:");
+      expect(text).toMatch(/Client name:\s+\w+/);
+      expect(text).toMatch(/Client version:\s+[\d.]+/);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResourceTemplate({
+        arguments: [
+          {
+            name: "userId",
+            required: true,
+          },
+        ],
+        async load(_args, _auth, context) {
+          expect(context).toBeDefined();
+          expect(context?.log.info).toBeInstanceOf(Function);
+          expect(context).not.toHaveProperty("reportProgress");
+          expect(context).not.toHaveProperty("streamContent");
+
+          const clientInfo = context?.client.version;
+          return {
+            text: `Client name: ${clientInfo?.name || "unknown"}\nClient version: ${clientInfo?.version || "unknown"}`,
+          };
+        },
+        mimeType: "text/plain",
+        name: "User Profile",
+        uriTemplate: "user://profile/{userId}",
+      });
+
+      return server;
+    },
+  });
+});
+
+test("prompts can access client info via load context", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const result = await client.getPrompt({
+        arguments: {
+          changes: "foo",
+        },
+        name: "git-commit",
+      });
+
+      const message = result.messages[0]?.content;
+      expect(message).toHaveProperty("type", "text");
+      const text = (message as { text: string }).text;
+      expect(text).toContain("Client name:");
+      expect(text).toContain("Client version:");
+      expect(text).toMatch(/Client name:\s+\w+/);
+      expect(text).toMatch(/Client version:\s+[\d.]+/);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addPrompt({
+        arguments: [
+          {
+            description: "Git diff or description of changes",
+            name: "changes",
+            required: true,
+          },
+        ],
+        description: "Generate a Git commit message",
+        async load(_args, _auth, context) {
+          expect(context).toBeDefined();
+          expect(context?.log.info).toBeInstanceOf(Function);
+          expect(context).not.toHaveProperty("reportProgress");
+          expect(context).not.toHaveProperty("streamContent");
+
+          const clientInfo = context?.client.version;
+          return `Client name: ${clientInfo?.name || "unknown"}\nClient version: ${clientInfo?.version || "unknown"}`;
+        },
+        name: "git-commit",
       });
 
       return server;

@@ -1368,6 +1368,23 @@ async load() {
 }
 ```
 
+`load` also receives `auth` (the value returned by your `authenticate` function, if any) and a `context` object as its second and third arguments. `context` mirrors the `client`, `log`, `session`, and `sessionId` fields available to `tool.execute` (see [Session ID and Request ID Tracking](#session-id-and-request-id-tracking)); `reportProgress` and `streamContent` are not included since they are tied to a tool call's progress token:
+
+```ts
+server.addResource({
+  uri: "file:///logs/app.log",
+  name: "Application Logs",
+  mimeType: "text/plain",
+  async load(auth, context) {
+    context.log.info("loading application logs", { requestedBy: auth?.userId });
+
+    return {
+      text: await readLogFile(),
+    };
+  },
+});
+```
+
 ### Resource templates
 
 You can also define resource templates:
@@ -1391,6 +1408,8 @@ server.addResourceTemplate({
   },
 });
 ```
+
+Like plain resources, `load` also receives `auth` and `context` as its second and third arguments (see [Resources](#resources)).
 
 #### Resource template argument auto-completion
 
@@ -1551,6 +1570,27 @@ server.addPrompt({
     },
   ],
   load: async (args) => {
+    return `Generate a concise but descriptive commit message for these changes:\n\n${args.changes}`;
+  },
+});
+```
+
+Like resources, `load` also receives `auth` and `context` as its second and third arguments (see [Resources](#resources)):
+
+```ts
+server.addPrompt({
+  name: "git-commit",
+  description: "Generate a Git commit message",
+  arguments: [
+    {
+      name: "changes",
+      description: "Git diff or description of changes",
+      required: true,
+    },
+  ],
+  load: async (args, auth, context) => {
+    context.log.debug("generating git commit prompt", { user: auth?.userId });
+
     return `Generate a concise but descriptive commit message for these changes:\n\n${args.changes}`;
   },
 });
