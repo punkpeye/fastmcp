@@ -8,6 +8,9 @@ import {
   ClientCapabilities,
   CompleteRequestSchema,
   CreateMessageRequestSchema,
+  ElicitRequestFormParams,
+  ElicitRequestURLParams,
+  ElicitResult,
   ErrorCode,
   GetPromptRequestSchema,
   GetPromptResult,
@@ -213,6 +216,17 @@ type Context<T extends FastMCPSessionAuth> = {
   client: {
     version: ReturnType<Server["getClientVersion"]>;
   };
+  /**
+   * Requests additional information from the user via the client
+   * (see https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation).
+   * The client must advertise the matching `elicitation` capability mode —
+   * `elicitation: { form: {} }` for form requests (the default) and/or
+   * `elicitation: { url: {} }` for url requests.
+   */
+  elicit: (
+    params: ElicitRequestFormParams | ElicitRequestURLParams,
+    options?: RequestOptions,
+  ) => Promise<ElicitResult>;
   log: {
     debug: (message: string, data?: SerializableValue) => void;
     error: (message: string, data?: SerializableValue) => void;
@@ -1381,6 +1395,13 @@ export class FastMCPSession<
     this.triggerListChangedNotification("notifications/prompts/list_changed");
   }
 
+  public async requestElicitation(
+    params: ElicitRequestFormParams | ElicitRequestURLParams,
+    options?: RequestOptions,
+  ): Promise<ElicitResult> {
+    return this.#server.elicitInput(params, options);
+  }
+
   public async requestSampling(
     message: z.infer<typeof CreateMessageRequestSchema>["params"],
     options?: RequestOptions,
@@ -1475,8 +1496,8 @@ export class FastMCPSession<
    * Builds the context object passed as the third argument to
    * `resource.load` / `resourceTemplate.load` / `prompt.load`.
    *
-   * This mirrors the `client`, `log`, `requestId`, `session`, and
-   * `sessionId` fields available to `tool.execute` via {@link Context}.
+   * This mirrors the `client`, `elicit`, `log`, `requestId`, `session`,
+   * and `sessionId` fields available to `tool.execute` via {@link Context}.
    * `reportProgress` and `streamContent` are intentionally omitted: they
    * are tied to a tool call's progress token / streaming notification,
    * which resource and prompt reads do not have.
@@ -1486,6 +1507,10 @@ export class FastMCPSession<
       client: {
         version: this.#server.getClientVersion(),
       },
+      elicit: (
+        params: ElicitRequestFormParams | ElicitRequestURLParams,
+        options?: RequestOptions,
+      ) => this.#server.elicitInput(params, options),
       log: this.#createLog(),
       requestId:
         typeof meta?.requestId === "string" ? meta.requestId : undefined,
@@ -2182,6 +2207,10 @@ export class FastMCPSession<
           client: {
             version: this.#server.getClientVersion(),
           },
+          elicit: (
+            params: ElicitRequestFormParams | ElicitRequestURLParams,
+            options?: RequestOptions,
+          ) => this.#server.elicitInput(params, options),
           log,
           reportProgress,
           requestId:

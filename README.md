@@ -29,6 +29,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Typed server events](#typed-server-events)
 - [Prompt argument auto-completion](#prompt-argument-auto-completion)
 - [Sampling](#requestsampling)
+- [Elicitation](#elicitation)
 - [Configurable ping behavior](#configurable-ping-behavior)
 - [Health-check endpoint](#health-check-endpoint)
 - [Roots](#roots-management)
@@ -1244,6 +1245,44 @@ server.addTool({
 });
 ```
 
+#### Elicitation
+
+Tools can request additional information from the user mid-execution via [elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation), using the `elicit` method in the context object. The client must advertise the matching `elicitation` capability mode — `elicitation: { form: {} }` for form requests (the default) and/or `elicitation: { url: {} }` for url requests.
+
+```js
+server.addTool({
+  name: "delete-file",
+  description: "Delete a file",
+  parameters: z.object({
+    path: z.string(),
+  }),
+  execute: async (args, { elicit }) => {
+    const response = await elicit({
+      message: `Are you sure you want to delete ${args.path}?`,
+      requestedSchema: {
+        type: "object",
+        properties: {
+          confirmed: {
+            type: "boolean",
+          },
+        },
+        required: ["confirmed"],
+      },
+    });
+
+    if (response.action !== "accept" || !response.content?.confirmed) {
+      return "Deletion cancelled.";
+    }
+
+    // ...
+
+    return `Deleted ${args.path}`;
+  },
+});
+```
+
+The response `action` is `"accept"`, `"decline"`, or `"cancel"`; on accept, `content` holds the user's answers matching `requestedSchema`. Elicitation is also available outside of tools via [`session.requestElicitation`](#requestelicitation).
+
 #### Tool Annotations
 
 As of the MCP Specification (2025-03-26), tools can include annotations that provide richer context and control by adding metadata about a tool's behavior:
@@ -2242,6 +2281,25 @@ server.on("disconnect", (event) => {
 `FastMCPSession` represents a client session and provides methods to interact with the client.
 
 Refer to [Sessions](#sessions) for examples of how to obtain a `FastMCPSession` instance.
+
+### `requestElicitation`
+
+`requestElicitation` creates an [elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation) request to collect additional information from the user via the client and returns the response. The client must advertise the matching `elicitation` capability mode — `elicitation: { form: {} }` for form requests (the default) and/or `elicitation: { url: {} }` for url requests.
+
+```ts
+await session.requestElicitation({
+  message: "What is your name?",
+  requestedSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+    },
+    required: ["name"],
+  },
+});
+```
+
+Inside a tool, prefer the `elicit` method from the [context object](#elicitation).
 
 ### `requestSampling`
 
