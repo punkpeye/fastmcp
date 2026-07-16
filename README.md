@@ -267,87 +267,108 @@ The `CorsOptions` type is exported from `fastmcp` for convenience.
 FastMCP allows you to add custom HTTP routes alongside MCP endpoints, enabling you to build comprehensive HTTP services that include REST APIs, webhooks, admin interfaces, and more - all within the same server process.
 
 ```ts
-// Add REST API endpoints
-server.addRoute("GET", "/api/users", async (req, res) => {
-  res.json({ users: [] });
+const app = server.getApp();
+
+// Add REST API endpoints with Hono's native API
+app.get("/api/users", async (c) => {
+  return c.json({ users: [] });
 });
 
 // Handle path parameters
-server.addRoute("GET", "/api/users/:id", async (req, res) => {
-  res.json({
-    userId: req.params.id,
-    query: req.query, // Access query parameters
+app.get("/api/users/:id", async (c) => {
+  return c.json({
+    userId: c.req.param("id"),
+    query: c.req.query(), // Access query parameters
   });
 });
 
 // Handle POST requests with body parsing
-server.addRoute("POST", "/api/users", async (req, res) => {
-  const body = await req.json();
-  res.status(201).json({ created: body });
+app.post("/api/users", async (c) => {
+  const body = await c.req.json();
+  return c.json({ created: body }, 201);
 });
 
 // Serve HTML content
-server.addRoute("GET", "/admin", async (req, res) => {
-  res.send("<html><body><h1>Admin Panel</h1></body></html>");
+app.get("/admin", async (c) => {
+  return c.html("<html><body><h1>Admin Panel</h1></body></html>");
 });
 
 // Handle webhooks
-server.addRoute("POST", "/webhook/github", async (req, res) => {
-  const payload = await req.json();
-  const event = req.headers["x-github-event"];
+app.post("/webhook/github", async (c) => {
+  const payload = await c.req.json();
+  const event = c.req.header("x-github-event");
 
   // Process webhook...
-  res.json({ received: true });
+  return c.json({ received: true });
 });
 ```
 
-Custom routes support:
+Custom routes use the underlying [Hono](https://hono.dev/) app returned by `server.getApp()` and support:
 
-- All HTTP methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
+- Hono's HTTP methods: `get`, `post`, `put`, `delete`, `patch`, `options`, and more
 - Path parameters (`:param`) and wildcards (`*`)
 - Query string parsing
-- JSON and text body parsing
+- JSON, text, form, and other body helpers from `c.req`
 - Custom status codes and headers
-- Authentication via the same `authenticate` function as MCP
-- **Public routes** that bypass authentication
+- Middleware and route groups through Hono
 
 Routes are matched in the order they are registered, allowing you to define specific routes before catch-all patterns.
 
-##### Public Routes
+##### Public and Protected Routes
 
-By default, custom routes require authentication (if configured). You can make routes public by adding the `{ public: true }` option:
+Custom Hono routes are public unless you add your own route middleware or authentication checks. For protected custom routes, put your auth logic in a reusable helper and call it from both FastMCP's `authenticate` option and your Hono route handlers:
 
 ```ts
+import type { IncomingMessage } from "node:http";
+import type { Context } from "hono";
+import { FastMCP } from "fastmcp";
+
+async function authenticateRequest(request: IncomingMessage) {
+  const apiKey = request.headers["x-api-key"];
+  return apiKey === "123" ? { userId: "123" } : undefined;
+}
+
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  authenticate: authenticateRequest,
+});
+
+const app = server.getApp();
+
+async function requireAuth(c: Context) {
+  const auth = await authenticateRequest(c.env.incoming);
+
+  if (!auth) {
+    return c.json({ error: "Authentication required" }, 401);
+  }
+
+  return auth;
+}
+
 // Public route - no authentication required
-server.addRoute(
-  "GET",
-  "/.well-known/openid-configuration",
-  async (req, res) => {
-    res.json({
-      issuer: "https://example.com",
-      authorization_endpoint: "https://example.com/auth",
-      token_endpoint: "https://example.com/token",
-    });
-  },
-  { public: true },
-);
+app.get("/.well-known/openid-configuration", async (c) => {
+  return c.json({
+    issuer: "https://example.com",
+    authorization_endpoint: "https://example.com/auth",
+    token_endpoint: "https://example.com/token",
+  });
+});
 
 // Private route - requires authentication
-server.addRoute("GET", "/api/users", async (req, res) => {
-  // req.auth contains authenticated user data
-  res.json({ users: [] });
+app.get("/api/users", async (c) => {
+  const auth = await requireAuth(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  return c.json({ users: [] });
 });
 
 // Public static files
-server.addRoute(
-  "GET",
-  "/public/*",
-  async (req, res) => {
-    // Serve static files without authentication
-    res.send(`File: ${req.url}`);
-  },
-  { public: true },
-);
+app.get("/public/*", async (c) => {
+  return c.text(`File: ${c.req.path}`);
+});
 ```
 
 Public routes are perfect for:
