@@ -242,6 +242,18 @@ type Extras = Record<string, Extra>;
 
 type Literal = boolean | null | number | string | undefined;
 
+/**
+ * Context passed to `load` for resources, resource templates, and prompts.
+ *
+ * This is a subset of the tool execution {@link Context}. `reportProgress`
+ * and `streamContent` are tied to a tool call's progress token / streaming
+ * notification and are not available outside of `tool.execute`.
+ */
+type LoadContext<T extends FastMCPSessionAuth> = Omit<
+  Context<T>,
+  "reportProgress" | "streamContent"
+>;
+
 type Progress = {
   /**
    * The progress thus far. This should increase every time progress is made, even if the total is unknown.
@@ -431,7 +443,11 @@ type InputPrompt<
   arguments?: InputPromptArgument<T>[];
   complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
-  load: (args: Args, auth?: T) => Promise<PromptResult>;
+  load: (
+    args: Args,
+    auth?: T,
+    context?: LoadContext<T>,
+  ) => Promise<PromptResult>;
   name: string;
 };
 
@@ -455,6 +471,7 @@ type InputResourceTemplate<
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
     auth?: T,
+    context?: LoadContext<T>,
   ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
@@ -488,7 +505,11 @@ type Prompt<
   arguments?: PromptArgument<T>[];
   complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
-  load: (args: Args, auth?: T) => Promise<PromptResult>;
+  load: (
+    args: Args,
+    auth?: T,
+    context?: LoadContext<T>,
+  ) => Promise<PromptResult>;
   name: string;
 };
 
@@ -516,7 +537,10 @@ type PromptResult = Pick<GetPromptResult, "messages"> | string;
 type Resource<T extends FastMCPSessionAuth> = {
   complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
-  load: (auth?: T) => Promise<ResourceResult | ResourceResult[]>;
+  load: (
+    auth?: T,
+    context?: LoadContext<T>,
+  ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
   uri: string;
@@ -545,6 +569,7 @@ type ResourceTemplate<
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
     auth?: T,
+    context?: LoadContext<T>,
   ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
@@ -1448,6 +1473,70 @@ export class FastMCPSession<
     });
   }
 
+  /**
+   * Builds the context object passed as the third argument to
+   * `resource.load` / `resourceTemplate.load` / `prompt.load`.
+   *
+   * This mirrors the `client`, `log`, `requestId`, `session`, and
+   * `sessionId` fields available to `tool.execute` via {@link Context}.
+   * `reportProgress` and `streamContent` are intentionally omitted: they
+   * are tied to a tool call's progress token / streaming notification,
+   * which resource and prompt reads do not have.
+   */
+  #createLoadContext(meta?: Record<string, unknown>): LoadContext<T> {
+    return {
+      client: {
+        version: this.#server.getClientVersion(),
+      },
+      log: this.#createLog(),
+      requestId:
+        typeof meta?.requestId === "string" ? meta.requestId : undefined,
+      session: this.#auth,
+      sessionId: this.#sessionId,
+    };
+  }
+
+  #createLog(): Context<T>["log"] {
+    return {
+      debug: (message: string, context?: SerializableValue) => {
+        this.#server.sendLoggingMessage({
+          data: {
+            context,
+            message,
+          },
+          level: "debug",
+        });
+      },
+      error: (message: string, context?: SerializableValue) => {
+        this.#server.sendLoggingMessage({
+          data: {
+            context,
+            message,
+          },
+          level: "error",
+        });
+      },
+      info: (message: string, context?: SerializableValue) => {
+        this.#server.sendLoggingMessage({
+          data: {
+            context,
+            message,
+          },
+          level: "info",
+        });
+      },
+      warn: (message: string, context?: SerializableValue) => {
+        this.#server.sendLoggingMessage({
+          data: {
+            context,
+            message,
+          },
+          level: "warning",
+        });
+      },
+    };
+  }
+
   #formatSchemaIssues(issues: readonly StandardSchemaV1.Issue[]): string {
     return this.#utils?.formatInvalidParamsErrorMessage
       ? this.#utils.formatInvalidParamsErrorMessage(issues)
@@ -1727,6 +1816,7 @@ export class FastMCPSession<
         result = await prompt.load(
           args as Record<string, string | undefined>,
           this.#auth,
+          this.#createLoadContext(request.params?._meta),
         );
       } catch (error) {
         const errorMessage =
@@ -1800,7 +1890,11 @@ export class FastMCPSession<
 
               const uri = uriTemplate.fill(match);
 
-              const result = await resourceTemplate.load(match, this.#auth);
+              const result = await resourceTemplate.load(
+                match,
+                this.#auth,
+                this.#createLoadContext(request.params?._meta),
+              );
 
               const resources = Array.isArray(result) ? result : [result];
               return {
@@ -1831,7 +1925,10 @@ export class FastMCPSession<
           let maybeArrayResult: Awaited<ReturnType<Resource<T>["load"]>>;
 
           try {
-            maybeArrayResult = await resource.load(this.#auth);
+            maybeArrayResult = await resource.load(
+              this.#auth,
+              this.#createLoadContext(request.params?._meta),
+            );
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : String(error);
@@ -2046,44 +2143,7 @@ export class FastMCPSession<
           }
         };
 
-        const log = {
-          debug: (message: string, context?: SerializableValue) => {
-            this.#server.sendLoggingMessage({
-              data: {
-                context,
-                message,
-              },
-              level: "debug",
-            });
-          },
-          error: (message: string, context?: SerializableValue) => {
-            this.#server.sendLoggingMessage({
-              data: {
-                context,
-                message,
-              },
-              level: "error",
-            });
-          },
-          info: (message: string, context?: SerializableValue) => {
-            this.#server.sendLoggingMessage({
-              data: {
-                context,
-                message,
-              },
-              level: "info",
-            });
-          },
-          warn: (message: string, context?: SerializableValue) => {
-            this.#server.sendLoggingMessage({
-              data: {
-                context,
-                message,
-              },
-              level: "warning",
-            });
-          },
-        };
+        const log = this.#createLog();
 
         // Create a promise for tool execution
         // Streams partial results while a tool is still executing
@@ -3611,6 +3671,7 @@ export type {
   ImageContent,
   InputPrompt,
   InputPromptArgument,
+  LoadContext,
   LoggingLevel,
   Progress,
   Prompt,
