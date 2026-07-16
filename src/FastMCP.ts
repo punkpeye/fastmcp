@@ -407,6 +407,7 @@ const ContentZodSchema = z.discriminatedUnion("type", [
 ]) satisfies z.ZodType<Content>;
 
 type ContentResult = {
+  _meta?: Record<string, unknown>;
   content: Content[];
   isError?: boolean;
   structuredContent?: Record<string, unknown>;
@@ -414,6 +415,7 @@ type ContentResult = {
 
 const ContentResultZodSchema = z
   .object({
+    _meta: z.record(z.string(), z.unknown()).optional(),
     content: ContentZodSchema.array(),
     isError: z.boolean().optional(),
     structuredContent: z.record(z.string(), z.unknown()).optional(),
