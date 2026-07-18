@@ -2865,9 +2865,10 @@ export class FastMCP<
               auth = await this.#authenticate(request);
 
               // In stateless mode, authentication is REQUIRED
-              // mcp-proxy will catch this error and return 401
               if (auth === undefined || auth === null) {
-                throw new Error("Authentication required");
+                throw this.#createUnauthorizedResponse(
+                  "Authentication required",
+                );
               }
             }
 
@@ -3026,7 +3027,7 @@ export class FastMCP<
         typeof (auth as { error: unknown }).error === "string"
           ? (auth as { error: string }).error
           : "Authentication failed";
-      throw new Error(errorMessage);
+      throw this.#createUnauthorizedResponse(errorMessage);
     }
 
     const allowedTools = auth
@@ -3051,6 +3052,56 @@ export class FastMCP<
       utils: this.#options.utils,
       version: this.#options.version,
     });
+  }
+
+  /**
+   * Builds a 401 Unauthorized HTTP Response for authentication failures.
+   *
+   * Throwing a `Response` (rather than a plain `Error`) guarantees that the
+   * transport (e.g. mcp-proxy) surfaces the correct status code directly,
+   * instead of relying on heuristics that infer the status code from the
+   * error message's text (see https://github.com/punkpeye/fastmcp/issues/180).
+   *
+   * The response body matches the JSON-RPC error envelope FastMCP otherwise
+   * produces, and a `WWW-Authenticate` header is included per RFC 7235 (and
+   * RFC 9728 when protected-resource metadata is configured), so HTTP-aware
+   * clients can distinguish "unauthenticated" from a malformed request.
+   */
+  #createUnauthorizedResponse(message: string): Response {
+    // Only advertise resource_metadata when OAuth is enabled: the
+    // `/.well-known/oauth-protected-resource` endpoint is served only under
+    // `oauth.enabled` (and this matches how the oauth config is forwarded to
+    // mcp-proxy at the httpStream call sites), so gating here avoids pointing
+    // clients at an endpoint that would 404.
+    const oauth = this.#options.oauth;
+    const resource = oauth?.enabled
+      ? oauth.protectedResource?.resource
+      : undefined;
+    const wwwAuthenticateParts = [
+      'error="invalid_token"',
+      `error_description="${message.replace(/"/g, '\\"')}"`,
+    ];
+
+    if (resource) {
+      wwwAuthenticateParts.push(
+        `resource_metadata="${resource}/.well-known/oauth-protected-resource"`,
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        error: { code: -32000, message },
+        id: null,
+        jsonrpc: "2.0",
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": `Bearer ${wwwAuthenticateParts.join(", ")}`,
+        },
+        status: 401,
+      },
+    );
   }
 
   /**
