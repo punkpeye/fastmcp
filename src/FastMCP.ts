@@ -1164,6 +1164,8 @@ export class FastMCPSession<
    */
   #sessionId?: string;
 
+  #stateless: boolean;
+
   #utils?: ServerOptions<T>["utils"];
 
   constructor({
@@ -1178,6 +1180,7 @@ export class FastMCPSession<
     resourcesTemplates,
     roots,
     sessionId,
+    stateless = false,
     tools,
     transportType,
     utils,
@@ -1194,6 +1197,7 @@ export class FastMCPSession<
     resourcesTemplates: InputResourceTemplate<T>[];
     roots?: ServerOptions<T>["roots"];
     sessionId?: string;
+    stateless?: boolean;
     tools: Tool<T>[];
     transportType?: "httpStream" | "stdio";
     utils?: ServerOptions<T>["utils"];
@@ -1207,6 +1211,7 @@ export class FastMCPSession<
     this.#pingConfig = ping;
     this.#rootsConfig = roots;
     this.#sessionId = sessionId;
+    this.#stateless = stateless;
     this.#needsEventLoopFlush = transportType === "httpStream";
 
     if (tools.length) {
@@ -1300,25 +1305,27 @@ export class FastMCPSession<
         }
       }
 
-      let attempt = 0;
-      const maxAttempts = 10;
-      const retryDelay = 100;
+      if (!this.#stateless) {
+        let attempt = 0;
+        const maxAttempts = 10;
+        const retryDelay = 100;
 
-      while (attempt++ < maxAttempts) {
-        const capabilities = this.#server.getClientCapabilities();
+        while (attempt++ < maxAttempts) {
+          const capabilities = this.#server.getClientCapabilities();
 
-        if (capabilities) {
-          this.#clientCapabilities = capabilities;
-          break;
+          if (capabilities) {
+            this.#clientCapabilities = capabilities;
+            break;
+          }
+
+          await delay(retryDelay);
         }
 
-        await delay(retryDelay);
-      }
-
-      if (!this.#clientCapabilities) {
-        this.#logger.warn(
-          `[FastMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`,
-        );
+        if (!this.#clientCapabilities) {
+          this.#logger.warn(
+            `[FastMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`,
+          );
+        }
       }
 
       if (
@@ -2879,7 +2886,7 @@ export class FastMCP<
 
             // In stateless mode, create a new session for each request
             // without persisting it in the sessions array
-            return this.#createSession(auth, sessionId);
+            return this.#createSession(auth, sessionId, true);
           },
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
@@ -3014,7 +3021,11 @@ export class FastMCP<
    * Creates a new FastMCPSession instance with the current configuration.
    * Used both for regular sessions and stateless requests.
    */
-  #createSession(auth?: T, sessionId?: string): FastMCPSession<T> {
+  #createSession(
+    auth?: T,
+    sessionId?: string,
+    stateless = false,
+  ): FastMCPSession<T> {
     // Check if authentication failed
     if (
       auth &&
@@ -3047,6 +3058,7 @@ export class FastMCP<
       resourcesTemplates: this.#resourcesTemplates,
       roots: this.#options.roots,
       sessionId,
+      stateless,
       tools: allowedTools,
       transportType: "httpStream",
       utils: this.#options.utils,
