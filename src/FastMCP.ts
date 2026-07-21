@@ -30,6 +30,8 @@ import {
   Tool as SDKTool,
   ServerCapabilities,
   SetLevelRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
 import { EventEmitter } from "events";
@@ -1164,6 +1166,13 @@ export class FastMCPSession<
    */
   #sessionId?: string;
 
+  /**
+   * Resource URIs the connected client has subscribed to via
+   * `resources/subscribe`. Used to scope `notifications/resources/updated`
+   * to interested clients only.
+   */
+  #subscriptions: Set<string> = new Set();
+
   #utils?: ServerOptions<T>["utils"];
 
   constructor({
@@ -1214,7 +1223,7 @@ export class FastMCPSession<
     }
 
     if (resources.length || resourcesTemplates.length) {
-      this.#capabilities.resources = {};
+      this.#capabilities.resources = { listChanged: true, subscribe: true };
     }
 
     if (prompts.length) {
@@ -1222,7 +1231,7 @@ export class FastMCPSession<
         this.addPrompt(prompt);
       }
 
-      this.#capabilities.prompts = {};
+      this.#capabilities.prompts = { listChanged: true };
     }
 
     this.#capabilities.logging = {};
@@ -1251,6 +1260,7 @@ export class FastMCPSession<
       }
 
       this.setupResourceHandlers();
+      this.setupResourceSubscriptionHandlers();
 
       if (resourcesTemplates.length) {
         for (const resourceTemplate of resourcesTemplates) {
@@ -1427,6 +1437,29 @@ export class FastMCPSession<
     }
     this.setupResourceTemplateHandlers();
     this.triggerListChangedNotification("notifications/resources/list_changed");
+  }
+
+  /**
+   * Notifies the connected client that the contents of a resource have changed.
+   *
+   * The `notifications/resources/updated` notification is only sent when the
+   * client has subscribed to the URI via `resources/subscribe`; otherwise this
+   * is a no-op.
+   */
+  async sendResourceUpdated(uri: string) {
+    if (!this.#subscriptions.has(uri)) {
+      return;
+    }
+
+    try {
+      await this.#server.sendResourceUpdated({ uri });
+    } catch (error) {
+      this.#logger.error(
+        `[FastMCP error] failed to send resources/updated notification for '${uri}'.\n\n${
+          error instanceof Error ? error.stack : JSON.stringify(error)
+        }`,
+      );
+    }
   }
 
   toolsListChanged(tools: Tool<T>[]) {
@@ -1985,6 +2018,20 @@ export class FastMCPSession<
         });
       },
     );
+  }
+
+  private setupResourceSubscriptionHandlers() {
+    this.#server.setRequestHandler(SubscribeRequestSchema, (request) => {
+      this.#subscriptions.add(request.params.uri);
+
+      return {};
+    });
+
+    this.#server.setRequestHandler(UnsubscribeRequestSchema, (request) => {
+      this.#subscriptions.delete(request.params.uri);
+
+      return {};
+    });
   }
 
   private setupResourceTemplateHandlers() {
@@ -2748,6 +2795,22 @@ export class FastMCP<
     if (this.#serverState === ServerState.Running) {
       this.#toolsListChanged(this.#tools);
     }
+  }
+
+  /**
+   * Notifies subscribed clients that a resource's contents have changed.
+   *
+   * Sends a `notifications/resources/updated` notification to every connected
+   * session that has subscribed to `uri` via `resources/subscribe`. Sessions
+   * that have not subscribed to the URI are skipped, so it is safe to call this
+   * whenever the underlying data changes.
+   *
+   * @param uri - The URI of the resource whose contents changed.
+   */
+  public async sendResourceUpdated(uri: string): Promise<void> {
+    await Promise.all(
+      this.#sessions.map((session) => session.sendResourceUpdated(uri)),
+    );
   }
 
   /**

@@ -1406,6 +1406,26 @@ server.addResource({
 });
 ```
 
+#### Subscribing to resource updates
+
+Clients can subscribe to a resource with the MCP [`resources/subscribe`](https://modelcontextprotocol.io/specification/2025-06-18/server/resources#subscriptions) method to be notified whenever its contents change. FastMCP advertises the `subscribe` capability automatically for any server that exposes resources, tracks each client's subscriptions, and lets you emit an update with `sendResourceUpdated`:
+
+```ts
+server.addResource({
+  uri: "file:///logs/app.log",
+  name: "Application Logs",
+  mimeType: "text/plain",
+  async load() {
+    return { text: await readLogFile() };
+  },
+});
+
+// Whenever the underlying data changes, notify subscribed clients:
+await server.sendResourceUpdated("file:///logs/app.log");
+```
+
+`sendResourceUpdated` only notifies clients that have subscribed to the given URI, so it is safe to call whenever your data changes. FastMCP also advertises the `listChanged` capability for resources and prompts and emits `notifications/resources/list_changed` / `notifications/prompts/list_changed` automatically when you add or remove resources, resource templates, or prompts at runtime.
+
 ### Resource templates
 
 You can also define resource templates:
