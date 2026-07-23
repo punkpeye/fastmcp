@@ -3,6 +3,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   CreateMessageRequestSchema,
+  ElicitRequestSchema,
   ErrorCode,
   ListRootsRequestSchema,
   LoggingMessageNotificationSchema,
@@ -205,6 +206,97 @@ test("health endpoint returns ok", async () => {
     const response = await fetch(`http://localhost:${port}/healthz`);
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("healthy");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("health and ready endpoints respect httpStream basePath", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    health: { message: "healthy", path: "/healthz" },
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: { basePath: "/issuer1", port, stateless: true },
+    transportType: "httpStream",
+  });
+
+  try {
+    const healthResponse = await fetch(
+      `http://localhost:${port}/issuer1/healthz`,
+    );
+    expect(healthResponse.status).toBe(200);
+    expect(await healthResponse.text()).toBe("healthy");
+
+    const readyResponse = await fetch(`http://localhost:${port}/issuer1/ready`);
+    expect(readyResponse.status).toBe(200);
+
+    const rootHealthResponse = await fetch(`http://localhost:${port}/healthz`);
+    expect(rootHealthResponse.status).toBe(404);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("health and ready endpoints respond to HEAD requests", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    health: { message: "healthy", path: "/healthz" },
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: { port, stateless: true },
+    transportType: "httpStream",
+  });
+
+  try {
+    // Load balancers and uptime probes commonly issue HEAD requests against
+    // health endpoints; they must return the same status as GET with no body.
+    const healthResponse = await fetch(`http://localhost:${port}/healthz`, {
+      method: "HEAD",
+    });
+    expect(healthResponse.status).toBe(200);
+    expect(await healthResponse.text()).toBe("");
+
+    const readyResponse = await fetch(`http://localhost:${port}/ready`, {
+      method: "HEAD",
+    });
+    expect(readyResponse.status).toBe(200);
+    expect(await readyResponse.text()).toBe("");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("ready endpoint returns 503 for HEAD when not ready", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  // A non-stateless server with no connected sessions reports not-ready.
+  await server.start({
+    httpStream: { port },
+    transportType: "httpStream",
+  });
+
+  try {
+    // HEAD must preserve the 503 status (with an empty body) so load-balancer
+    // probes still see the not-ready signal, not just a 200 from /health.
+    const response = await fetch(`http://localhost:${port}/ready`, {
+      method: "HEAD",
+    });
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe("");
   } finally {
     await server.stop();
   }
@@ -649,6 +741,48 @@ test(
     });
   },
 );
+
+test("reportProgress is a no-op when the client did not request progress", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const onError = vi.fn();
+      client.onerror = onError;
+
+      // No onprogress is passed, so the client sends no progressToken.
+      const result = (await client.callTool({
+        arguments: { a: 1, b: 2 },
+        name: "add",
+      })) as ContentResult;
+
+      await delay(100);
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(result.content).toEqual([{ text: "3", type: "text" }]);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Add two numbers",
+        execute: async (args, { reportProgress }) => {
+          await reportProgress({ progress: 0, total: 10 });
+
+          return String(args.a + args.b);
+        },
+        name: "add",
+        parameters: z.object({
+          a: z.number(),
+          b: z.number(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
 
 test("sets logging levels", async () => {
   await runWithTestServer({
@@ -2170,6 +2304,169 @@ test("makes a sampling request", async () => {
   });
 });
 
+const elicitationTestClient = async () => {
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {
+        elicitation: { form: {} },
+      },
+    },
+  );
+  return client;
+};
+
+const elicitationTestServer = async () => {
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Greets the user by the name collected via elicitation",
+    async execute(_args, { elicit }) {
+      const response = await elicit({
+        message: "What is your name?",
+        requestedSchema: {
+          properties: {
+            name: { type: "string" },
+          },
+          required: ["name"],
+          type: "object",
+        },
+      });
+
+      if (response.action !== "accept") {
+        return `No name provided (${response.action})`;
+      }
+
+      return `Hello, ${response.content?.name}!`;
+    },
+    name: "greet-user",
+  });
+
+  return server;
+};
+
+test("makes an elicitation request from a tool", async () => {
+  const onElicitRequest = vi.fn(
+    (request: z.infer<typeof ElicitRequestSchema>) => {
+      expect(request.params.message).toBe("What is your name?");
+
+      return {
+        action: "accept" as const,
+        content: {
+          name: "Alice",
+        },
+      };
+    },
+  );
+
+  await runWithTestServer({
+    client: elicitationTestClient,
+    run: async ({ client }) => {
+      client.setRequestHandler(ElicitRequestSchema, onElicitRequest);
+
+      const result = await client.callTool({
+        arguments: {},
+        name: "greet-user",
+      });
+
+      expect(result.content).toEqual([
+        {
+          text: "Hello, Alice!",
+          type: "text",
+        },
+      ]);
+
+      expect(onElicitRequest).toHaveBeenCalledTimes(1);
+    },
+    server: elicitationTestServer,
+  });
+});
+
+test("handles a declined elicitation request", async () => {
+  await runWithTestServer({
+    client: elicitationTestClient,
+    run: async ({ client }) => {
+      client.setRequestHandler(ElicitRequestSchema, () => {
+        return {
+          action: "decline" as const,
+        };
+      });
+
+      const result = await client.callTool({
+        arguments: {},
+        name: "greet-user",
+      });
+
+      expect(result.content).toEqual([
+        {
+          text: "No name provided (decline)",
+          type: "text",
+        },
+      ]);
+    },
+    server: elicitationTestServer,
+  });
+});
+
+test("makes an elicitation request via session.requestElicitation", async () => {
+  await runWithTestServer({
+    client: elicitationTestClient,
+    run: async ({ client, session }) => {
+      client.setRequestHandler(ElicitRequestSchema, () => {
+        return {
+          action: "accept" as const,
+          content: {
+            name: "Alice",
+          },
+        };
+      });
+
+      const response = await session.requestElicitation({
+        message: "What is your name?",
+        requestedSchema: {
+          properties: {
+            name: { type: "string" },
+          },
+          required: ["name"],
+          type: "object",
+        },
+      });
+
+      expect(response).toEqual({
+        action: "accept",
+        content: {
+          name: "Alice",
+        },
+      });
+    },
+  });
+});
+
+test("rejects elicitation when the client does not declare the capability", async () => {
+  await runWithTestServer({
+    run: async ({ session }) => {
+      await expect(
+        session.requestElicitation({
+          message: "What is your name?",
+          requestedSchema: {
+            properties: {
+              name: { type: "string" },
+            },
+            required: ["name"],
+            type: "object",
+          },
+        }),
+      ).rejects.toThrow("Client does not support form elicitation");
+    },
+  });
+});
+
 test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
@@ -2529,6 +2826,7 @@ test("provides auth to tools", async () => {
     },
     {
       client: expect.any(Object),
+      elicit: expect.any(Function),
       log: {
         debug: expect.any(Function),
         error: expect.any(Function),
@@ -2614,10 +2912,13 @@ test("provides auth to resources", async () => {
   });
 
   expect(resourceLoad).toHaveBeenCalledTimes(1);
-  expect(resourceLoad).toHaveBeenCalledWith({
-    role: "admin",
-    userId: 42,
-  });
+  expect(resourceLoad).toHaveBeenCalledWith(
+    {
+      role: "admin",
+      userId: 42,
+    },
+    expect.anything(),
+  );
 
   expect(result).toEqual({
     contents: [
@@ -2709,6 +3010,7 @@ test("provides auth to resource templates", async () => {
   expect(templateLoad).toHaveBeenCalledWith(
     { resourceId: "resource-123" },
     { permissions: ["read", "write"], userId: 99 },
+    expect.anything(),
   );
 
   expect(result).toEqual({
@@ -2806,6 +3108,7 @@ test("provides auth to resource templates returning arrays", async () => {
   expect(templateLoad).toHaveBeenCalledWith(
     { category: "reports" },
     { accessLevel: 3, teamId: "team-alpha" },
+    expect.anything(),
   );
 
   expect(result).toEqual({
@@ -3001,6 +3304,7 @@ test("provides auth to prompt load function", async () => {
   expect(promptLoad).toHaveBeenCalledWith(
     { option: "dashboard" },
     { level: "admin", username: "testuser" },
+    expect.anything(),
   );
 
   expect(result).toEqual({
@@ -4436,6 +4740,69 @@ test("authentication failure handling: should not create session for authenticat
   }
 });
 
+// See https://github.com/punkpeye/fastmcp/issues/180
+test("authentication failure handling: returns 401 with WWW-Authenticate even when the error message has no auth-related keywords", async () => {
+  const port = await getRandomPort();
+  let callCount = 0;
+
+  // Regression test for a session-mode (non-stateless) request where
+  // `authenticate()` is invoked twice for the same request -- once by the
+  // transport layer and once internally by FastMCP when building the
+  // session. If the second call reports a failure whose message doesn't
+  // happen to contain a magic keyword (e.g. "Authentication", "Token",
+  // "Unauthorized"), the response must still be 401, not a generic 500.
+  const server = new FastMCP<{ authenticated: boolean; error?: string }>({
+    authenticate: async () => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return { authenticated: true };
+      }
+
+      return { authenticated: false, error: "Access denied" };
+    },
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "initialize",
+        params: {
+          capabilities: {},
+          clientInfo: { name: "test", version: "1.0" },
+          protocolVersion: "2024-11-05",
+        },
+      }),
+      headers: {
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("WWW-Authenticate")).toContain("Bearer");
+
+    const body = (await response.json()) as {
+      error?: { code?: number; message?: string };
+    };
+    expect(body.error?.message).toBe("Access denied");
+  } finally {
+    await server.stop();
+  }
+});
+
 test("host configuration works with 0.0.0.0", async () => {
   const port = await getRandomPort();
 
@@ -4491,6 +4858,151 @@ test("tools can access client info", async () => {
           return `Client name: ${clientInfo?.name || "unknown"}\nClient version: ${clientInfo?.version || "unknown"}`;
         },
         name: "get-client-info",
+      });
+
+      return server;
+    },
+  });
+});
+
+test("resources can access client info via load context", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const result = await client.readResource({
+        uri: "file:///logs/app.log",
+      });
+
+      expect(result.contents).toHaveLength(1);
+      const text = (result.contents[0] as { text: string } | undefined)
+        ?.text as string;
+      expect(text).toContain("Client name:");
+      expect(text).toContain("Client version:");
+      expect(text).toMatch(/Client name:\s+\w+/);
+      expect(text).toMatch(/Client version:\s+[\d.]+/);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResource({
+        async load(_auth, context) {
+          expect(context).toBeDefined();
+          expect(context?.log.debug).toBeInstanceOf(Function);
+          expect(context?.log.info).toBeInstanceOf(Function);
+          expect(context?.log.warn).toBeInstanceOf(Function);
+          expect(context?.log.error).toBeInstanceOf(Function);
+          expect(context).not.toHaveProperty("reportProgress");
+          expect(context).not.toHaveProperty("streamContent");
+
+          const clientInfo = context?.client.version;
+          return {
+            text: `Client name: ${clientInfo?.name || "unknown"}\nClient version: ${clientInfo?.version || "unknown"}`,
+          };
+        },
+        mimeType: "text/plain",
+        name: "Application Logs",
+        uri: "file:///logs/app.log",
+      });
+
+      return server;
+    },
+  });
+});
+
+test("resource templates can access client info via load context", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const result = await client.readResource({
+        uri: "user://profile/123",
+      });
+
+      expect(result.contents).toHaveLength(1);
+      const text = (result.contents[0] as { text: string } | undefined)
+        ?.text as string;
+      expect(text).toContain("Client name:");
+      expect(text).toContain("Client version:");
+      expect(text).toMatch(/Client name:\s+\w+/);
+      expect(text).toMatch(/Client version:\s+[\d.]+/);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResourceTemplate({
+        arguments: [
+          {
+            name: "userId",
+            required: true,
+          },
+        ],
+        async load(_args, _auth, context) {
+          expect(context).toBeDefined();
+          expect(context?.log.info).toBeInstanceOf(Function);
+          expect(context).not.toHaveProperty("reportProgress");
+          expect(context).not.toHaveProperty("streamContent");
+
+          const clientInfo = context?.client.version;
+          return {
+            text: `Client name: ${clientInfo?.name || "unknown"}\nClient version: ${clientInfo?.version || "unknown"}`,
+          };
+        },
+        mimeType: "text/plain",
+        name: "User Profile",
+        uriTemplate: "user://profile/{userId}",
+      });
+
+      return server;
+    },
+  });
+});
+
+test("prompts can access client info via load context", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const result = await client.getPrompt({
+        arguments: {
+          changes: "foo",
+        },
+        name: "git-commit",
+      });
+
+      const message = result.messages[0]?.content;
+      expect(message).toHaveProperty("type", "text");
+      const text = (message as { text: string }).text;
+      expect(text).toContain("Client name:");
+      expect(text).toContain("Client version:");
+      expect(text).toMatch(/Client name:\s+\w+/);
+      expect(text).toMatch(/Client version:\s+[\d.]+/);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addPrompt({
+        arguments: [
+          {
+            description: "Git diff or description of changes",
+            name: "changes",
+            required: true,
+          },
+        ],
+        description: "Generate a Git commit message",
+        async load(_args, _auth, context) {
+          expect(context).toBeDefined();
+          expect(context?.log.info).toBeInstanceOf(Function);
+          expect(context).not.toHaveProperty("reportProgress");
+          expect(context).not.toHaveProperty("streamContent");
+
+          const clientInfo = context?.client.version;
+          return `Client name: ${clientInfo?.name || "unknown"}\nClient version: ${clientInfo?.version || "unknown"}`;
+        },
+        name: "git-commit",
       });
 
       return server;
@@ -4701,6 +5213,190 @@ test("adds tools with outputSchema", async () => {
   });
 });
 
+test("returns structuredContent for tool output that matches outputSchema", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            city: "San Francisco",
+          },
+          name: "get-weather",
+        }),
+      ).toEqual({
+        content: [
+          {
+            text: JSON.stringify({ humidity: 65, temperature: 72 }),
+            type: "text",
+          },
+        ],
+        structuredContent: {
+          humidity: 65,
+          temperature: 72,
+        },
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          return { humidity: 65, temperature: 72 };
+        },
+        name: "get-weather",
+        outputSchema: z.object({
+          humidity: z.number(),
+          temperature: z.number(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("validates explicit structuredContent against outputSchema", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            city: "San Francisco",
+          },
+          name: "get-weather",
+        }),
+      ).toEqual({
+        content: [{ text: "Weather: 72F", type: "text" }],
+        structuredContent: {
+          humidity: 65,
+          temperature: 72,
+        },
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          return {
+            content: [{ text: "Weather: 72F", type: "text" }],
+            structuredContent: { humidity: 65, temperature: 72 },
+          };
+        },
+        name: "get-weather",
+        outputSchema: z.object({
+          humidity: z.number(),
+          temperature: z.number(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("passes through result _meta from tool execute", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          name: "get-weather",
+        }),
+      ).toEqual({
+        _meta: {
+          requestId: "req_123",
+          retryable: true,
+        },
+        content: [{ text: "Weather: 72F", type: "text" }],
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          return {
+            _meta: {
+              requestId: "req_123",
+              retryable: true,
+            },
+            content: [{ text: "Weather: 72F", type: "text" }],
+          };
+        },
+        name: "get-weather",
+      });
+
+      return server;
+    },
+  });
+});
+
+test("returns an error when structuredContent fails outputSchema validation", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            city: "San Francisco",
+          },
+          name: "get-weather",
+        }),
+      ).toEqual({
+        content: [
+          {
+            text: expect.stringContaining(
+              "structured output validation failed",
+            ),
+            type: "text",
+          },
+        ],
+        isError: true,
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get weather for a city",
+        execute: async () => {
+          return { humidity: "65", temperature: 72 };
+        },
+        name: "get-weather",
+        outputSchema: z.object({
+          humidity: z.number(),
+          temperature: z.number(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("tools without outputSchema omit it from listing", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
@@ -4730,4 +5426,79 @@ test("tools without outputSchema omit it from listing", async () => {
       return server;
     },
   });
+});
+
+test("httpStream forwards custom cors allowedHeaders to mcp-proxy", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      cors: {
+        allowedHeaders: [
+          "Content-Type",
+          "Authorization",
+          "Accept",
+          "Mcp-Session-Id",
+          "Mcp-Protocol-Version",
+          "Last-Event-Id",
+          "X-Custom-Header",
+        ],
+      },
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      headers: {
+        "Access-Control-Request-Headers": "X-Custom-Header, Content-Type",
+        "Access-Control-Request-Method": "POST",
+        Origin: "http://example.com",
+      },
+      method: "OPTIONS",
+    });
+
+    const allowHeaders = response.headers.get("access-control-allow-headers");
+
+    expect(allowHeaders).toContain("X-Custom-Header");
+  } finally {
+    await server.stop();
+  }
+});
+
+test("httpStream respects cors: false by not setting CORS headers", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      cors: false,
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/mcp`, {
+      headers: {
+        "Access-Control-Request-Method": "POST",
+        Origin: "http://example.com",
+      },
+      method: "OPTIONS",
+    });
+
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  } finally {
+    await server.stop();
+  }
 });

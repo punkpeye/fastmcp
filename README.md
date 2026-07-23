@@ -29,6 +29,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Typed server events](#typed-server-events)
 - [Prompt argument auto-completion](#prompt-argument-auto-completion)
 - [Sampling](#requestsampling)
+- [Elicitation](#elicitation)
 - [Configurable ping behavior](#configurable-ping-behavior)
 - [Health-check endpoint](#health-check-endpoint)
 - [Roots](#roots-management)
@@ -139,6 +140,8 @@ This will start the server and listen for HTTP streaming connections on `http://
 
 > **Note:** You can also customize the endpoint path using the `httpStream.endpoint` option (default is `/mcp`).
 
+> **Note:** To serve HTTP streaming and built-in OAuth routes under an issuer path, set `httpStream.basePath` (for example, `/issuer1`). This exposes authorization server metadata at `/.well-known/oauth-authorization-server/issuer1` per RFC 8414.
+
 > **Note:** This also starts an SSE server on `http://localhost:8080/sse`.
 
 You can connect to these servers using the appropriate client transport.
@@ -219,92 +222,153 @@ openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -node
 
 See the [https-server example](src/examples/https-server.ts) for a complete demonstration.
 
+##### CORS Configuration
+
+By default, FastMCP enables CORS with a standard set of allowed headers. You can customize the CORS behavior by passing a `cors` option:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    port: 8080,
+    cors: {
+      origin: "http://localhost:3000",
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Mcp-Session-Id",
+        "Mcp-Protocol-Version",
+        "Last-Event-Id",
+        "X-Custom-Header",
+      ],
+      credentials: true,
+    },
+  },
+});
+```
+
+The `cors` option accepts:
+
+- `true` (default) - enable CORS with default settings
+- `false` - disable CORS entirely
+- An object with these fields:
+  - `origin` - a string, array of strings, or a function `(origin: string) => boolean`
+  - `allowedHeaders` - a string or array of strings
+  - `methods` - array of allowed HTTP methods
+  - `exposedHeaders` - array of headers to expose
+  - `credentials` - boolean to allow credentials
+  - `maxAge` - preflight cache duration in seconds
+
+The `CorsOptions` type is exported from `fastmcp` for convenience.
+
 #### Custom HTTP Routes
 
 FastMCP allows you to add custom HTTP routes alongside MCP endpoints, enabling you to build comprehensive HTTP services that include REST APIs, webhooks, admin interfaces, and more - all within the same server process.
 
 ```ts
-// Add REST API endpoints
-server.addRoute("GET", "/api/users", async (req, res) => {
-  res.json({ users: [] });
+const app = server.getApp();
+
+// Add REST API endpoints with Hono's native API
+app.get("/api/users", async (c) => {
+  return c.json({ users: [] });
 });
 
 // Handle path parameters
-server.addRoute("GET", "/api/users/:id", async (req, res) => {
-  res.json({
-    userId: req.params.id,
-    query: req.query, // Access query parameters
+app.get("/api/users/:id", async (c) => {
+  return c.json({
+    userId: c.req.param("id"),
+    query: c.req.query(), // Access query parameters
   });
 });
 
 // Handle POST requests with body parsing
-server.addRoute("POST", "/api/users", async (req, res) => {
-  const body = await req.json();
-  res.status(201).json({ created: body });
+app.post("/api/users", async (c) => {
+  const body = await c.req.json();
+  return c.json({ created: body }, 201);
 });
 
 // Serve HTML content
-server.addRoute("GET", "/admin", async (req, res) => {
-  res.send("<html><body><h1>Admin Panel</h1></body></html>");
+app.get("/admin", async (c) => {
+  return c.html("<html><body><h1>Admin Panel</h1></body></html>");
 });
 
 // Handle webhooks
-server.addRoute("POST", "/webhook/github", async (req, res) => {
-  const payload = await req.json();
-  const event = req.headers["x-github-event"];
+app.post("/webhook/github", async (c) => {
+  const payload = await c.req.json();
+  const event = c.req.header("x-github-event");
 
   // Process webhook...
-  res.json({ received: true });
+  return c.json({ received: true });
 });
 ```
 
-Custom routes support:
+Custom routes use the underlying [Hono](https://hono.dev/) app returned by `server.getApp()` and support:
 
-- All HTTP methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
+- Hono's HTTP methods: `get`, `post`, `put`, `delete`, `patch`, `options`, and more
 - Path parameters (`:param`) and wildcards (`*`)
 - Query string parsing
-- JSON and text body parsing
+- JSON, text, form, and other body helpers from `c.req`
 - Custom status codes and headers
-- Authentication via the same `authenticate` function as MCP
-- **Public routes** that bypass authentication
+- Middleware and route groups through Hono
 
 Routes are matched in the order they are registered, allowing you to define specific routes before catch-all patterns.
 
-##### Public Routes
+##### Public and Protected Routes
 
-By default, custom routes require authentication (if configured). You can make routes public by adding the `{ public: true }` option:
+Custom Hono routes are public unless you add your own route middleware or authentication checks. For protected custom routes, put your auth logic in a reusable helper and call it from both FastMCP's `authenticate` option and your Hono route handlers:
 
 ```ts
+import type { IncomingMessage } from "node:http";
+import type { Context } from "hono";
+import { FastMCP } from "fastmcp";
+
+async function authenticateRequest(request: IncomingMessage) {
+  const apiKey = request.headers["x-api-key"];
+  return apiKey === "123" ? { userId: "123" } : undefined;
+}
+
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  authenticate: authenticateRequest,
+});
+
+const app = server.getApp();
+
+async function requireAuth(c: Context) {
+  const auth = await authenticateRequest(c.env.incoming);
+
+  if (!auth) {
+    return c.json({ error: "Authentication required" }, 401);
+  }
+
+  return auth;
+}
+
 // Public route - no authentication required
-server.addRoute(
-  "GET",
-  "/.well-known/openid-configuration",
-  async (req, res) => {
-    res.json({
-      issuer: "https://example.com",
-      authorization_endpoint: "https://example.com/auth",
-      token_endpoint: "https://example.com/token",
-    });
-  },
-  { public: true },
-);
+app.get("/.well-known/openid-configuration", async (c) => {
+  return c.json({
+    issuer: "https://example.com",
+    authorization_endpoint: "https://example.com/auth",
+    token_endpoint: "https://example.com/token",
+  });
+});
 
 // Private route - requires authentication
-server.addRoute("GET", "/api/users", async (req, res) => {
-  // req.auth contains authenticated user data
-  res.json({ users: [] });
+app.get("/api/users", async (c) => {
+  const auth = await requireAuth(c);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  return c.json({ users: [] });
 });
 
 // Public static files
-server.addRoute(
-  "GET",
-  "/public/*",
-  async (req, res) => {
-    // Serve static files without authentication
-    res.send(`File: ${req.url}`);
-  },
-  { public: true },
-);
+app.get("/public/*", async (c) => {
+  return c.text(`File: ${c.req.path}`);
+});
 ```
 
 Public routes are perfect for:
@@ -565,6 +629,66 @@ When creating tools that don't require parameters, you have two options:
 > [!NOTE]
 >
 > Both approaches are fully compatible with all MCP clients, including Cursor. FastMCP automatically generates the proper schema in both cases.
+
+#### Structured Tool Output
+
+Tools can declare an `outputSchema` and return structured data. FastMCP exposes that value as MCP `structuredContent`, while also returning a JSON text fallback for clients that only render text content.
+
+```typescript
+server.addTool({
+  name: "get-weather",
+  description: "Get weather for a city",
+  parameters: z.object({
+    city: z.string(),
+  }),
+  outputSchema: z.object({
+    temperature: z.number(),
+    humidity: z.number(),
+  }),
+  execute: async ({ city }) => {
+    const weather = await getWeather(city);
+
+    return {
+      temperature: weather.temperature,
+      humidity: weather.humidity,
+    };
+  },
+});
+```
+
+You can also return explicit text content and structured content together:
+
+```typescript
+server.addTool({
+  name: "get-weather",
+  description: "Get weather for a city",
+  parameters: z.object({
+    city: z.string(),
+  }),
+  outputSchema: z.object({
+    temperature: z.number(),
+    humidity: z.number(),
+  }),
+  execute: async ({ city }) => {
+    const weather = await getWeather(city);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${city}: ${weather.temperature}F`,
+        },
+      ],
+      structuredContent: {
+        temperature: weather.temperature,
+        humidity: weather.humidity,
+      },
+    };
+  },
+});
+```
+
+When `outputSchema` is provided, FastMCP validates `structuredContent` before sending the tool result. Invalid structured output is returned to the client as a tool error instead of silently violating the advertised schema.
 
 #### Tool Authorization
 
@@ -1142,6 +1266,44 @@ server.addTool({
 });
 ```
 
+#### Elicitation
+
+Tools can request additional information from the user mid-execution via [elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation), using the `elicit` method in the context object. The client must advertise the matching `elicitation` capability mode — `elicitation: { form: {} }` for form requests (the default) and/or `elicitation: { url: {} }` for url requests.
+
+```js
+server.addTool({
+  name: "delete-file",
+  description: "Delete a file",
+  parameters: z.object({
+    path: z.string(),
+  }),
+  execute: async (args, { elicit }) => {
+    const response = await elicit({
+      message: `Are you sure you want to delete ${args.path}?`,
+      requestedSchema: {
+        type: "object",
+        properties: {
+          confirmed: {
+            type: "boolean",
+          },
+        },
+        required: ["confirmed"],
+      },
+    });
+
+    if (response.action !== "accept" || !response.content?.confirmed) {
+      return "Deletion cancelled.";
+    }
+
+    // ...
+
+    return `Deleted ${args.path}`;
+  },
+});
+```
+
+The response `action` is `"accept"`, `"decline"`, or `"cancel"`; on accept, `content` holds the user's answers matching `requestedSchema`. Elicitation is also available outside of tools via [`session.requestElicitation`](#requestelicitation).
+
 #### Tool Annotations
 
 As of the MCP Specification (2025-03-26), tools can include annotations that provide richer context and control by adding metadata about a tool's behavior:
@@ -1227,6 +1389,43 @@ async load() {
 }
 ```
 
+`load` also receives `auth` (the value returned by your `authenticate` function, if any) and a `context` object as its second and third arguments. `context` mirrors the `client`, `log`, `session`, and `sessionId` fields available to `tool.execute` (see [Session ID and Request ID Tracking](#session-id-and-request-id-tracking)); `reportProgress` and `streamContent` are not included since they are tied to a tool call's progress token:
+
+```ts
+server.addResource({
+  uri: "file:///logs/app.log",
+  name: "Application Logs",
+  mimeType: "text/plain",
+  async load(auth, context) {
+    context.log.info("loading application logs", { requestedBy: auth?.userId });
+
+    return {
+      text: await readLogFile(),
+    };
+  },
+});
+```
+
+#### Subscribing to resource updates
+
+Clients can subscribe to a resource with the MCP [`resources/subscribe`](https://modelcontextprotocol.io/specification/2025-06-18/server/resources#subscriptions) method to be notified whenever its contents change. FastMCP advertises the `subscribe` capability automatically for any server that exposes resources, tracks each client's subscriptions, and lets you emit an update with `sendResourceUpdated`:
+
+```ts
+server.addResource({
+  uri: "file:///logs/app.log",
+  name: "Application Logs",
+  mimeType: "text/plain",
+  async load() {
+    return { text: await readLogFile() };
+  },
+});
+
+// Whenever the underlying data changes, notify subscribed clients:
+await server.sendResourceUpdated("file:///logs/app.log");
+```
+
+`sendResourceUpdated` only notifies clients that have subscribed to the given URI, so it is safe to call whenever your data changes. FastMCP also advertises the `listChanged` capability for resources and prompts and emits `notifications/resources/list_changed` / `notifications/prompts/list_changed` automatically when you add or remove resources, resource templates, or prompts at runtime.
+
 ### Resource templates
 
 You can also define resource templates:
@@ -1250,6 +1449,8 @@ server.addResourceTemplate({
   },
 });
 ```
+
+Like plain resources, `load` also receives `auth` and `context` as its second and third arguments (see [Resources](#resources)).
 
 #### Resource template argument auto-completion
 
@@ -1410,6 +1611,27 @@ server.addPrompt({
     },
   ],
   load: async (args) => {
+    return `Generate a concise but descriptive commit message for these changes:\n\n${args.changes}`;
+  },
+});
+```
+
+Like resources, `load` also receives `auth` and `context` as its second and third arguments (see [Resources](#resources)):
+
+```ts
+server.addPrompt({
+  name: "git-commit",
+  description: "Generate a Git commit message",
+  arguments: [
+    {
+      name: "changes",
+      description: "Git diff or description of changes",
+      required: true,
+    },
+  ],
+  load: async (args, auth, context) => {
+    context.log.debug("generating git commit prompt", { user: auth?.userId });
+
     return `Generate a concise but descriptive commit message for these changes:\n\n${args.changes}`;
   },
 });
@@ -1823,9 +2045,29 @@ const server = new FastMCP({
 });
 ```
 
+If your MCP server is published below an issuer path, configure the HTTP
+stream base path as well:
+
+```ts
+server.start({
+  transportType: "httpStream",
+  httpStream: {
+    basePath: "/issuer1",
+    endpoint: "/mcp",
+    port: 8080,
+  },
+});
+```
+
+With this configuration, FastMCP serves the issuer-path authorization server
+metadata at `/.well-known/oauth-authorization-server/issuer1`, while protected
+resource metadata remains available for the MCP endpoint at
+`/.well-known/oauth-protected-resource/issuer1/mcp`.
+
 This configuration automatically exposes OAuth discovery endpoints:
 
 - `/.well-known/oauth-authorization-server` - Authorization server metadata (RFC 8414)
+- `/.well-known/oauth-authorization-server<basePath>` - Authorization server metadata when `httpStream.basePath` is set (RFC 8414 Section 3)
 - `/.well-known/oauth-protected-resource` - Protected resource metadata (RFC 9728)
 - `/.well-known/oauth-protected-resource<endpoint>` - Protected resource metadata at sub-path (MCP 2025-11-25)
 
@@ -2080,6 +2322,25 @@ server.on("disconnect", (event) => {
 `FastMCPSession` represents a client session and provides methods to interact with the client.
 
 Refer to [Sessions](#sessions) for examples of how to obtain a `FastMCPSession` instance.
+
+### `requestElicitation`
+
+`requestElicitation` creates an [elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation) request to collect additional information from the user via the client and returns the response. The client must advertise the matching `elicitation` capability mode — `elicitation: { form: {} }` for form requests (the default) and/or `elicitation: { url: {} }` for url requests.
+
+```ts
+await session.requestElicitation({
+  message: "What is your name?",
+  requestedSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+    },
+    required: ["name"],
+  },
+});
+```
+
+Inside a tool, prefer the `elicit` method from the [context object](#elicitation).
 
 ### `requestSampling`
 
