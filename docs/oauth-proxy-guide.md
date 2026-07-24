@@ -676,6 +676,12 @@ The bundled `MemoryTokenStorage` and `DiskStore` both implement it —
 `DiskStore` claims entries with an atomic `rename()`, so several processes
 sharing one directory are safe.
 
+Because codes are consumed at the start of the exchange, a token request that
+then fails validation — wrong `client_id`, bad PKCE `code_verifier` — spends
+the code. The client has to restart at `/oauth/authorize` rather than retry the
+same code. That is deliberate: a code presented without the matching verifier
+has most likely leaked, so it should not stay redeemable.
+
 ### JWKS Token Verification
 
 For distributed systems or when you need to verify tokens using public keys (RS256/ES256), use JWKS (JSON Web Key Set) verification.

@@ -64,9 +64,12 @@ export class OAuthProxy {
   private config: OAuthProxyConfig;
   private consentManager: ConsentManager;
   private jwtIssuer?: JWTIssuer;
-  /** Keyed by redirect_uri for defence-in-depth checks in handleCallback/handleConsent */
-  private registeredClients: Map<string, ProxyDCRClient> = new Map();
-  /** Keyed by proxy-issued client_id for authorize/token-exchange lookups */
+  /**
+   * Keyed by proxy-issued client_id for authorize/token-exchange lookups and
+   * for the defence-in-depth callback checks. A registration never changes
+   * after it is written, so caching it locally cannot go stale; it is also
+   * persisted, so another instance can hydrate it.
+   */
   private registeredClientsByClientId: Map<string, ProxyDCRClient> = new Map();
   private stateStore: OAuthProxyStateStore;
   private tokenStorage: TokenStorage;
@@ -102,7 +105,6 @@ export class OAuthProxy {
 
     this.tokenStorage = storage;
     this.stateStore = new OAuthProxyStateStore({
-      registeredClients: this.registeredClients,
       registeredClientsByClientId: this.registeredClientsByClientId,
       tokenStorage: this.tokenStorage,
     });
@@ -207,7 +209,6 @@ export class OAuthProxy {
       this.cleanupInterval = null;
     }
 
-    this.registeredClients.clear();
     this.registeredClientsByClientId.clear();
   }
 
@@ -631,7 +632,7 @@ export class OAuthProxy {
   }
 
   /**
-   * Clean up expired transactions and codes
+   * Periodic maintenance hook. Expiry is enforced by the token storage.
    */
   private cleanup(): void {
     // Transactions and codes live in the token storage with a TTL derived from

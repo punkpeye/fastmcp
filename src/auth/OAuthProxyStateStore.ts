@@ -93,7 +93,6 @@ const oauthTransactionStorageSchema: z.ZodType<OAuthTransaction> = z.object({
 });
 
 interface OAuthProxyStateStoreConfig {
-  readonly registeredClients: Map<string, ProxyDCRClient>;
   readonly registeredClientsByClientId: Map<string, ProxyDCRClient>;
   readonly tokenStorage: TokenStorage;
 }
@@ -109,22 +108,16 @@ interface OAuthProxyStateStoreConfig {
  * a second time.
  */
 export class OAuthProxyStateStore {
-  private readonly registeredClients: Map<string, ProxyDCRClient>;
   private readonly registeredClientsByClientId: Map<string, ProxyDCRClient>;
   private readonly tokenStorage: TokenStorage;
 
   constructor(config: OAuthProxyStateStoreConfig) {
-    this.registeredClients = config.registeredClients;
     this.registeredClientsByClientId = config.registeredClientsByClientId;
     this.tokenStorage = config.tokenStorage;
   }
 
   cacheRegisteredClient(client: ProxyDCRClient): void {
     this.registeredClientsByClientId.set(client.clientId, client);
-
-    for (const uri of client.redirectUris) {
-      this.registeredClients.set(uri, client);
-    }
   }
 
   /**
@@ -162,10 +155,6 @@ export class OAuthProxyStateStore {
     }
 
     return parsed.data;
-  }
-
-  async deleteClientCode(code: string): Promise<void> {
-    await this.tokenStorage.delete(`${STORAGE_KEY_PREFIX.code}${code}`);
   }
 
   async deleteTransaction(transactionId: string): Promise<void> {

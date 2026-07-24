@@ -171,6 +171,71 @@ describe("OAuthProxy TokenStorage persistence", () => {
     });
   });
 
+  it("carries a consent-gated flow across instances", async () => {
+    // Consent is the one flow that reads a transaction without consuming it:
+    // the approving instance has to hand the same transaction to the upstream
+    // redirect, and a later instance still has to be able to use it.
+    const tokenStorage = createStorage();
+    mockUpstreamTokenEndpoint();
+
+    const consentConfig = { ...baseConfig, consentRequired: true };
+    const consentProxies = [0, 1, 2].map(() => {
+      const proxy = new OAuthProxy({ ...consentConfig, tokenStorage });
+      proxies.push(proxy);
+      return proxy;
+    });
+
+    const dcr = await consentProxies[0].registerClient({
+      redirect_uris: [CALLBACK_URL],
+    });
+
+    // Authorization renders the consent screen instead of redirecting.
+    const consentResponse = await consentProxies[0].authorize(
+      authParams(dcr.client_id),
+    );
+    expect(consentResponse.status).toBe(200);
+
+    const transactionId = /name="transaction_id" value="([^"]+)"/.exec(
+      await consentResponse.text(),
+    )?.[1];
+    expect(transactionId).toBeTruthy();
+
+    // A second instance handles the approval and redirects upstream.
+    const approvalResponse = await consentProxies[1].handleConsent(
+      new Request(`${baseConfig.baseUrl}/oauth/consent`, {
+        body: new URLSearchParams({
+          action: "approve",
+          transaction_id: transactionId!,
+        }).toString(),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        method: "POST",
+      }),
+    );
+
+    expect(approvalResponse.status).toBe(302);
+    const upstreamUrl = new URL(getRequiredLocation(approvalResponse));
+    expect(upstreamUrl.origin + upstreamUrl.pathname).toBe(
+      baseConfig.upstreamAuthorizationEndpoint,
+    );
+
+    // And a third instance can still complete the callback for it.
+    const callbackResponse = await consentProxies[2].handleCallback(
+      new Request(
+        `${baseConfig.baseUrl}/oauth/callback?code=upstream-code&state=${encodeURIComponent(
+          getRequiredSearchParam(upstreamUrl, "state"),
+        )}`,
+      ),
+    );
+
+    expect(callbackResponse.status).toBe(302);
+    expect(
+      getRequiredSearchParam(
+        new URL(getRequiredLocation(callbackResponse)),
+        "code",
+      ),
+    ).toBeTruthy();
+  });
+
   describe("single use is enforced across instances", () => {
     /**
      * Drives authorize -> callback and returns everything needed to redeem the

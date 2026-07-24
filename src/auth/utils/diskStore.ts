@@ -198,7 +198,10 @@ export class DiskStore implements TokenStorage {
    */
   async take(key: string): Promise<null | unknown> {
     const filePath = this.getFilePath(key);
-    const claimPath = `${filePath}.${randomUUID()}.claim`;
+    // Keep the configured extension on the claim file so that if the process
+    // dies between the rename and the unlink, cleanup() still reaps it once
+    // the entry expires rather than leaving it on disk forever.
+    const claimPath = `${filePath}.${randomUUID()}.claim${this.fileExtension}`;
 
     try {
       await rename(filePath, claimPath);

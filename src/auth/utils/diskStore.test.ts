@@ -244,7 +244,7 @@ describe("DiskStore", () => {
       await store.take("claim-key");
 
       const files = await readdir(TEST_DIR);
-      expect(files.filter((file) => file.endsWith(".claim"))).toHaveLength(0);
+      expect(files.filter((file) => file.includes(".claim"))).toHaveLength(0);
 
       store.destroy();
     });
