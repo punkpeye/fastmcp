@@ -30,6 +30,8 @@ import {
   Tool as SDKTool,
   ServerCapabilities,
   SetLevelRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
 import { EventEmitter } from "events";
@@ -1164,6 +1166,13 @@ export class FastMCPSession<
    */
   #sessionId?: string;
 
+  /**
+   * Resource URIs the connected client has subscribed to via
+   * `resources/subscribe`. Used to scope `notifications/resources/updated`
+   * to interested clients only.
+   */
+  #subscriptions: Set<string> = new Set();
+
   #utils?: ServerOptions<T>["utils"];
 
   constructor({
@@ -1214,7 +1223,7 @@ export class FastMCPSession<
     }
 
     if (resources.length || resourcesTemplates.length) {
-      this.#capabilities.resources = {};
+      this.#capabilities.resources = { listChanged: true, subscribe: true };
     }
 
     if (prompts.length) {
@@ -1222,7 +1231,7 @@ export class FastMCPSession<
         this.addPrompt(prompt);
       }
 
-      this.#capabilities.prompts = {};
+      this.#capabilities.prompts = { listChanged: true };
     }
 
     this.#capabilities.logging = {};
@@ -1251,6 +1260,7 @@ export class FastMCPSession<
       }
 
       this.setupResourceHandlers();
+      this.setupResourceSubscriptionHandlers();
 
       if (resourcesTemplates.length) {
         for (const resourceTemplate of resourcesTemplates) {
@@ -1427,6 +1437,29 @@ export class FastMCPSession<
     }
     this.setupResourceTemplateHandlers();
     this.triggerListChangedNotification("notifications/resources/list_changed");
+  }
+
+  /**
+   * Notifies the connected client that the contents of a resource have changed.
+   *
+   * The `notifications/resources/updated` notification is only sent when the
+   * client has subscribed to the URI via `resources/subscribe`; otherwise this
+   * is a no-op.
+   */
+  async sendResourceUpdated(uri: string) {
+    if (!this.#subscriptions.has(uri)) {
+      return;
+    }
+
+    try {
+      await this.#server.sendResourceUpdated({ uri });
+    } catch (error) {
+      this.#logger.error(
+        `[FastMCP error] failed to send resources/updated notification for '${uri}'.\n\n${
+          error instanceof Error ? error.stack : JSON.stringify(error)
+        }`,
+      );
+    }
   }
 
   toolsListChanged(tools: Tool<T>[]) {
@@ -1985,6 +2018,20 @@ export class FastMCPSession<
         });
       },
     );
+  }
+
+  private setupResourceSubscriptionHandlers() {
+    this.#server.setRequestHandler(SubscribeRequestSchema, (request) => {
+      this.#subscriptions.add(request.params.uri);
+
+      return {};
+    });
+
+    this.#server.setRequestHandler(UnsubscribeRequestSchema, (request) => {
+      this.#subscriptions.delete(request.params.uri);
+
+      return {};
+    });
   }
 
   private setupResourceTemplateHandlers() {
@@ -2751,6 +2798,22 @@ export class FastMCP<
   }
 
   /**
+   * Notifies subscribed clients that a resource's contents have changed.
+   *
+   * Sends a `notifications/resources/updated` notification to every connected
+   * session that has subscribed to `uri` via `resources/subscribe`. Sessions
+   * that have not subscribed to the URI are skipped, so it is safe to call this
+   * whenever the underlying data changes.
+   *
+   * @param uri - The URI of the resource whose contents changed.
+   */
+  public async sendResourceUpdated(uri: string): Promise<void> {
+    await Promise.all(
+      this.#sessions.map((session) => session.sendResourceUpdated(uri)),
+    );
+  }
+
+  /**
    * Starts the server.
    */
   public async start(
@@ -2813,6 +2876,22 @@ export class FastMCP<
 
       await session.connect(transport);
 
+      // Belt-and-suspenders: detect when the MCP client closes its end of
+      // the stdin pipe and shut down the transport so the process doesn't
+      // linger as a zombie/orphan. The upstream SDK fix (PR #2003) handles
+      // this inside StdioServerTransport itself, but adding the listener here
+      // means older SDK versions are also protected.
+      let stdinClosed = false;
+      const onStdinClose = () => {
+        if (stdinClosed) return;
+        stdinClosed = true;
+        process.stdin.off("close", onStdinClose);
+        process.stdin.off("end", onStdinClose);
+        transport.close().catch(() => {});
+      };
+      process.stdin.on("close", onStdinClose);
+      process.stdin.on("end", onStdinClose);
+
       this.#sessions.push(session);
 
       session.once("error", () => {
@@ -2824,6 +2903,8 @@ export class FastMCP<
         const originalOnClose = transport.onclose;
 
         transport.onclose = () => {
+          process.stdin.off("close", onStdinClose);
+          process.stdin.off("end", onStdinClose);
           this.#removeSession(session);
 
           if (originalOnClose) {
@@ -2832,6 +2913,8 @@ export class FastMCP<
         };
       } else {
         transport.onclose = () => {
+          process.stdin.off("close", onStdinClose);
+          process.stdin.off("end", onStdinClose);
           this.#removeSession(session);
         };
       }
@@ -2865,9 +2948,10 @@ export class FastMCP<
               auth = await this.#authenticate(request);
 
               // In stateless mode, authentication is REQUIRED
-              // mcp-proxy will catch this error and return 401
               if (auth === undefined || auth === null) {
-                throw new Error("Authentication required");
+                throw this.#createUnauthorizedResponse(
+                  "Authentication required",
+                );
               }
             }
 
@@ -3026,7 +3110,7 @@ export class FastMCP<
         typeof (auth as { error: unknown }).error === "string"
           ? (auth as { error: string }).error
           : "Authentication failed";
-      throw new Error(errorMessage);
+      throw this.#createUnauthorizedResponse(errorMessage);
     }
 
     const allowedTools = auth
@@ -3051,6 +3135,56 @@ export class FastMCP<
       utils: this.#options.utils,
       version: this.#options.version,
     });
+  }
+
+  /**
+   * Builds a 401 Unauthorized HTTP Response for authentication failures.
+   *
+   * Throwing a `Response` (rather than a plain `Error`) guarantees that the
+   * transport (e.g. mcp-proxy) surfaces the correct status code directly,
+   * instead of relying on heuristics that infer the status code from the
+   * error message's text (see https://github.com/punkpeye/fastmcp/issues/180).
+   *
+   * The response body matches the JSON-RPC error envelope FastMCP otherwise
+   * produces, and a `WWW-Authenticate` header is included per RFC 7235 (and
+   * RFC 9728 when protected-resource metadata is configured), so HTTP-aware
+   * clients can distinguish "unauthenticated" from a malformed request.
+   */
+  #createUnauthorizedResponse(message: string): Response {
+    // Only advertise resource_metadata when OAuth is enabled: the
+    // `/.well-known/oauth-protected-resource` endpoint is served only under
+    // `oauth.enabled` (and this matches how the oauth config is forwarded to
+    // mcp-proxy at the httpStream call sites), so gating here avoids pointing
+    // clients at an endpoint that would 404.
+    const oauth = this.#options.oauth;
+    const resource = oauth?.enabled
+      ? oauth.protectedResource?.resource
+      : undefined;
+    const wwwAuthenticateParts = [
+      'error="invalid_token"',
+      `error_description="${message.replace(/"/g, '\\"')}"`,
+    ];
+
+    if (resource) {
+      wwwAuthenticateParts.push(
+        `resource_metadata="${resource}/.well-known/oauth-protected-resource"`,
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        error: { code: -32000, message },
+        id: null,
+        jsonrpc: "2.0",
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": `Bearer ${wwwAuthenticateParts.join(", ")}`,
+        },
+        status: 401,
+      },
+    );
   }
 
   /**
