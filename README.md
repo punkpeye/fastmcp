@@ -1951,14 +1951,9 @@ const server = new FastMCP({
 FastMCP also supports OAuth discovery endpoints for direct integration with OAuth providers, supporting both **MCP Specification 2025-03-26** and **MCP Specification 2025-06-18**. This provides standard discovery endpoints that comply with RFC 8414 (OAuth 2.0 Authorization Server Metadata) and RFC 9470 (OAuth 2.0 Protected Resource Metadata):
 
 ```ts
-import { FastMCP, DiscoveryDocumentCache } from "fastmcp";
-import { buildGetJwks } from "get-jwks";
-import fastJwt from "fast-jwt";
-
-// Create a cache for discovery documents (reuse across requests)
-const discoveryCache = new DiscoveryDocumentCache({
-  ttl: 3600000, // Cache for 1 hour (default)
-});
+import { FastMCP } from "fastmcp";
+import buildGetJwks from "get-jwks";
+import fastJwt, { type DecodedJwt } from "fast-jwt";
 
 const server = new FastMCP({
   name: "My Server",
@@ -1991,39 +1986,20 @@ const server = new FastMCP({
 
     // Validate OAuth JWT access token using OpenID Connect discovery
     try {
-      // Fetch and cache the discovery document
-      const discoveryUrl =
-        "https://auth.example.com/.well-known/openid-configuration";
-      // Alternative: Use OAuth authorization server metadata endpoint
-      // const discoveryUrl = 'https://auth.example.com/.well-known/oauth-authorization-server';
+      // Create JWKS client for token verification
+      const getJwks = buildGetJwks();
 
-      const config = (await discoveryCache.get(discoveryUrl)) as {
-        jwks_uri: string;
-        issuer: string;
-      };
-      const jwksUri = config.jwks_uri;
-      const issuer = config.issuer;
-
-      // Create JWKS client for token verification using discovered endpoint
-      const getJwks = buildGetJwks({
-        jwksUrl: jwksUri,
-        cache: true,
-        rateLimit: true,
-      });
-
-      // Create JWT verifier with JWKS and discovered issuer
+      // Create JWT verifier
       const verify = fastJwt.createVerifier({
-        key: async (token) => {
-          const { header } = fastJwt.decode(token, { complete: true });
-          const jwk = await getJwks.getJwk({
+        async key({ header }: DecodedJwt) {
+          const publicKey = await getJwks.getPublicKey({
             kid: header.kid,
             alg: header.alg,
+            domain: "https://auth.example.com",
           });
-          return jwk;
+          return publicKey;
         },
-        algorithms: ["RS256", "ES256"],
-        issuer: issuer,
-        audience: "mcp://my-server",
+        algorithms: ["RS256"],
       });
 
       // Verify the JWT token
@@ -2081,7 +2057,7 @@ Clients discover protected resource metadata using the following search order:
 
 Both the sub-path and root endpoints return identical metadata, ensuring compatibility with all MCP client implementations.
 
-For JWT token validation, you can use libraries like [`get-jwks`](https://github.com/nearform/get-jwks) and [`@fastify/jwt`](https://github.com/fastify/fastify-jwt) for OAuth JWT tokens.
+For JWT token validation, you can use libraries like [`get-jwks`](https://github.com/nearform/get-jwks) and [`fast-jwt`](https://github.com/nearform/fast-jwt) for OAuth JWT tokens.
 
 #### Passing Headers Through Context
 
@@ -2470,6 +2446,14 @@ npx fastmcp dev server.ts
 ```
 
 This will run your server with [`mcp-cli`](https://github.com/wong2/mcp-cli) for testing and debugging your MCP server in the terminal.
+
+To call a tool non-interactively (for example, in scripts or automated tests), pass `--tool` and optional JSON `--args`:
+
+```bash
+npx fastmcp dev server.ts --tool add --args '{"a":1,"b":2}'
+```
+
+This prints the tool result as JSON and exits, instead of opening the interactive inspector. `--watch` has no effect in this mode, since the server is started for a single call.
 
 ### Inspect with `MCP Inspector`
 
