@@ -19,7 +19,8 @@ export type DevCommandOptions = {
    */
   toolArgs?: string;
   /**
-   * Watch the file for changes and restart the server.
+   * Watch the file for changes and restart the server. Only used in
+   * interactive mode; a non-interactive call runs the server once.
    */
   watch?: boolean;
 };
@@ -30,23 +31,21 @@ export type DevCommandOptions = {
  */
 export const DEV_SERVER_NAME = "dev";
 
-const shellQuote = (value: string): string =>
-  `'${value.replace(/'/g, `'\\''`)}'`;
-
 /**
  * Build the JSON config that registers the dev server with mcp-cli so it can
  * be invoked non-interactively. mcp-cli's non-interactive mode resolves the
  * server by name from a config file's `mcpServers` map, so an inline command
  * cannot be passed directly alongside `call-tool`.
+ *
+ * The server is never started in watch mode here: a non-interactive call
+ * connects, calls one tool, and exits, so there is nothing to restart into.
  */
-export const buildDevConfig = (file: string, watch: boolean): string => {
-  const args = watch ? ["tsx", "--watch", file] : ["tsx", file];
-
-  return JSON.stringify(
+export const buildDevConfig = (file: string): string =>
+  JSON.stringify(
     {
       mcpServers: {
         [DEV_SERVER_NAME]: {
-          args,
+          args: ["tsx", file],
           command: "npx",
         },
       },
@@ -54,17 +53,23 @@ export const buildDevConfig = (file: string, watch: boolean): string => {
     null,
     2,
   );
-};
 
 /**
- * Build the shell command that the dev command runs.
+ * Build the argv that the dev command runs.
+ *
+ * This is an argv array rather than a shell string so that nothing has to be
+ * quoted: file paths, tool names and JSON `--args` are passed to the child
+ * process verbatim. Quoting through a shell would be wrong on Windows, where
+ * cmd.exe treats single quotes as literal characters rather than as quoting.
  *
  * - Without `tool`: launches the interactive @wong2/mcp-cli inspector
  *   against an inline `npx tsx <file>` server (existing behaviour).
  * - With `tool`: runs @wong2/mcp-cli in non-interactive mode against a
  *   generated config file, calling the named tool and forwarding `--args`.
  */
-export const buildDevCommand = (options: DevCommandOptions): string => {
+export const buildDevCommand = (
+  options: DevCommandOptions,
+): [string, ...string[]] => {
   const { configPath, file, tool, toolArgs, watch = false } = options;
 
   if (tool) {
@@ -74,23 +79,23 @@ export const buildDevCommand = (options: DevCommandOptions): string => {
       );
     }
 
-    const parts = [
+    return [
       "npx",
       "@wong2/mcp-cli",
       "-c",
-      shellQuote(configPath),
+      configPath,
       "call-tool",
-      shellQuote(`${DEV_SERVER_NAME}:${tool}`),
+      `${DEV_SERVER_NAME}:${tool}`,
+      ...(toolArgs === undefined ? [] : ["--args", toolArgs]),
     ];
-
-    if (toolArgs !== undefined) {
-      parts.push("--args", shellQuote(toolArgs));
-    }
-
-    return parts.join(" ");
   }
 
-  return watch
-    ? `npx @wong2/mcp-cli npx tsx --watch ${file}`
-    : `npx @wong2/mcp-cli npx tsx ${file}`;
+  return [
+    "npx",
+    "@wong2/mcp-cli",
+    "npx",
+    "tsx",
+    ...(watch ? ["--watch"] : []),
+    file,
+  ];
 };

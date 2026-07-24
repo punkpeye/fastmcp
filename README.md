@@ -2316,7 +2316,7 @@ To call a tool non-interactively (for example, in scripts or automated tests), p
 npx fastmcp dev server.ts --tool add --args '{"a":1,"b":2}'
 ```
 
-This prints the tool result as JSON and exits, instead of opening the interactive inspector.
+This prints the tool result as JSON and exits, instead of opening the interactive inspector. `--watch` has no effect in this mode, since the server is started for a single call.
 
 ### Inspect with `MCP Inspector`
 

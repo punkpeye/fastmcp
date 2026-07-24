@@ -56,7 +56,14 @@ await yargs(hideBin(process.argv))
       try {
         if (argv.args !== undefined && !argv.tool) {
           console.error("[FastMCP Error] --args requires --tool");
-          process.exit(1);
+          process.exitCode = 1;
+          return;
+        }
+
+        if (argv.tool && argv.watch) {
+          console.warn(
+            "[FastMCP] --watch is ignored when calling a tool with --tool: the server runs for a single call.",
+          );
         }
 
         let configPath: string | undefined;
@@ -64,14 +71,10 @@ await yargs(hideBin(process.argv))
         if (argv.tool) {
           configDir = await mkdtemp(join(tmpdir(), "fastmcp-dev-"));
           configPath = join(configDir, "mcp-cli.json");
-          await writeFile(
-            configPath,
-            buildDevConfig(argv.file, argv.watch),
-            "utf8",
-          );
+          await writeFile(configPath, buildDevConfig(argv.file), "utf8");
         }
 
-        const command = buildDevCommand({
+        const [command, ...commandArgs] = buildDevCommand({
           configPath,
           file: argv.file,
           tool: argv.tool,
@@ -80,7 +83,9 @@ await yargs(hideBin(process.argv))
         });
 
         if (argv.verbose) {
-          console.log(`[FastMCP] Starting server: ${command}`);
+          console.log(
+            `[FastMCP] Starting server: ${[command, ...commandArgs].join(" ")}`,
+          );
           console.log(`[FastMCP] File: ${argv.file}`);
           console.log(
             `[FastMCP] Watch mode: ${argv.watch ? "enabled" : "disabled"}`,
@@ -91,12 +96,11 @@ await yargs(hideBin(process.argv))
           }
         }
 
-        await execa({
-          shell: true,
+        await execa(command, commandArgs, {
           stderr: "inherit",
           stdin: "inherit",
           stdout: "inherit",
-        })`${command}`;
+        });
       } catch (error) {
         console.error(
           "[FastMCP Error] Failed to start development server:",
@@ -107,7 +111,9 @@ await yargs(hideBin(process.argv))
           console.error("[FastMCP Debug] Stack trace:", error.stack);
         }
 
-        process.exit(1);
+        // Not process.exit(): that would skip the `finally` block below and
+        // leak the temporary config directory on every failed tool call.
+        process.exitCode = 1;
       } finally {
         if (configDir) {
           await rm(configDir, { force: true, recursive: true });
