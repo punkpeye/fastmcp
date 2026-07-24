@@ -13,7 +13,17 @@ import { OAuthProxy } from "../OAuthProxy.js";
  * Configuration common to all OAuth providers.
  */
 export interface AuthProviderConfig {
-  /** Allowed redirect URI patterns (default: ["http://localhost:*", "https://*"]) */
+  /**
+   * Allow-list of redirect URI patterns accepted by Dynamic Client
+   * Registration. Required for any deployment that exposes /oauth/register
+   * or /oauth/authorize — an empty/unset list rejects every URI.
+   *
+   * Example: `["https://yourapp.example.com/*"]`
+   *
+   * Prior versions defaulted to `["http://localhost:*", "https://*"]`, which
+   * enabled CWE-601 open-redirect / authorization-code theft. See the
+   * SECURITY advisory before loosening this.
+   */
   allowedRedirectUriPatterns?: string[];
   /** Base URL where the MCP server is accessible */
   baseUrl: string;

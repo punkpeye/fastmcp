@@ -59,6 +59,7 @@ class TTLTrackingStorage implements TokenStorage {
 
 describe("OAuthProxy - Token Swap Pattern", () => {
   const baseConfig = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
     baseUrl: "https://proxy.example.com",
     consentRequired: false,
     upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
@@ -96,8 +97,8 @@ describe("OAuthProxy - Token Swap Pattern", () => {
         tokenType: "Bearer",
       };
 
-      // Register a client
-      await proxy.registerClient({
+      // Register a client — capture the proxy-issued client_id
+      const dcr = await proxy.registerClient({
         redirect_uris: ["https://client.example.com/callback"],
       });
 
@@ -106,7 +107,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
 
       // Create a transaction and authorization code manually
       const transaction = await (proxy as any).createTransaction({
-        client_id: "upstream-client-id",
+        client_id: dcr.client_id,
         code_challenge: pkce.challenge,
         code_challenge_method: "S256",
         redirect_uri: "https://client.example.com/callback",
@@ -121,7 +122,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
 
       // Exchange authorization code
       const tokenRequest: TokenRequest = {
-        client_id: "upstream-client-id",
+        client_id: dcr.client_id,
         code: authCode,
         code_verifier: pkce.verifier,
         grant_type: "authorization_code",
@@ -159,14 +160,14 @@ describe("OAuthProxy - Token Swap Pattern", () => {
         tokenType: "Bearer",
       };
 
-      await proxy.registerClient({
+      const dcr = await proxy.registerClient({
         redirect_uris: ["https://client.example.com/callback"],
       });
 
       const pkce = PKCEUtils.generatePair("S256");
 
       const transaction = await (proxy as any).createTransaction({
-        client_id: "upstream-client-id",
+        client_id: dcr.client_id,
         code_challenge: pkce.challenge,
         code_challenge_method: "S256",
         redirect_uri: "https://client.example.com/callback",
@@ -180,7 +181,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
       );
 
       const response = await proxy.exchangeAuthorizationCode({
-        client_id: "upstream-client-id",
+        client_id: dcr.client_id,
         code: authCode,
         code_verifier: pkce.verifier,
         grant_type: "authorization_code",
@@ -225,14 +226,14 @@ describe("OAuthProxy - Token Swap Pattern", () => {
         tokenType: "Bearer",
       };
 
-      await proxy.registerClient({
+      const dcr = await proxy.registerClient({
         redirect_uris: ["https://client.example.com/callback"],
       });
 
       const pkce = PKCEUtils.generatePair("S256");
 
       const transaction = await (proxy as any).createTransaction({
-        client_id: "upstream-client-id",
+        client_id: dcr.client_id,
         code_challenge: pkce.challenge,
         code_challenge_method: "S256",
         redirect_uri: "https://client.example.com/callback",
@@ -246,17 +247,18 @@ describe("OAuthProxy - Token Swap Pattern", () => {
       );
 
       const response = await proxy.exchangeAuthorizationCode({
-        client_id: "upstream-client-id",
+        client_id: dcr.client_id,
         code: authCode,
         code_verifier: pkce.verifier,
         grant_type: "authorization_code",
         redirect_uri: "https://client.example.com/callback",
       });
 
-      // Verify JWT is valid
+      // Verify JWT is valid and carries the proxy-issued client_id (not the
+      // upstream provider's credentials).
       const validation = await jwtIssuer.verify(response.access_token);
       expect(validation.valid).toBe(true);
-      expect(validation.claims?.client_id).toBe("upstream-client-id");
+      expect(validation.claims?.client_id).toBe(dcr.client_id);
       expect(validation.claims?.scope).toEqual(["read", "write"]);
 
       // Load upstream tokens
@@ -323,14 +325,14 @@ describe("OAuthProxy - Token Swap Pattern", () => {
         tokenType: "Bearer",
       };
 
-      await proxy.registerClient({
+      const dcr = await proxy.registerClient({
         redirect_uris: ["https://client.example.com/callback"],
       });
 
       const pkce = PKCEUtils.generatePair("S256");
 
       const transaction = await (proxy as any).createTransaction({
-        client_id: "upstream-client-id",
+        client_id: dcr.client_id,
         code_challenge: pkce.challenge,
         code_challenge_method: "S256",
         redirect_uri: "https://client.example.com/callback",
@@ -344,7 +346,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
       );
 
       const response = await proxy.exchangeAuthorizationCode({
-        client_id: "upstream-client-id",
+        client_id: dcr.client_id,
         code: authCode,
         code_verifier: pkce.verifier,
         grant_type: "authorization_code",
@@ -378,6 +380,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
 
 describe("OAuthProxy - Upstream Token Endpoint Authentication", () => {
   const baseConfig = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
     baseUrl: "https://proxy.example.com",
     consentRequired: false,
     upstreamAuthorizationEndpoint: "https://provider.com/oauth/authorize",
@@ -528,6 +531,7 @@ describe("OAuthProxy - Upstream Token Endpoint Authentication", () => {
  */
 describe("OAuthProxy - Upstream Token Storage TTL", () => {
   const baseConfig = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
     baseUrl: "https://proxy.example.com",
     consentRequired: false,
     enableTokenSwap: true,
@@ -542,14 +546,14 @@ describe("OAuthProxy - Upstream Token Storage TTL", () => {
     proxy: OAuthProxy,
     upstreamTokens: UpstreamTokenSet,
   ) {
-    await proxy.registerClient({
+    const dcr = await proxy.registerClient({
       redirect_uris: ["https://client.example.com/callback"],
     });
 
     const pkce = PKCEUtils.generatePair("S256");
 
     const transaction = await (proxy as any).createTransaction({
-      client_id: "upstream-client-id",
+      client_id: dcr.client_id,
       code_challenge: pkce.challenge,
       code_challenge_method: "S256",
       redirect_uri: "https://client.example.com/callback",
@@ -563,7 +567,7 @@ describe("OAuthProxy - Upstream Token Storage TTL", () => {
     );
 
     return proxy.exchangeAuthorizationCode({
-      client_id: "upstream-client-id",
+      client_id: dcr.client_id,
       code: authCode,
       code_verifier: pkce.verifier,
       grant_type: "authorization_code",
@@ -782,6 +786,7 @@ describe("OAuthProxy - Upstream Token Storage TTL", () => {
 
 describe("OAuthProxy - Swap Mode Refresh Token", () => {
   const baseConfig = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
     baseUrl: "https://proxy.example.com",
     consentRequired: false,
     enableTokenSwap: true,
@@ -832,14 +837,14 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
       ...upstreamTokens,
     };
 
-    await proxy.registerClient({
+    const dcr = await proxy.registerClient({
       redirect_uris: ["https://client.example.com/callback"],
     });
 
     const pkce = PKCEUtils.generatePair("S256");
 
     const transaction = await (proxy as any).createTransaction({
-      client_id: "upstream-client-id",
+      client_id: dcr.client_id,
       code_challenge: pkce.challenge,
       code_challenge_method: "S256",
       redirect_uri: "https://client.example.com/callback",
@@ -853,7 +858,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     );
 
     return proxy.exchangeAuthorizationCode({
-      client_id: "upstream-client-id",
+      client_id: dcr.client_id,
       code: authCode,
       code_verifier: pkce.verifier,
       grant_type: "authorization_code",
