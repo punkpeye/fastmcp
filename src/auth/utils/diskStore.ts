@@ -3,7 +3,16 @@
  * Provides persistent file-based storage for OAuth tokens and transaction state
  */
 
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "fs/promises";
+import { randomUUID } from "crypto";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "fs/promises";
 import { join } from "path";
 
 import type { TokenStorage } from "../types.js";
@@ -176,6 +185,40 @@ export class DiskStore implements TokenStorage {
       return files.filter((f) => f.endsWith(this.fileExtension)).length;
     } catch {
       return 0;
+    }
+  }
+
+  /**
+   * Atomically retrieve a value and delete it.
+   *
+   * rename() is atomic on POSIX filesystems, so when several processes race
+   * for the same key exactly one rename succeeds and the losers see ENOENT.
+   * That is what makes single-use authorization codes safe when more than one
+   * process shares the directory.
+   */
+  async take(key: string): Promise<null | unknown> {
+    const filePath = this.getFilePath(key);
+    const claimPath = `${filePath}.${randomUUID()}.claim`;
+
+    try {
+      await rename(filePath, claimPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.error(`Failed to take key ${key}:`, error);
+      }
+      return null;
+    }
+
+    try {
+      const content = await readFile(claimPath, "utf-8");
+      const entry: StorageEntry = JSON.parse(content);
+
+      return entry.expiresAt < Date.now() ? null : entry.value;
+    } catch (error) {
+      console.error(`Failed to read key ${key}:`, error);
+      return null;
+    } finally {
+      await rm(claimPath, { force: true });
     }
   }
 

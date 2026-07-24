@@ -606,6 +606,12 @@ class RedisTokenStorage implements TokenStorage {
   async cleanup(): Promise<void> {
     // Redis handles TTL automatically
   }
+
+  // Optional, but required to run more than one instance — see below.
+  async take(key: string): Promise<unknown | null> {
+    const value = await this.redis.getdel(key);
+    return value ? JSON.parse(value) : null;
+  }
 }
 
 const authProxy = new OAuthProxy({
@@ -613,6 +619,62 @@ const authProxy = new OAuthProxy({
   tokenStorage: new RedisTokenStorage(redisClient),
 });
 ```
+
+Two requirements your implementation must meet:
+
+- **Honour `ttl`.** Transactions and authorization codes are written with a TTL
+  derived from their expiry. A backend that ignores it never reclaims them.
+  Expired entries are still rejected on read, so this is a storage leak rather
+  than a security hole — but it is an unbounded one.
+- **Implement `take` if more than one process shares the storage.** See the
+  next section.
+
+### Running Multiple Instances
+
+All proxy state — client registrations, in-flight transactions, and issued
+authorization codes — lives in the configured `TokenStorage`, so several
+instances behind a load balancer can serve different legs of the same OAuth
+flow. Three things have to line up:
+
+**1. Share the storage.** Every instance must point at the same backend.
+`MemoryTokenStorage` (the default) is per-process, so it only works for a
+single instance.
+
+**2. Share the key material.** `encryptionKey`, `consentSigningKey`, and
+`jwtSigningKey` are each auto-generated per instance when you don't supply
+them. Two instances then write state the other cannot read, and the failures
+are indirect: decryption returns `null`, so a valid request comes back as
+`invalid_client` or "Invalid or expired state" rather than as a key error. Set
+all three explicitly, from the same secret source:
+
+```typescript
+const authProxy = new OAuthProxy({
+  // ... other config
+  consentSigningKey: process.env.OAUTH_CONSENT_SIGNING_KEY,
+  encryptionKey: process.env.OAUTH_ENCRYPTION_KEY,
+  jwtSigningKey: process.env.OAUTH_JWT_SIGNING_KEY,
+  tokenStorage: new RedisTokenStorage(redisClient),
+});
+```
+
+**3. Implement `TokenStorage.take`.** Authorization codes and transactions are
+single-use (RFC 6749 §4.1.2). The proxy consumes them through `take`, which
+must atomically return a value and delete it so that at most one caller
+receives it. Without it the proxy falls back to a non-atomic get + delete, and
+two concurrent requests landing on different instances can both redeem the same
+authorization code.
+
+Most backends have a primitive for this:
+
+| Backend  | Implementation                                   |
+| -------- | ------------------------------------------------ |
+| Redis    | `GETDEL key`                                     |
+| DynamoDB | `DeleteItem` with `ReturnValues: "ALL_OLD"`      |
+| SQL      | `DELETE FROM ... WHERE key = $1 RETURNING value` |
+
+The bundled `MemoryTokenStorage` and `DiskStore` both implement it —
+`DiskStore` claims entries with an atomic `rename()`, so several processes
+sharing one directory are safe.
 
 ### JWKS Token Verification
 
@@ -953,6 +1015,12 @@ const authProxy = new OAuthProxy({
   // ...
 });
 ```
+
+8. **If You Run More Than One Instance**
+
+Share the token storage and the key material across instances, and implement
+`TokenStorage.take` so authorization codes stay single-use. See
+[Running Multiple Instances](#running-multiple-instances).
 
 ### Environment Variables
 

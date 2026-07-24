@@ -93,26 +93,30 @@ const oauthTransactionStorageSchema: z.ZodType<OAuthTransaction> = z.object({
 });
 
 interface OAuthProxyStateStoreConfig {
-  readonly clientCodes: Map<string, ClientCode>;
   readonly registeredClients: Map<string, ProxyDCRClient>;
   readonly registeredClientsByClientId: Map<string, ProxyDCRClient>;
   readonly tokenStorage: TokenStorage;
-  readonly transactions: Map<string, OAuthTransaction>;
 }
 
+/**
+ * Backs OAuth proxy state with the configured TokenStorage so that several
+ * proxy instances can serve one flow.
+ *
+ * Client registrations are immutable once written, so they are cached locally.
+ * Transactions and authorization codes are *not* cached: they are single-use
+ * and mutated by whichever instance handles the next leg of the flow, so a
+ * local copy would go stale and let a consumed code or transaction be redeemed
+ * a second time.
+ */
 export class OAuthProxyStateStore {
-  private readonly clientCodes: Map<string, ClientCode>;
   private readonly registeredClients: Map<string, ProxyDCRClient>;
   private readonly registeredClientsByClientId: Map<string, ProxyDCRClient>;
   private readonly tokenStorage: TokenStorage;
-  private readonly transactions: Map<string, OAuthTransaction>;
 
   constructor(config: OAuthProxyStateStoreConfig) {
-    this.clientCodes = config.clientCodes;
     this.registeredClients = config.registeredClients;
     this.registeredClientsByClientId = config.registeredClientsByClientId;
     this.tokenStorage = config.tokenStorage;
-    this.transactions = config.transactions;
   }
 
   cacheRegisteredClient(client: ProxyDCRClient): void {
@@ -123,45 +127,51 @@ export class OAuthProxyStateStore {
     }
   }
 
-  async deleteClientCode(code: string): Promise<void> {
-    this.clientCodes.delete(code);
-    await this.tokenStorage.delete(`${STORAGE_KEY_PREFIX.code}${code}`);
-  }
-
-  async deleteTransaction(transactionId: string): Promise<void> {
-    this.transactions.delete(transactionId);
-    await this.tokenStorage.delete(
-      `${STORAGE_KEY_PREFIX.transaction}${transactionId}`,
-    );
-  }
-
-  async getClientCode(code: string): Promise<ClientCode | null> {
-    const cached = this.clientCodes.get(code);
-    if (cached) {
-      if (this.isExpired(cached.expiresAt)) {
-        await this.deleteClientCode(code);
-        return null;
-      }
-
-      return cached;
-    }
-
-    const stored = await this.tokenStorage.get(
+  /**
+   * Atomically consume an authorization code. At most one caller — across all
+   * processes sharing the storage — can receive a given code, which is what
+   * makes single use enforceable (RFC 6749 §4.1.2).
+   */
+  async consumeClientCode(code: string): Promise<ClientCode | null> {
+    const stored = await this.takeFromStorage(
       `${STORAGE_KEY_PREFIX.code}${code}`,
     );
     const parsed = clientCodeStorageSchema.safeParse(stored);
 
-    if (!parsed.success) {
+    if (!parsed.success || this.isExpired(parsed.data.expiresAt)) {
       return null;
     }
 
-    if (this.isExpired(parsed.data.expiresAt)) {
-      await this.deleteClientCode(code);
-      return null;
-    }
-
-    this.clientCodes.set(parsed.data.code, parsed.data);
     return parsed.data;
+  }
+
+  /**
+   * Atomically consume a transaction, so a callback can only be redeemed once
+   * no matter which instance it lands on.
+   */
+  async consumeTransaction(
+    transactionId: string,
+  ): Promise<null | OAuthTransaction> {
+    const stored = await this.takeFromStorage(
+      `${STORAGE_KEY_PREFIX.transaction}${transactionId}`,
+    );
+    const parsed = oauthTransactionStorageSchema.safeParse(stored);
+
+    if (!parsed.success || this.isExpired(parsed.data.expiresAt)) {
+      return null;
+    }
+
+    return parsed.data;
+  }
+
+  async deleteClientCode(code: string): Promise<void> {
+    await this.tokenStorage.delete(`${STORAGE_KEY_PREFIX.code}${code}`);
+  }
+
+  async deleteTransaction(transactionId: string): Promise<void> {
+    await this.tokenStorage.delete(
+      `${STORAGE_KEY_PREFIX.transaction}${transactionId}`,
+    );
   }
 
   async getRegisteredClientByClientId(
@@ -185,19 +195,13 @@ export class OAuthProxyStateStore {
     return parsed.data;
   }
 
+  /**
+   * Read a transaction without consuming it. Used by the consent screen, which
+   * has to hand the same transaction back to the upstream redirect.
+   */
   async getTransaction(
     transactionId: string,
   ): Promise<null | OAuthTransaction> {
-    const cached = this.transactions.get(transactionId);
-    if (cached) {
-      if (this.isExpired(cached.expiresAt)) {
-        await this.deleteTransaction(transactionId);
-        return null;
-      }
-
-      return cached;
-    }
-
     const stored = await this.tokenStorage.get(
       `${STORAGE_KEY_PREFIX.transaction}${transactionId}`,
     );
@@ -212,7 +216,6 @@ export class OAuthProxyStateStore {
       return null;
     }
 
-    this.transactions.set(parsed.data.id, parsed.data);
     return parsed.data;
   }
 
@@ -230,7 +233,6 @@ export class OAuthProxyStateStore {
   }
 
   async saveClientCode(clientCode: ClientCode): Promise<void> {
-    this.clientCodes.set(clientCode.code, clientCode);
     await this.tokenStorage.save(
       `${STORAGE_KEY_PREFIX.code}${clientCode.code}`,
       clientCode,
@@ -246,7 +248,6 @@ export class OAuthProxyStateStore {
   }
 
   async saveTransaction(transaction: OAuthTransaction): Promise<void> {
-    this.transactions.set(transaction.id, transaction);
     await this.tokenStorage.save(
       `${STORAGE_KEY_PREFIX.transaction}${transaction.id}`,
       transaction,
@@ -261,5 +262,26 @@ export class OAuthProxyStateStore {
 
   private isExpired(expiresAt: Date): boolean {
     return expiresAt.getTime() < Date.now();
+  }
+
+  /**
+   * Prefer the storage's atomic take. Falling back to get + delete leaves a
+   * window in which two processes can both observe the same value, so
+   * multi-process deployments should implement `TokenStorage.take`.
+   */
+  private async takeFromStorage(key: string): Promise<null | unknown> {
+    if (this.tokenStorage.take) {
+      return this.tokenStorage.take(key);
+    }
+
+    const stored = await this.tokenStorage.get(key);
+
+    if (stored === null) {
+      return null;
+    }
+
+    await this.tokenStorage.delete(key);
+
+    return stored;
   }
 }

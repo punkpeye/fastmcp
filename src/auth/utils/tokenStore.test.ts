@@ -5,6 +5,8 @@
 import { setTimeout as delay } from "timers/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import type { TokenStorage } from "../types.js";
+
 import { EncryptedTokenStorage, MemoryTokenStorage } from "./tokenStore.js";
 
 describe("MemoryTokenStorage", () => {
@@ -78,6 +80,38 @@ describe("MemoryTokenStorage", () => {
 
       expect(storage.size()).toBe(1);
       expect(await storage.get("key7")).toBe("value7");
+    });
+  });
+
+  describe("take", () => {
+    it("should return the value and remove it", async () => {
+      await storage.save("take-key", "value");
+
+      expect(await storage.take("take-key")).toBe("value");
+      expect(await storage.get("take-key")).toBeNull();
+    });
+
+    it("should return null for a missing key", async () => {
+      expect(await storage.take("no-such-key")).toBeNull();
+    });
+
+    it("should return null for an expired entry", async () => {
+      await storage.save("expired-key", "value", 0.1);
+      await delay(150);
+
+      expect(await storage.take("expired-key")).toBeNull();
+    });
+
+    it("should hand the value to exactly one of several concurrent callers", async () => {
+      await storage.save("contended-key", "value");
+
+      const results = await Promise.all([
+        storage.take("contended-key"),
+        storage.take("contended-key"),
+        storage.take("contended-key"),
+      ]);
+
+      expect(results.filter((result) => result !== null)).toEqual(["value"]);
     });
   });
 });
@@ -183,6 +217,47 @@ describe("EncryptedTokenStorage", () => {
       await storage.delete("delete-key");
       const value = await storage.get("delete-key");
       expect(value).toBeNull();
+    });
+  });
+
+  describe("take", () => {
+    it("should decrypt the value and remove it", async () => {
+      const value = { nested: { token: "secret" } };
+      await storage.save("take-key", value);
+
+      expect(await storage.take("take-key")).toEqual(value);
+      expect(await storage.get("take-key")).toBeNull();
+      expect(await backend.get("take-key")).toBeNull();
+    });
+
+    it("should return null for a missing key", async () => {
+      expect(await storage.take("no-such-key")).toBeNull();
+    });
+
+    it("should delegate to a backend that cannot take atomically", async () => {
+      const calls: string[] = [];
+      const backendWithoutTake: TokenStorage = {
+        cleanup: async () => {},
+        delete: async (key) => {
+          calls.push(`delete:${key}`);
+          await backend.delete(key);
+        },
+        get: async (key) => {
+          calls.push(`get:${key}`);
+          return backend.get(key);
+        },
+        save: async (key, value, ttl) => backend.save(key, value, ttl),
+      };
+      const wrapper = new EncryptedTokenStorage(
+        backendWithoutTake,
+        "test-encryption-key",
+      );
+
+      await wrapper.save("fallback-key", "value");
+
+      expect(await wrapper.take("fallback-key")).toBe("value");
+      expect(calls).toEqual(["get:fallback-key", "delete:fallback-key"]);
+      expect(await wrapper.get("fallback-key")).toBeNull();
     });
   });
 });

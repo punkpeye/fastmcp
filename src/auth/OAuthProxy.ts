@@ -61,7 +61,6 @@ const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
 export class OAuthProxy {
   private claimsExtractor: ClaimsExtractor | null = null;
   private cleanupInterval: NodeJS.Timeout | null = null;
-  private clientCodes: Map<string, ClientCode> = new Map();
   private config: OAuthProxyConfig;
   private consentManager: ConsentManager;
   private jwtIssuer?: JWTIssuer;
@@ -71,7 +70,6 @@ export class OAuthProxy {
   private registeredClientsByClientId: Map<string, ProxyDCRClient> = new Map();
   private stateStore: OAuthProxyStateStore;
   private tokenStorage: TokenStorage;
-  private transactions: Map<string, OAuthTransaction> = new Map();
 
   constructor(config: OAuthProxyConfig) {
     this.config = {
@@ -104,11 +102,9 @@ export class OAuthProxy {
 
     this.tokenStorage = storage;
     this.stateStore = new OAuthProxyStateStore({
-      clientCodes: this.clientCodes,
       registeredClients: this.registeredClients,
       registeredClientsByClientId: this.registeredClientsByClientId,
       tokenStorage: this.tokenStorage,
-      transactions: this.transactions,
     });
     this.consentManager = new ConsentManager(
       config.consentSigningKey || this.generateSigningKey(),
@@ -211,8 +207,6 @@ export class OAuthProxy {
       this.cleanupInterval = null;
     }
 
-    this.transactions.clear();
-    this.clientCodes.clear();
     this.registeredClients.clear();
     this.registeredClientsByClientId.clear();
   }
@@ -239,11 +233,30 @@ export class OAuthProxy {
       throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
 
-    const clientCode = await this.stateStore.getClientCode(request.code);
+    // Consume the code atomically: whoever takes it owns this exchange, so two
+    // concurrent requests — on this instance or another one sharing the
+    // storage — cannot both redeem it (RFC 6749 §4.1.2).
+    const clientCode = await this.stateStore.consumeClientCode(request.code);
     if (!clientCode) {
       throw new OAuthProxyError(
         "invalid_grant",
         "Invalid or expired authorization code",
+      );
+    }
+
+    const alreadyUsed = clientCode.used === true;
+
+    // Put the record back marked used, so later attempts get the precise
+    // "already used" error rather than looking like an unknown code. This is a
+    // tombstone: `used` only ever goes false -> true, so it cannot resurrect a
+    // spent code.
+    clientCode.used = true;
+    await this.stateStore.saveClientCode(clientCode);
+
+    if (alreadyUsed) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "Authorization code already used",
       );
     }
 
@@ -271,18 +284,6 @@ export class OAuthProxy {
         throw new OAuthProxyError("invalid_grant", "Invalid PKCE verifier");
       }
     }
-
-    // Check if code was already used
-    if (clientCode.used) {
-      throw new OAuthProxyError(
-        "invalid_grant",
-        "Authorization code already used",
-      );
-    }
-
-    // Mark code as used
-    clientCode.used = true;
-    await this.stateStore.saveClientCode(clientCode);
 
     // Return tokens based on token swap setting
     if (this.config.enableTokenSwap && this.jwtIssuer) {
@@ -397,8 +398,10 @@ export class OAuthProxy {
       );
     }
 
-    // Retrieve transaction
-    const transaction = await this.stateStore.getTransaction(state);
+    // Consume the transaction: a callback is single-use, so taking it here
+    // prevents the same state from being replayed against this or any other
+    // instance sharing the storage.
+    const transaction = await this.stateStore.consumeTransaction(state);
     if (!transaction) {
       throw new OAuthProxyError("invalid_request", "Invalid or expired state");
     }
@@ -407,7 +410,6 @@ export class OAuthProxy {
     // registered. Guards against any code path that could persist an
     // unvalidated URI, and against registration being revoked mid-flow.
     if (!(await this.stateStore.isTransactionCallbackRegistered(transaction))) {
-      await this.stateStore.deleteTransaction(state);
       throw new OAuthProxyError(
         "invalid_request",
         "Transaction callback URL is not registered",
@@ -422,9 +424,6 @@ export class OAuthProxy {
       transaction,
       upstreamTokens,
     );
-
-    // Clean up transaction
-    await this.stateStore.deleteTransaction(state);
 
     // Redirect to client callback with code
     const redirectUrl = new URL(transaction.clientCallbackUrl);
@@ -635,24 +634,16 @@ export class OAuthProxy {
    * Clean up expired transactions and codes
    */
   private cleanup(): void {
-    const now = Date.now();
-
-    // Clean up expired transactions
-    for (const [id, transaction] of this.transactions.entries()) {
-      if (transaction.expiresAt.getTime() < now) {
-        void this.stateStore.deleteTransaction(id);
-      }
-    }
-
-    // Clean up expired codes
-    for (const [code, clientCode] of this.clientCodes.entries()) {
-      if (clientCode.expiresAt.getTime() < now) {
-        void this.stateStore.deleteClientCode(code);
-      }
-    }
-
-    // Clean up token storage
-    void this.tokenStorage.cleanup();
+    // Transactions and codes live in the token storage with a TTL derived from
+    // their expiry, so sweeping them is the storage's job. Failures here must
+    // not become unhandled rejections: this runs on a timer, and a transient
+    // backend error would otherwise take the process down.
+    void this.tokenStorage.cleanup().catch((error: unknown) => {
+      console.error(
+        "[FastMCP] OAuth proxy token storage cleanup failed:",
+        error instanceof Error ? error.message : String(error),
+      );
+    });
   }
 
   /**

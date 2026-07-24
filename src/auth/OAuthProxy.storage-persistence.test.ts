@@ -170,4 +170,112 @@ describe("OAuthProxy TokenStorage persistence", () => {
       token_type: "Bearer",
     });
   });
+
+  describe("single use is enforced across instances", () => {
+    /**
+     * Drives authorize -> callback and returns everything needed to redeem the
+     * resulting authorization code.
+     */
+    const issueAuthorizationCode = async (tokenStorage: MemoryTokenStorage) => {
+      const registrationProxy = createProxy(tokenStorage);
+      const dcr = await registrationProxy.registerClient({
+        redirect_uris: [CALLBACK_URL],
+      });
+
+      const authResponse = await createProxy(tokenStorage).authorize(
+        authParams(dcr.client_id),
+      );
+      const transactionId = getRequiredSearchParam(
+        new URL(getRequiredLocation(authResponse)),
+        "state",
+      );
+
+      const callbackResponse = await createProxy(tokenStorage).handleCallback(
+        new Request(
+          `${baseConfig.baseUrl}/oauth/callback?code=upstream-code&state=${encodeURIComponent(
+            transactionId,
+          )}`,
+        ),
+      );
+
+      const code = getRequiredSearchParam(
+        new URL(getRequiredLocation(callbackResponse)),
+        "code",
+      );
+
+      return {
+        request: {
+          client_id: dcr.client_id,
+          code,
+          grant_type: "authorization_code" as const,
+          redirect_uri: CALLBACK_URL,
+        },
+        transactionId,
+      };
+    };
+
+    it("redeems an authorization code exactly once when two instances race", async () => {
+      // Given a code issued into shared storage.
+      const tokenStorage = createStorage();
+      mockUpstreamTokenEndpoint();
+      const { request } = await issueAuthorizationCode(tokenStorage);
+
+      // When two instances that have never seen the code redeem it at once,
+      // as a load balancer fanning out a retried request would produce.
+      const results = await Promise.allSettled([
+        createProxy(tokenStorage).exchangeAuthorizationCode(request),
+        createProxy(tokenStorage).exchangeAuthorizationCode(request),
+      ]);
+
+      // Then exactly one succeeds (RFC 6749 §4.1.2).
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      expect(fulfilled).toHaveLength(1);
+    });
+
+    it("rejects a code that another instance already redeemed", async () => {
+      const tokenStorage = createStorage();
+      mockUpstreamTokenEndpoint();
+      const { request } = await issueAuthorizationCode(tokenStorage);
+
+      await createProxy(tokenStorage).exchangeAuthorizationCode(request);
+
+      await expect(
+        createProxy(tokenStorage).exchangeAuthorizationCode(request),
+      ).rejects.toMatchObject({ code: "invalid_grant" });
+    });
+
+    it("rejects a callback whose transaction another instance already consumed", async () => {
+      // Given an authorization started on one instance...
+      const tokenStorage = createStorage();
+      mockUpstreamTokenEndpoint();
+      const authorizationProxy = createProxy(tokenStorage);
+      const dcr = await createProxy(tokenStorage).registerClient({
+        redirect_uris: [CALLBACK_URL],
+      });
+
+      const authResponse = await authorizationProxy.authorize(
+        authParams(dcr.client_id),
+      );
+      const transactionId = getRequiredSearchParam(
+        new URL(getRequiredLocation(authResponse)),
+        "state",
+      );
+      const callbackRequest = () =>
+        new Request(
+          `${baseConfig.baseUrl}/oauth/callback?code=upstream-code&state=${encodeURIComponent(
+            transactionId,
+          )}`,
+        );
+
+      // ...and consumed by a *different* instance.
+      await createProxy(tokenStorage).handleCallback(callbackRequest());
+
+      // Then replaying it against the instance that started the flow — which
+      // is the one most likely to hold stale local state — must not mint a
+      // second authorization code.
+      await expect(
+        authorizationProxy.handleCallback(callbackRequest()),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+    });
+  });
 });
