@@ -22,6 +22,7 @@ import type {
   UpstreamTokenSet,
 } from "./types.js";
 
+import { OAuthProxyStateStore } from "./OAuthProxyStateStore.js";
 import {
   DEFAULT_ACCESS_TOKEN_TTL,
   DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH,
@@ -60,16 +61,18 @@ const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
 export class OAuthProxy {
   private claimsExtractor: ClaimsExtractor | null = null;
   private cleanupInterval: NodeJS.Timeout | null = null;
-  private clientCodes: Map<string, ClientCode> = new Map();
   private config: OAuthProxyConfig;
   private consentManager: ConsentManager;
   private jwtIssuer?: JWTIssuer;
-  /** Keyed by redirect_uri for defence-in-depth checks in handleCallback/handleConsent */
-  private registeredClients: Map<string, ProxyDCRClient> = new Map();
-  /** Keyed by proxy-issued client_id for authorize/token-exchange lookups */
+  /**
+   * Keyed by proxy-issued client_id for authorize/token-exchange lookups and
+   * for the defence-in-depth callback checks. A registration never changes
+   * after it is written, so caching it locally cannot go stale; it is also
+   * persisted, so another instance can hydrate it.
+   */
   private registeredClientsByClientId: Map<string, ProxyDCRClient> = new Map();
+  private stateStore: OAuthProxyStateStore;
   private tokenStorage: TokenStorage;
-  private transactions: Map<string, OAuthTransaction> = new Map();
 
   constructor(config: OAuthProxyConfig) {
     this.config = {
@@ -101,6 +104,10 @@ export class OAuthProxy {
     }
 
     this.tokenStorage = storage;
+    this.stateStore = new OAuthProxyStateStore({
+      registeredClientsByClientId: this.registeredClientsByClientId,
+      tokenStorage: this.tokenStorage,
+    });
     this.consentManager = new ConsentManager(
       config.consentSigningKey || this.generateSigningKey(),
     );
@@ -153,9 +160,8 @@ export class OAuthProxy {
     // RFC 6749 §5.2 - reject unknown clients with invalid_client.
     // MCP clients receive a proxy-issued client_id during DCR (not the upstream
     // provider's credentials), so we look up by that proxy client_id.
-    const registeredClient = this.registeredClientsByClientId.get(
-      params.client_id,
-    );
+    const registeredClient =
+      await this.stateStore.getRegisteredClientByClientId(params.client_id);
     if (!registeredClient) {
       throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
@@ -203,9 +209,6 @@ export class OAuthProxy {
       this.cleanupInterval = null;
     }
 
-    this.transactions.clear();
-    this.clientCodes.clear();
-    this.registeredClients.clear();
     this.registeredClientsByClientId.clear();
   }
 
@@ -225,15 +228,36 @@ export class OAuthProxy {
     // RFC 6749 §5.2 - reject unknown clients. Only proxy-issued client_ids
     // (obtained via DCR) are accepted, so stolen codes cannot be exchanged by
     // arbitrary callers.
-    if (!this.registeredClientsByClientId.has(request.client_id)) {
+    const registeredClient =
+      await this.stateStore.getRegisteredClientByClientId(request.client_id);
+    if (!registeredClient) {
       throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
 
-    const clientCode = this.clientCodes.get(request.code);
+    // Consume the code atomically: whoever takes it owns this exchange, so two
+    // concurrent requests — on this instance or another one sharing the
+    // storage — cannot both redeem it (RFC 6749 §4.1.2).
+    const clientCode = await this.stateStore.consumeClientCode(request.code);
     if (!clientCode) {
       throw new OAuthProxyError(
         "invalid_grant",
         "Invalid or expired authorization code",
+      );
+    }
+
+    const alreadyUsed = clientCode.used === true;
+
+    // Put the record back marked used, so later attempts get the precise
+    // "already used" error rather than looking like an unknown code. This is a
+    // tombstone: `used` only ever goes false -> true, so it cannot resurrect a
+    // spent code.
+    clientCode.used = true;
+    await this.stateStore.saveClientCode(clientCode);
+
+    if (alreadyUsed) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "Authorization code already used",
       );
     }
 
@@ -261,18 +285,6 @@ export class OAuthProxy {
         throw new OAuthProxyError("invalid_grant", "Invalid PKCE verifier");
       }
     }
-
-    // Check if code was already used
-    if (clientCode.used) {
-      throw new OAuthProxyError(
-        "invalid_grant",
-        "Authorization code already used",
-      );
-    }
-
-    // Mark code as used
-    clientCode.used = true;
-    this.clientCodes.set(request.code, clientCode);
 
     // Return tokens based on token swap setting
     if (this.config.enableTokenSwap && this.jwtIssuer) {
@@ -387,8 +399,10 @@ export class OAuthProxy {
       );
     }
 
-    // Retrieve transaction
-    const transaction = this.transactions.get(state);
+    // Consume the transaction: a callback is single-use, so taking it here
+    // prevents the same state from being replayed against this or any other
+    // instance sharing the storage.
+    const transaction = await this.stateStore.consumeTransaction(state);
     if (!transaction) {
       throw new OAuthProxyError("invalid_request", "Invalid or expired state");
     }
@@ -396,8 +410,7 @@ export class OAuthProxy {
     // Defense-in-depth: the transaction's stored callback URL must still be
     // registered. Guards against any code path that could persist an
     // unvalidated URI, and against registration being revoked mid-flow.
-    if (!this.registeredClients.has(transaction.clientCallbackUrl)) {
-      this.transactions.delete(state);
+    if (!(await this.stateStore.isTransactionCallbackRegistered(transaction))) {
       throw new OAuthProxyError(
         "invalid_request",
         "Transaction callback URL is not registered",
@@ -408,13 +421,10 @@ export class OAuthProxy {
     const upstreamTokens = await this.exchangeUpstreamCode(code, transaction);
 
     // Generate authorization code for client
-    const clientCode = this.generateAuthorizationCode(
+    const clientCode = await this.generateAuthorizationCode(
       transaction,
       upstreamTokens,
     );
-
-    // Clean up transaction
-    this.transactions.delete(state);
 
     // Redirect to client callback with code
     const redirectUrl = new URL(transaction.clientCallbackUrl);
@@ -434,14 +444,14 @@ export class OAuthProxy {
    */
   async handleConsent(request: Request): Promise<Response> {
     const formData = await request.formData();
-    const transactionId = formData.get("transaction_id") as string;
-    const action = formData.get("action") as string;
+    const transactionId = formData.get("transaction_id");
+    const action = formData.get("action");
 
-    if (!transactionId) {
+    if (typeof transactionId !== "string" || !transactionId) {
       throw new OAuthProxyError("invalid_request", "Missing transaction_id");
     }
 
-    const transaction = this.transactions.get(transactionId);
+    const transaction = await this.stateStore.getTransaction(transactionId);
     if (!transaction) {
       throw new OAuthProxyError(
         "invalid_request",
@@ -451,9 +461,11 @@ export class OAuthProxy {
 
     if (action === "deny") {
       // User denied consent
-      this.transactions.delete(transactionId);
+      await this.stateStore.deleteTransaction(transactionId);
       // Defense-in-depth: never redirect to an unregistered URI.
-      if (!this.registeredClients.has(transaction.clientCallbackUrl)) {
+      if (
+        !(await this.stateStore.isTransactionCallbackRegistered(transaction))
+      ) {
         throw new OAuthProxyError(
           "invalid_request",
           "Transaction callback URL is not registered",
@@ -476,10 +488,13 @@ export class OAuthProxy {
     }
 
     // User approved, mark consent and redirect to upstream
-    transaction.consentGiven = true;
-    this.transactions.set(transactionId, transaction);
+    const approvedTransaction = {
+      ...transaction,
+      consentGiven: true,
+    };
+    await this.stateStore.saveTransaction(approvedTransaction);
 
-    return this.redirectToUpstream(transaction);
+    return this.redirectToUpstream(approvedTransaction);
   }
 
   /**
@@ -567,14 +582,8 @@ export class OAuthProxy {
       registeredAt: new Date(),
     };
 
-    // Index by proxy client_id for authorize/token-exchange lookups.
-    this.registeredClientsByClientId.set(proxyClientId, client);
-
-    // Also index by every redirect_uri for defence-in-depth checks in
-    // handleCallback/handleConsent (RFC 6749 §3.1.2.3).
-    for (const uri of request.redirect_uris) {
-      this.registeredClients.set(uri, client);
-    }
+    this.stateStore.cacheRegisteredClient(client);
+    await this.stateStore.saveRegisteredClient(client);
 
     // Return RFC 7591 compliant response with proxy-issued credentials.
     const response: DCRResponse = {
@@ -623,27 +632,19 @@ export class OAuthProxy {
   }
 
   /**
-   * Clean up expired transactions and codes
+   * Periodic maintenance hook. Expiry is enforced by the token storage.
    */
   private cleanup(): void {
-    const now = Date.now();
-
-    // Clean up expired transactions
-    for (const [id, transaction] of this.transactions.entries()) {
-      if (transaction.expiresAt.getTime() < now) {
-        this.transactions.delete(id);
-      }
-    }
-
-    // Clean up expired codes
-    for (const [code, clientCode] of this.clientCodes.entries()) {
-      if (clientCode.expiresAt.getTime() < now) {
-        this.clientCodes.delete(code);
-      }
-    }
-
-    // Clean up token storage
-    void this.tokenStorage.cleanup();
+    // Transactions and codes live in the token storage with a TTL derived from
+    // their expiry, so sweeping them is the storage's job. Failures here must
+    // not become unhandled rejections: this runs on a timer, and a transient
+    // backend error would otherwise take the process down.
+    void this.tokenStorage.cleanup().catch((error: unknown) => {
+      console.error(
+        "[FastMCP] OAuth proxy token storage cleanup failed:",
+        error instanceof Error ? error.message : String(error),
+      );
+    });
   }
 
   /**
@@ -671,7 +672,7 @@ export class OAuthProxy {
       state: params.state || this.generateId(),
     };
 
-    this.transactions.set(transactionId, transaction);
+    await this.stateStore.saveTransaction(transaction);
 
     return transaction;
   }
@@ -804,10 +805,10 @@ export class OAuthProxy {
   /**
    * Generate authorization code for client
    */
-  private generateAuthorizationCode(
+  private async generateAuthorizationCode(
     transaction: OAuthTransaction,
     upstreamTokens: UpstreamTokenSet,
-  ): string {
+  ): Promise<string> {
     const code = this.generateId();
 
     const clientCode: ClientCode = {
@@ -823,7 +824,7 @@ export class OAuthProxy {
       upstreamTokens,
     };
 
-    this.clientCodes.set(code, clientCode);
+    await this.stateStore.saveClientCode(clientCode);
 
     return code;
   }

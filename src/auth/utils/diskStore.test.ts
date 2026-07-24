@@ -201,4 +201,52 @@ describe("DiskStore", () => {
 
     store.destroy();
   });
+
+  describe("take", () => {
+    it("should return the value and remove it", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+      await store.save("take-key", { token: "secret" });
+
+      expect(await store.take("take-key")).toEqual({ token: "secret" });
+      expect(await store.get("take-key")).toBeNull();
+
+      store.destroy();
+    });
+
+    it("should return null for a missing key", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+
+      expect(await store.take("no-such-key")).toBeNull();
+
+      store.destroy();
+    });
+
+    it("should hand the value to exactly one of several concurrent callers", async () => {
+      // The rename() claim is what makes single-use safe when several
+      // processes share the directory.
+      const store = new DiskStore({ directory: TEST_DIR });
+      await store.save("contended-key", "value");
+
+      const results = await Promise.all([
+        store.take("contended-key"),
+        store.take("contended-key"),
+        store.take("contended-key"),
+      ]);
+
+      expect(results.filter((result) => result !== null)).toEqual(["value"]);
+
+      store.destroy();
+    });
+
+    it("should not leave claim files behind", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+      await store.save("claim-key", "value");
+      await store.take("claim-key");
+
+      const files = await readdir(TEST_DIR);
+      expect(files.filter((file) => file.includes(".claim"))).toHaveLength(0);
+
+      store.destroy();
+    });
+  });
 });

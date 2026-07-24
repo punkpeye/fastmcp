@@ -42,22 +42,7 @@ export class EncryptedTokenStorage implements TokenStorage {
   }
 
   async get(key: string): Promise<null | unknown> {
-    const encrypted = await this.backend.get(key);
-
-    if (!encrypted) {
-      return null;
-    }
-
-    try {
-      const decrypted = await this.decrypt(
-        encrypted as string,
-        this.encryptionKey,
-      );
-      return JSON.parse(decrypted);
-    } catch (error) {
-      console.error("Failed to decrypt value:", error);
-      return null;
-    }
+    return this.decryptStored(await this.backend.get(key));
   }
 
   async save(key: string, value: unknown, ttl?: number): Promise<void> {
@@ -66,6 +51,26 @@ export class EncryptedTokenStorage implements TokenStorage {
       this.encryptionKey,
     );
     await this.backend.save(key, encrypted, ttl);
+  }
+
+  /**
+   * Delegates to the backend so that the atomicity of the underlying store is
+   * preserved; falls back to get + delete when the backend cannot do better.
+   */
+  async take(key: string): Promise<null | unknown> {
+    if (this.backend.take) {
+      return this.decryptStored(await this.backend.take(key));
+    }
+
+    const value = await this.get(key);
+
+    if (value === null) {
+      return null;
+    }
+
+    await this.backend.delete(key);
+
+    return value;
   }
 
   private async decrypt(ciphertext: string, key: Buffer): Promise<string> {
@@ -90,6 +95,23 @@ export class EncryptedTokenStorage implements TokenStorage {
     decrypted += decipher.final("utf8");
 
     return decrypted;
+  }
+
+  private async decryptStored(encrypted: unknown): Promise<null | unknown> {
+    if (!encrypted) {
+      return null;
+    }
+
+    try {
+      const decrypted = await this.decrypt(
+        encrypted as string,
+        this.encryptionKey,
+      );
+      return JSON.parse(decrypted);
+    } catch (error) {
+      console.error("Failed to decrypt value:", error);
+      return null;
+    }
   }
 
   private async encrypt(plaintext: string, key: Buffer): Promise<string> {
@@ -185,5 +207,20 @@ export class MemoryTokenStorage implements TokenStorage {
    */
   size(): number {
     return this.store.size;
+  }
+
+  /**
+   * Atomic by construction: the read and the delete happen in a single
+   * synchronous block, so no other task can observe the value in between.
+   */
+  async take(key: string): Promise<null | unknown> {
+    const entry = this.store.get(key);
+    this.store.delete(key);
+
+    if (!entry || entry.expiresAt < Date.now()) {
+      return null;
+    }
+
+    return entry.value;
   }
 }

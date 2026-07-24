@@ -407,6 +407,21 @@ export interface TokenStorage {
   get(key: string): Promise<null | unknown>;
   /** Save a value with optional TTL */
   save(key: string, value: unknown, ttl?: number): Promise<void>;
+  /**
+   * Atomically retrieve a value and delete it, returning `null` if the key was
+   * absent. At most one caller may observe a given value.
+   *
+   * Optional, but **required for correctness when more than one process shares
+   * this storage**: the OAuth proxy consumes authorization codes and
+   * transactions through it, and single-use enforcement depends on the
+   * atomicity. Without it the proxy falls back to a non-atomic get + delete,
+   * where two concurrent requests can both redeem the same authorization code.
+   *
+   * Most backends expose a suitable primitive: Redis `GETDEL`, DynamoDB
+   * `DeleteItem` with `ReturnValues: "ALL_OLD"`, or SQL
+   * `DELETE ... RETURNING *`.
+   */
+  take?(key: string): Promise<null | unknown>;
 }
 
 /**
