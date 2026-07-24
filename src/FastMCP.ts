@@ -8,6 +8,9 @@ import {
   ClientCapabilities,
   CompleteRequestSchema,
   CreateMessageRequestSchema,
+  ElicitRequestFormParams,
+  ElicitRequestURLParams,
+  ElicitResult,
   ErrorCode,
   GetPromptRequestSchema,
   GetPromptResult,
@@ -27,6 +30,8 @@ import {
   Tool as SDKTool,
   ServerCapabilities,
   SetLevelRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
 import { EventEmitter } from "events";
@@ -213,6 +218,17 @@ type Context<T extends FastMCPSessionAuth> = {
   client: {
     version: ReturnType<Server["getClientVersion"]>;
   };
+  /**
+   * Requests additional information from the user via the client
+   * (see https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation).
+   * The client must advertise the matching `elicitation` capability mode —
+   * `elicitation: { form: {} }` for form requests (the default) and/or
+   * `elicitation: { url: {} }` for url requests.
+   */
+  elicit: (
+    params: ElicitRequestFormParams | ElicitRequestURLParams,
+    options?: RequestOptions,
+  ) => Promise<ElicitResult>;
   log: {
     debug: (message: string, data?: SerializableValue) => void;
     error: (message: string, data?: SerializableValue) => void;
@@ -241,6 +257,18 @@ type Extra = unknown;
 type Extras = Record<string, Extra>;
 
 type Literal = boolean | null | number | string | undefined;
+
+/**
+ * Context passed to `load` for resources, resource templates, and prompts.
+ *
+ * This is a subset of the tool execution {@link Context}. `reportProgress`
+ * and `streamContent` are tied to a tool call's progress token / streaming
+ * notification and are not available outside of `tool.execute`.
+ */
+type LoadContext<T extends FastMCPSessionAuth> = Omit<
+  Context<T>,
+  "reportProgress" | "streamContent"
+>;
 
 type Progress = {
   /**
@@ -381,6 +409,7 @@ const ContentZodSchema = z.discriminatedUnion("type", [
 ]) satisfies z.ZodType<Content>;
 
 type ContentResult = {
+  _meta?: Record<string, unknown>;
   content: Content[];
   isError?: boolean;
   structuredContent?: Record<string, unknown>;
@@ -388,6 +417,7 @@ type ContentResult = {
 
 const ContentResultZodSchema = z
   .object({
+    _meta: z.record(z.string(), z.unknown()).optional(),
     content: ContentZodSchema.array(),
     isError: z.boolean().optional(),
     structuredContent: z.record(z.string(), z.unknown()).optional(),
@@ -429,7 +459,11 @@ type InputPrompt<
   arguments?: InputPromptArgument<T>[];
   complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
-  load: (args: Args, auth?: T) => Promise<PromptResult>;
+  load: (
+    args: Args,
+    auth?: T,
+    context?: LoadContext<T>,
+  ) => Promise<PromptResult>;
   name: string;
 };
 
@@ -453,6 +487,7 @@ type InputResourceTemplate<
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
     auth?: T,
+    context?: LoadContext<T>,
   ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
@@ -486,7 +521,11 @@ type Prompt<
   arguments?: PromptArgument<T>[];
   complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
-  load: (args: Args, auth?: T) => Promise<PromptResult>;
+  load: (
+    args: Args,
+    auth?: T,
+    context?: LoadContext<T>,
+  ) => Promise<PromptResult>;
   name: string;
 };
 
@@ -514,7 +553,10 @@ type PromptResult = Pick<GetPromptResult, "messages"> | string;
 type Resource<T extends FastMCPSessionAuth> = {
   complete?: (name: string, value: string, auth?: T) => Promise<Completion>;
   description?: string;
-  load: (auth?: T) => Promise<ResourceResult | ResourceResult[]>;
+  load: (
+    auth?: T,
+    context?: LoadContext<T>,
+  ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
   uri: string;
@@ -543,6 +585,7 @@ type ResourceTemplate<
   load: (
     args: ResourceTemplateArgumentsToObject<Arguments>,
     auth?: T,
+    context?: LoadContext<T>,
   ) => Promise<ResourceResult | ResourceResult[]>;
   mimeType?: string;
   name: string;
@@ -1123,6 +1166,13 @@ export class FastMCPSession<
    */
   #sessionId?: string;
 
+  /**
+   * Resource URIs the connected client has subscribed to via
+   * `resources/subscribe`. Used to scope `notifications/resources/updated`
+   * to interested clients only.
+   */
+  #subscriptions: Set<string> = new Set();
+
   #utils?: ServerOptions<T>["utils"];
 
   constructor({
@@ -1173,7 +1223,7 @@ export class FastMCPSession<
     }
 
     if (resources.length || resourcesTemplates.length) {
-      this.#capabilities.resources = {};
+      this.#capabilities.resources = { listChanged: true, subscribe: true };
     }
 
     if (prompts.length) {
@@ -1181,7 +1231,7 @@ export class FastMCPSession<
         this.addPrompt(prompt);
       }
 
-      this.#capabilities.prompts = {};
+      this.#capabilities.prompts = { listChanged: true };
     }
 
     this.#capabilities.logging = {};
@@ -1210,6 +1260,7 @@ export class FastMCPSession<
       }
 
       this.setupResourceHandlers();
+      this.setupResourceSubscriptionHandlers();
 
       if (resourcesTemplates.length) {
         for (const resourceTemplate of resourcesTemplates) {
@@ -1356,6 +1407,13 @@ export class FastMCPSession<
     this.triggerListChangedNotification("notifications/prompts/list_changed");
   }
 
+  public async requestElicitation(
+    params: ElicitRequestFormParams | ElicitRequestURLParams,
+    options?: RequestOptions,
+  ): Promise<ElicitResult> {
+    return this.#server.elicitInput(params, options);
+  }
+
   public async requestSampling(
     message: z.infer<typeof CreateMessageRequestSchema>["params"],
     options?: RequestOptions,
@@ -1379,6 +1437,29 @@ export class FastMCPSession<
     }
     this.setupResourceTemplateHandlers();
     this.triggerListChangedNotification("notifications/resources/list_changed");
+  }
+
+  /**
+   * Notifies the connected client that the contents of a resource have changed.
+   *
+   * The `notifications/resources/updated` notification is only sent when the
+   * client has subscribed to the URI via `resources/subscribe`; otherwise this
+   * is a no-op.
+   */
+  async sendResourceUpdated(uri: string) {
+    if (!this.#subscriptions.has(uri)) {
+      return;
+    }
+
+    try {
+      await this.#server.sendResourceUpdated({ uri });
+    } catch (error) {
+      this.#logger.error(
+        `[FastMCP error] failed to send resources/updated notification for '${uri}'.\n\n${
+          error instanceof Error ? error.stack : JSON.stringify(error)
+        }`,
+      );
+    }
   }
 
   toolsListChanged(tools: Tool<T>[]) {
@@ -1444,6 +1525,74 @@ export class FastMCPSession<
         reject(event.error);
       });
     });
+  }
+
+  /**
+   * Builds the context object passed as the third argument to
+   * `resource.load` / `resourceTemplate.load` / `prompt.load`.
+   *
+   * This mirrors the `client`, `elicit`, `log`, `requestId`, `session`,
+   * and `sessionId` fields available to `tool.execute` via {@link Context}.
+   * `reportProgress` and `streamContent` are intentionally omitted: they
+   * are tied to a tool call's progress token / streaming notification,
+   * which resource and prompt reads do not have.
+   */
+  #createLoadContext(meta?: Record<string, unknown>): LoadContext<T> {
+    return {
+      client: {
+        version: this.#server.getClientVersion(),
+      },
+      elicit: (
+        params: ElicitRequestFormParams | ElicitRequestURLParams,
+        options?: RequestOptions,
+      ) => this.#server.elicitInput(params, options),
+      log: this.#createLog(),
+      requestId:
+        typeof meta?.requestId === "string" ? meta.requestId : undefined,
+      session: this.#auth,
+      sessionId: this.#sessionId,
+    };
+  }
+
+  #createLog(): Context<T>["log"] {
+    return {
+      debug: (message: string, context?: SerializableValue) => {
+        this.#server.sendLoggingMessage({
+          data: {
+            context,
+            message,
+          },
+          level: "debug",
+        });
+      },
+      error: (message: string, context?: SerializableValue) => {
+        this.#server.sendLoggingMessage({
+          data: {
+            context,
+            message,
+          },
+          level: "error",
+        });
+      },
+      info: (message: string, context?: SerializableValue) => {
+        this.#server.sendLoggingMessage({
+          data: {
+            context,
+            message,
+          },
+          level: "info",
+        });
+      },
+      warn: (message: string, context?: SerializableValue) => {
+        this.#server.sendLoggingMessage({
+          data: {
+            context,
+            message,
+          },
+          level: "warning",
+        });
+      },
+    };
   }
 
   #formatSchemaIssues(issues: readonly StandardSchemaV1.Issue[]): string {
@@ -1725,6 +1874,7 @@ export class FastMCPSession<
         result = await prompt.load(
           args as Record<string, string | undefined>,
           this.#auth,
+          this.#createLoadContext(request.params?._meta),
         );
       } catch (error) {
         const errorMessage =
@@ -1798,7 +1948,11 @@ export class FastMCPSession<
 
               const uri = uriTemplate.fill(match);
 
-              const result = await resourceTemplate.load(match, this.#auth);
+              const result = await resourceTemplate.load(
+                match,
+                this.#auth,
+                this.#createLoadContext(request.params?._meta),
+              );
 
               const resources = Array.isArray(result) ? result : [result];
               return {
@@ -1829,7 +1983,10 @@ export class FastMCPSession<
           let maybeArrayResult: Awaited<ReturnType<Resource<T>["load"]>>;
 
           try {
-            maybeArrayResult = await resource.load(this.#auth);
+            maybeArrayResult = await resource.load(
+              this.#auth,
+              this.#createLoadContext(request.params?._meta),
+            );
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : String(error);
@@ -1861,6 +2018,20 @@ export class FastMCPSession<
         });
       },
     );
+  }
+
+  private setupResourceSubscriptionHandlers() {
+    this.#server.setRequestHandler(SubscribeRequestSchema, (request) => {
+      this.#subscriptions.add(request.params.uri);
+
+      return {};
+    });
+
+    this.#server.setRequestHandler(UnsubscribeRequestSchema, (request) => {
+      this.#subscriptions.delete(request.params.uri);
+
+      return {};
+    });
   }
 
   private setupResourceTemplateHandlers() {
@@ -2044,44 +2215,7 @@ export class FastMCPSession<
           }
         };
 
-        const log = {
-          debug: (message: string, context?: SerializableValue) => {
-            this.#server.sendLoggingMessage({
-              data: {
-                context,
-                message,
-              },
-              level: "debug",
-            });
-          },
-          error: (message: string, context?: SerializableValue) => {
-            this.#server.sendLoggingMessage({
-              data: {
-                context,
-                message,
-              },
-              level: "error",
-            });
-          },
-          info: (message: string, context?: SerializableValue) => {
-            this.#server.sendLoggingMessage({
-              data: {
-                context,
-                message,
-              },
-              level: "info",
-            });
-          },
-          warn: (message: string, context?: SerializableValue) => {
-            this.#server.sendLoggingMessage({
-              data: {
-                context,
-                message,
-              },
-              level: "warning",
-            });
-          },
-        };
+        const log = this.#createLog();
 
         // Create a promise for tool execution
         // Streams partial results while a tool is still executing
@@ -2122,6 +2256,10 @@ export class FastMCPSession<
           client: {
             version: this.#server.getClientVersion(),
           },
+          elicit: (
+            params: ElicitRequestFormParams | ElicitRequestURLParams,
+            options?: RequestOptions,
+          ) => this.#server.elicitInput(params, options),
           log,
           reportProgress,
           requestId:
@@ -2258,6 +2396,25 @@ function convertObjectToSnakeCase(
   return result;
 }
 
+function joinPaths(basePath: "" | `/${string}`, path: string): `/${string}` {
+  return `${basePath}${normalizePath(path)}` as `/${string}`;
+}
+
+function normalizeBasePath(path: string | undefined): "" | `/${string}` {
+  if (!path || path === "/") {
+    return "";
+  }
+
+  const withLeadingSlash = path.startsWith("/") ? path : `/${path}`;
+  const withoutTrailingSlash = withLeadingSlash.replace(/\/+$/, "");
+
+  return withoutTrailingSlash ? (withoutTrailingSlash as `/${string}`) : "";
+}
+
+function normalizePath(path: string): `/${string}` {
+  return (path.startsWith("/") ? path : `/${path}`) as `/${string}`;
+}
+
 /**
  * Parses Basic auth header (RFC 6749 Section 2.3.1)
  */
@@ -2276,6 +2433,25 @@ function parseBasicAuthHeader(
   } catch {
     return null;
   }
+}
+
+function stripBasePath(
+  path: string,
+  basePath: "" | `/${string}`,
+): null | string {
+  if (!basePath) {
+    return path;
+  }
+
+  if (path === basePath) {
+    return "/";
+  }
+
+  if (path.startsWith(`${basePath}/`)) {
+    return path.slice(basePath.length);
+  }
+
+  return null;
 }
 
 const FastMCPEventEmitterBase: {
@@ -2622,11 +2798,28 @@ export class FastMCP<
   }
 
   /**
+   * Notifies subscribed clients that a resource's contents have changed.
+   *
+   * Sends a `notifications/resources/updated` notification to every connected
+   * session that has subscribed to `uri` via `resources/subscribe`. Sessions
+   * that have not subscribed to the URI are skipped, so it is safe to call this
+   * whenever the underlying data changes.
+   *
+   * @param uri - The URI of the resource whose contents changed.
+   */
+  public async sendResourceUpdated(uri: string): Promise<void> {
+    await Promise.all(
+      this.#sessions.map((session) => session.sendResourceUpdated(uri)),
+    );
+  }
+
+  /**
    * Starts the server.
    */
   public async start(
     options?: Partial<{
       httpStream: {
+        basePath?: `/${string}`;
         cors?: boolean | CorsOptions;
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
@@ -2683,6 +2876,22 @@ export class FastMCP<
 
       await session.connect(transport);
 
+      // Belt-and-suspenders: detect when the MCP client closes its end of
+      // the stdin pipe and shut down the transport so the process doesn't
+      // linger as a zombie/orphan. The upstream SDK fix (PR #2003) handles
+      // this inside StdioServerTransport itself, but adding the listener here
+      // means older SDK versions are also protected.
+      let stdinClosed = false;
+      const onStdinClose = () => {
+        if (stdinClosed) return;
+        stdinClosed = true;
+        process.stdin.off("close", onStdinClose);
+        process.stdin.off("end", onStdinClose);
+        transport.close().catch(() => {});
+      };
+      process.stdin.on("close", onStdinClose);
+      process.stdin.on("end", onStdinClose);
+
       this.#sessions.push(session);
 
       session.once("error", () => {
@@ -2694,6 +2903,8 @@ export class FastMCP<
         const originalOnClose = transport.onclose;
 
         transport.onclose = () => {
+          process.stdin.off("close", onStdinClose);
+          process.stdin.off("end", onStdinClose);
           this.#removeSession(session);
 
           if (originalOnClose) {
@@ -2702,6 +2913,8 @@ export class FastMCP<
         };
       } else {
         transport.onclose = () => {
+          process.stdin.off("close", onStdinClose);
+          process.stdin.off("end", onStdinClose);
           this.#removeSession(session);
         };
       }
@@ -2714,11 +2927,15 @@ export class FastMCP<
       const httpConfig = config.httpStream;
       const protocol =
         httpConfig.sslCert || httpConfig.sslKey ? "https" : "http";
+      const streamEndpoint = joinPaths(
+        httpConfig.basePath,
+        httpConfig.endpoint,
+      );
 
       if (httpConfig.stateless) {
         // Stateless mode - create new server instance for each request
         this.#logger.info(
-          `[FastMCP info] Starting server in stateless mode on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
+          `[FastMCP info] Starting server in stateless mode on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
         );
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
@@ -2731,9 +2948,10 @@ export class FastMCP<
               auth = await this.#authenticate(request);
 
               // In stateless mode, authentication is REQUIRED
-              // mcp-proxy will catch this error and return 401
               if (auth === undefined || auth === null) {
-                throw new Error("Authentication required");
+                throw this.#createUnauthorizedResponse(
+                  "Authentication required",
+                );
               }
             }
 
@@ -2775,7 +2993,8 @@ export class FastMCP<
               res,
               true,
               httpConfig.host,
-              httpConfig.endpoint,
+              streamEndpoint,
+              httpConfig.basePath,
             );
           },
           port: httpConfig.port,
@@ -2783,7 +3002,7 @@ export class FastMCP<
           sslCert: httpConfig.sslCert,
           sslKey: httpConfig.sslKey,
           stateless: true,
-          streamEndpoint: httpConfig.endpoint,
+          streamEndpoint,
         });
       } else {
         // Regular mode with session management
@@ -2842,7 +3061,8 @@ export class FastMCP<
               res,
               false,
               httpConfig.host,
-              httpConfig.endpoint,
+              streamEndpoint,
+              httpConfig.basePath,
             );
           },
           port: httpConfig.port,
@@ -2850,11 +3070,11 @@ export class FastMCP<
           sslCert: httpConfig.sslCert,
           sslKey: httpConfig.sslKey,
           stateless: httpConfig.stateless,
-          streamEndpoint: httpConfig.endpoint,
+          streamEndpoint,
         });
 
         this.#logger.info(
-          `[FastMCP info] server is running on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${httpConfig.endpoint}`,
+          `[FastMCP info] server is running on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
         );
       }
       this.#serverState = ServerState.Running;
@@ -2890,7 +3110,7 @@ export class FastMCP<
         typeof (auth as { error: unknown }).error === "string"
           ? (auth as { error: string }).error
           : "Authentication failed";
-      throw new Error(errorMessage);
+      throw this.#createUnauthorizedResponse(errorMessage);
     }
 
     const allowedTools = auth
@@ -2918,6 +3138,56 @@ export class FastMCP<
   }
 
   /**
+   * Builds a 401 Unauthorized HTTP Response for authentication failures.
+   *
+   * Throwing a `Response` (rather than a plain `Error`) guarantees that the
+   * transport (e.g. mcp-proxy) surfaces the correct status code directly,
+   * instead of relying on heuristics that infer the status code from the
+   * error message's text (see https://github.com/punkpeye/fastmcp/issues/180).
+   *
+   * The response body matches the JSON-RPC error envelope FastMCP otherwise
+   * produces, and a `WWW-Authenticate` header is included per RFC 7235 (and
+   * RFC 9728 when protected-resource metadata is configured), so HTTP-aware
+   * clients can distinguish "unauthenticated" from a malformed request.
+   */
+  #createUnauthorizedResponse(message: string): Response {
+    // Only advertise resource_metadata when OAuth is enabled: the
+    // `/.well-known/oauth-protected-resource` endpoint is served only under
+    // `oauth.enabled` (and this matches how the oauth config is forwarded to
+    // mcp-proxy at the httpStream call sites), so gating here avoids pointing
+    // clients at an endpoint that would 404.
+    const oauth = this.#options.oauth;
+    const resource = oauth?.enabled
+      ? oauth.protectedResource?.resource
+      : undefined;
+    const wwwAuthenticateParts = [
+      'error="invalid_token"',
+      `error_description="${message.replace(/"/g, '\\"')}"`,
+    ];
+
+    if (resource) {
+      wwwAuthenticateParts.push(
+        `resource_metadata="${resource}/.well-known/oauth-protected-resource"`,
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        error: { code: -32000, message },
+        id: null,
+        jsonrpc: "2.0",
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": `Bearer ${wwwAuthenticateParts.join(", ")}`,
+        },
+        status: 401,
+      },
+    );
+  }
+
+  /**
    * Handles unhandled HTTP requests with health, readiness, OAuth endpoints, and custom routes
    */
   #handleUnhandledRequest = async (
@@ -2926,8 +3196,10 @@ export class FastMCP<
     isStateless = false,
     host: string,
     streamEndpoint?: string,
+    basePath: "" | `/${string}` = "",
   ) => {
     const url = new URL(req.url || "", `http://${host}`);
+    const basePathRelativePath = stripBasePath(url.pathname, basePath);
 
     // Try Hono routes first - users may have added routes via getApp()
     try {
@@ -2977,12 +3249,11 @@ export class FastMCP<
 
     if (enabled) {
       const path = healthConfig.path ?? "/health";
-      const url = new URL(req.url || "", `http://${host}`);
 
       try {
         if (
           (req.method === "GET" || req.method === "HEAD") &&
-          url.pathname === path
+          url.pathname === joinPaths(basePath, path)
         ) {
           res
             .writeHead(healthConfig.status ?? 200, {
@@ -3000,7 +3271,7 @@ export class FastMCP<
         // Enhanced readiness check endpoint
         if (
           (req.method === "GET" || req.method === "HEAD") &&
-          url.pathname === "/ready"
+          url.pathname === joinPaths(basePath, "/ready")
         ) {
           if (isStateless) {
             // In stateless mode, we're always ready if the server is running
@@ -3056,9 +3327,13 @@ export class FastMCP<
     const oauthConfig = this.#options.oauth;
     if (oauthConfig?.enabled && req.method === "GET") {
       const url = new URL(req.url || "", `http://${host}`);
+      const authorizationServerMetadataPath = joinPaths(
+        "",
+        `/.well-known/oauth-authorization-server${basePath}`,
+      );
 
       if (
-        url.pathname === "/.well-known/oauth-authorization-server" &&
+        url.pathname === authorizationServerMetadataPath &&
         oauthConfig.authorizationServer
       ) {
         const metadata = convertObjectToSnakeCase(
@@ -3111,10 +3386,11 @@ export class FastMCP<
     const oauthProxy = oauthConfig?.proxy;
     if (oauthProxy && oauthConfig?.enabled) {
       const url = new URL(req.url || "", `http://${host}`);
+      const oauthPath = basePathRelativePath;
 
       try {
         // DCR endpoint - POST /oauth/register
-        if (req.method === "POST" && url.pathname === "/oauth/register") {
+        if (req.method === "POST" && oauthPath === "/oauth/register") {
           await new Promise<void>((resolve) => {
             let body = "";
             req.on("data", (chunk) => (body += chunk));
@@ -3145,7 +3421,7 @@ export class FastMCP<
         }
 
         // Authorization endpoint - GET /oauth/authorize
-        if (req.method === "GET" && url.pathname === "/oauth/authorize") {
+        if (req.method === "GET" && oauthPath === "/oauth/authorize") {
           try {
             const params = Object.fromEntries(url.searchParams.entries());
             const response = await oauthProxy.authorize(
@@ -3181,7 +3457,7 @@ export class FastMCP<
         }
 
         // Callback endpoint - GET /oauth/callback
-        if (req.method === "GET" && url.pathname === "/oauth/callback") {
+        if (req.method === "GET" && oauthPath === "/oauth/callback") {
           try {
             const mockRequest = new Request(`http://${host}${req.url}`);
             const response = await oauthProxy.handleCallback(mockRequest);
@@ -3206,14 +3482,14 @@ export class FastMCP<
         }
 
         // Consent endpoint - POST /oauth/consent
-        if (req.method === "POST" && url.pathname === "/oauth/consent") {
+        if (req.method === "POST" && oauthPath === "/oauth/consent") {
           await new Promise<void>((resolve) => {
             let body = "";
             req.on("data", (chunk) => (body += chunk));
             req.on("end", async () => {
               try {
                 const mockRequest = new Request(
-                  `http://${host}/oauth/consent`,
+                  `http://${host}${url.pathname}${url.search}`,
                   {
                     body,
                     headers: {
@@ -3247,7 +3523,7 @@ export class FastMCP<
         }
 
         // Token endpoint - POST /oauth/token
-        if (req.method === "POST" && url.pathname === "/oauth/token") {
+        if (req.method === "POST" && oauthPath === "/oauth/token") {
           await new Promise<void>((resolve) => {
             let body = "";
             req.on("data", (chunk) => (body += chunk));
@@ -3366,6 +3642,7 @@ export class FastMCP<
   #parseRuntimeConfig(
     overrides?: Partial<{
       httpStream: {
+        basePath?: `/${string}`;
         cors?: boolean | CorsOptions;
         enableJsonResponse?: boolean;
         endpoint?: `/${string}`;
@@ -3382,6 +3659,7 @@ export class FastMCP<
   ):
     | {
         httpStream: {
+          basePath: "" | `/${string}`;
           cors?: boolean | CorsOptions;
           enableJsonResponse?: boolean;
           endpoint: `/${string}`;
@@ -3408,12 +3686,14 @@ export class FastMCP<
     const transportArg = getArg("transport");
     const portArg = getArg("port");
     const endpointArg = getArg("endpoint");
+    const basePathArg = getArg("base-path");
     const statelessArg = getArg("stateless");
     const hostArg = getArg("host");
 
     const envTransport = process.env.FASTMCP_TRANSPORT;
     const envPort = process.env.FASTMCP_PORT;
     const envEndpoint = process.env.FASTMCP_ENDPOINT;
+    const envBasePath = process.env.FASTMCP_BASE_PATH;
     const envStateless = process.env.FASTMCP_STATELESS;
     const envHost = process.env.FASTMCP_HOST;
     // Overrides > CLI > env > defaults
@@ -3431,6 +3711,9 @@ export class FastMCP<
         overrides?.httpStream?.host || hostArg || envHost || "localhost";
       const endpoint =
         overrides?.httpStream?.endpoint || endpointArg || envEndpoint || "/mcp";
+      const basePath = normalizeBasePath(
+        overrides?.httpStream?.basePath || basePathArg || envBasePath,
+      );
       const enableJsonResponse =
         overrides?.httpStream?.enableJsonResponse || false;
       const stateless =
@@ -3446,6 +3729,7 @@ export class FastMCP<
 
       return {
         httpStream: {
+          basePath,
           cors,
           enableJsonResponse,
           endpoint: endpoint as `/${string}`,
@@ -3550,6 +3834,7 @@ export type {
   ImageContent,
   InputPrompt,
   InputPromptArgument,
+  LoadContext,
   LoggingLevel,
   Progress,
   Prompt,
