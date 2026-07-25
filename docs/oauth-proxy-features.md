@@ -203,8 +203,10 @@ Ready-to-use provider implementations:
 
 Background processes maintain system health:
 
-- Expired transactions automatically removed
-- Authorization codes deleted after use or expiration
+- Transactions and authorization codes are written with a TTL derived from their
+  expiry, and reclaimed by the storage backend
+- Authorization codes are consumed on first use; a small marker is kept until
+  the code would have expired, so a replay reports "already used"
 - Token mappings cleaned up based on TTL
 - Configurable cleanup intervals (default: 60 seconds)
 
@@ -276,8 +278,16 @@ interface TokenStorage {
   get(key: string): Promise<unknown | null>;
   delete(key: string): Promise<void>;
   cleanup(): Promise<void>;
+  /** Atomic get + delete. Optional, but required to run more than one instance. */
+  take?(key: string): Promise<unknown | null>;
 }
 ```
+
+Your implementation must honour `ttl` — transactions and authorization codes
+are written with one derived from their expiry, and a backend that ignores it
+never reclaims them. Implement `take` if more than one process shares the
+storage; see
+[Running Multiple Instances](oauth-proxy-guide.md#running-multiple-instances).
 
 #### Forward PKCE Mode
 
@@ -433,13 +443,18 @@ Built-in debugging capabilities:
 - Server-side proxy only (no client-side OAuth handler)
 - HS256 JWT signing only (no RS256/ES256 yet)
 - No built-in token revocation endpoint
-- No built-in distributed locking for multi-server deployments
+- No general-purpose distributed locking; single-use enforcement for
+  authorization codes and transactions relies on `TokenStorage.take`
 
 ### Storage Considerations
 
-- In-memory storage doesn't persist across restarts
-- DiskStore is single-server only (no distributed support)
-- Large-scale deployments may need Redis/database backends
+- In-memory storage doesn't persist across restarts, and is per-process, so it
+  only works for a single instance
+- DiskStore is host-local: processes sharing one directory are safe (it claims
+  entries with an atomic `rename()`), but it is not a network-distributed store
+- Multi-instance deployments need a shared backend (Redis/database) that
+  implements `take` — see
+  [Running Multiple Instances](oauth-proxy-guide.md#running-multiple-instances)
 
 ### Provider Support
 

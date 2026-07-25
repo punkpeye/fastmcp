@@ -237,29 +237,29 @@ export class OAuthProxy {
     // Consume the code atomically: whoever takes it owns this exchange, so two
     // concurrent requests — on this instance or another one sharing the
     // storage — cannot both redeem it (RFC 6749 §4.1.2).
-    const clientCode = await this.stateStore.consumeClientCode(request.code);
-    if (!clientCode) {
+    const consumed = await this.stateStore.consumeClientCode(request.code);
+    if (!consumed) {
       throw new OAuthProxyError(
         "invalid_grant",
         "Invalid or expired authorization code",
       );
     }
 
-    const alreadyUsed = clientCode.used === true;
+    // Put a tombstone back — whether the code was live or already spent — so
+    // later attempts get the precise "already used" error rather than looking
+    // like an unknown code. It replaces the record instead of amending it, so
+    // the upstream tokens stop being stored the moment they are handed over,
+    // and a spent code can never be resurrected.
+    await this.stateStore.markClientCodeSpent(request.code, consumed.expiresAt);
 
-    // Put the record back marked used, so later attempts get the precise
-    // "already used" error rather than looking like an unknown code. This is a
-    // tombstone: `used` only ever goes false -> true, so it cannot resurrect a
-    // spent code.
-    clientCode.used = true;
-    await this.stateStore.saveClientCode(clientCode);
-
-    if (alreadyUsed) {
+    if (consumed.status === "spent") {
       throw new OAuthProxyError(
         "invalid_grant",
         "Authorization code already used",
       );
     }
+
+    const clientCode = consumed.clientCode;
 
     // Validate client
     if (clientCode.clientId !== request.client_id) {
@@ -449,6 +449,16 @@ export class OAuthProxy {
 
     if (typeof transactionId !== "string" || !transactionId) {
       throw new OAuthProxyError("invalid_request", "Missing transaction_id");
+    }
+
+    // Require the choice to be explicit. Anything else used to fall through to
+    // the approve branch, so a submission that lost the field — or never sent
+    // one — granted access the user never clicked for.
+    if (action !== "approve" && action !== "deny") {
+      throw new OAuthProxyError(
+        "invalid_request",
+        "action must be 'approve' or 'deny'",
+      );
     }
 
     const transaction = await this.stateStore.getTransaction(transactionId);

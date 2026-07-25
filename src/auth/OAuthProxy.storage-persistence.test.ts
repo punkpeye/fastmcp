@@ -309,6 +309,78 @@ describe("OAuthProxy TokenStorage persistence", () => {
       ).rejects.toMatchObject({ code: "invalid_grant" });
     });
 
+    it("keeps reporting a spent code as used rather than as unknown", async () => {
+      const tokenStorage = createStorage();
+      mockUpstreamTokenEndpoint();
+      const { request } = await issueAuthorizationCode(tokenStorage);
+
+      await createProxy(tokenStorage).exchangeAuthorizationCode(request);
+
+      const replay = () =>
+        expect(
+          createProxy(tokenStorage).exchangeAuthorizationCode(request),
+        ).rejects.toMatchObject({
+          code: "invalid_grant",
+          description: "Authorization code already used",
+        });
+
+      // Each attempt takes the tombstone out of storage, so it has to be put
+      // back every time; otherwise the second replay would report an unknown
+      // code and hide the fact that this one was issued and spent.
+      await replay();
+      await replay();
+    });
+
+    it("drops the upstream tokens from the record once the code is redeemed", async () => {
+      // encryptionKey: false so the test can read back what was actually
+      // written rather than ciphertext.
+      const tokenStorage = createStorage();
+      mockUpstreamTokenEndpoint();
+
+      const proxy = new OAuthProxy({
+        ...baseConfig,
+        encryptionKey: false,
+        tokenStorage,
+      });
+      proxies.push(proxy);
+
+      const dcr = await proxy.registerClient({ redirect_uris: [CALLBACK_URL] });
+      const authResponse = await proxy.authorize(authParams(dcr.client_id));
+      const callbackResponse = await proxy.handleCallback(
+        new Request(
+          `${baseConfig.baseUrl}/oauth/callback?code=upstream-code&state=${encodeURIComponent(
+            getRequiredSearchParam(
+              new URL(getRequiredLocation(authResponse)),
+              "state",
+            ),
+          )}`,
+        ),
+      );
+      const code = getRequiredSearchParam(
+        new URL(getRequiredLocation(callbackResponse)),
+        "code",
+      );
+
+      // While the code is redeemable the record holds the upstream tokens.
+      await expect(tokenStorage.get(`code:${code}`)).resolves.toMatchObject({
+        upstreamTokens: { refreshToken: "upstream-refresh-token" },
+      });
+
+      await proxy.exchangeAuthorizationCode({
+        client_id: dcr.client_id,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: CALLBACK_URL,
+      });
+
+      // Afterwards only the tombstone is left, so a long-lived upstream
+      // refresh token does not sit in storage for the rest of the code's TTL.
+      await expect(tokenStorage.get(`code:${code}`)).resolves.toEqual({
+        expiresAt: expect.any(Date),
+        used: true,
+      });
+    });
+
     it("rejects a callback whose transaction another instance already consumed", async () => {
       // Given an authorization started on one instance...
       const tokenStorage = createStorage();

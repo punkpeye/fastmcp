@@ -76,6 +76,19 @@ const clientCodeStorageSchema: z.ZodType<ClientCode> = z.object({
   used: z.boolean().optional(),
 });
 
+/**
+ * What is left behind once a code has been redeemed. Deliberately not a
+ * `ClientCode`: the tombstone carries only what a later attempt needs, so the
+ * upstream tokens do not linger in storage after they have been handed over.
+ *
+ * A full record written by an older version had `used: true` set on it, and
+ * still matches this shape, so those are read back as spent too.
+ */
+const spentClientCodeStorageSchema = z.object({
+  expiresAt: storedDateSchema,
+  used: z.literal(true),
+});
+
 const oauthTransactionStorageSchema: z.ZodType<OAuthTransaction> = z.object({
   clientCallbackUrl: z.string(),
   clientCodeChallenge: z.string(),
@@ -91,6 +104,16 @@ const oauthTransactionStorageSchema: z.ZodType<OAuthTransaction> = z.object({
   scope: z.array(z.string()),
   state: z.string(),
 });
+
+/**
+ * The result of taking an authorization code out of storage. Distinct from the
+ * `null` that `consumeClientCode` returns for a code that was never issued or
+ * has expired: `"spent"` means the code existed and a previous exchange
+ * already redeemed it, which the caller reports differently.
+ */
+export type ConsumedClientCode =
+  | { clientCode: ClientCode; expiresAt: Date; status: "active" }
+  | { expiresAt: Date; status: "spent" };
 
 interface OAuthProxyStateStoreConfig {
   readonly registeredClientsByClientId: Map<string, ProxyDCRClient>;
@@ -124,18 +147,35 @@ export class OAuthProxyStateStore {
    * Atomically consume an authorization code. At most one caller — across all
    * processes sharing the storage — can receive a given code, which is what
    * makes single use enforceable (RFC 6749 §4.1.2).
+   *
+   * Spent codes are taken too, so the caller must write the tombstone back
+   * with `markClientCodeSpent` to keep reporting the precise error on the
+   * attempt after this one.
    */
-  async consumeClientCode(code: string): Promise<ClientCode | null> {
+  async consumeClientCode(code: string): Promise<ConsumedClientCode | null> {
     const stored = await this.takeFromStorage(
       `${STORAGE_KEY_PREFIX.code}${code}`,
     );
+
+    const spent = spentClientCodeStorageSchema.safeParse(stored);
+
+    if (spent.success) {
+      return this.isExpired(spent.data.expiresAt)
+        ? null
+        : { expiresAt: spent.data.expiresAt, status: "spent" };
+    }
+
     const parsed = clientCodeStorageSchema.safeParse(stored);
 
     if (!parsed.success || this.isExpired(parsed.data.expiresAt)) {
       return null;
     }
 
-    return parsed.data;
+    return {
+      clientCode: parsed.data,
+      expiresAt: parsed.data.expiresAt,
+      status: "active",
+    };
   }
 
   /**
@@ -218,6 +258,19 @@ export class OAuthProxyStateStore {
     return (
       registeredClient?.redirectUris.includes(transaction.clientCallbackUrl) ??
       false
+    );
+  }
+
+  /**
+   * Record that an authorization code has been redeemed, so a later attempt
+   * gets "already used" rather than looking like an unknown code. Keyed and
+   * expiring exactly like the code it replaces, so it cannot outlive it.
+   */
+  async markClientCodeSpent(code: string, expiresAt: Date): Promise<void> {
+    await this.tokenStorage.save(
+      `${STORAGE_KEY_PREFIX.code}${code}`,
+      { expiresAt, used: true },
+      this.getTtlSeconds(expiresAt),
     );
   }
 
