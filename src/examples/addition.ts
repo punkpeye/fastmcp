@@ -147,7 +147,9 @@ server.addTool({
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
-    return;
+    // Return the complete poem as well: clients that do not handle the
+    // non-standard streamContent notification would otherwise see nothing.
+    return lines.join("\n");
   },
   name: "stream-poem",
   parameters: z.object({

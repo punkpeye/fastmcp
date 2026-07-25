@@ -249,6 +249,21 @@ type Context<T extends FastMCPSessionAuth> = {
    * counters, or maintain user-specific data across multiple requests.
    */
   sessionId?: string;
+  /**
+   * Streams incremental content while the tool is still executing, by emitting
+   * a `notifications/tool/streamContent` notification.
+   *
+   * NOTE: this is a FastMCP extension, not part of the MCP specification. As of
+   * revision 2025-11-25 the spec has no streaming tool output primitive (see
+   * SEP-2998 for the in-progress proposal). Clients that do not explicitly
+   * register a handler for this method — which includes Claude Desktop, Cursor
+   * and MCP Inspector — silently discard these notifications.
+   *
+   * Always return a final result from `execute` rather than relying on streamed
+   * content alone, otherwise such clients see an empty tool result. For
+   * incremental status that works everywhere, prefer
+   * {@link Context.reportProgress} with a `message`.
+   */
   streamContent: (content: Content | Content[]) => Promise<void>;
 };
 
@@ -271,6 +286,13 @@ type LoadContext<T extends FastMCPSessionAuth> = Omit<
 >;
 
 type Progress = {
+  /**
+   * An optional human-readable message describing the current progress.
+   *
+   * Part of `notifications/progress` since MCP revision 2025-06-18, so unlike
+   * `streamContent` this reaches any spec-compliant client.
+   */
+  message?: string;
   /**
    * The progress thus far. This should increase every time progress is made, even if the total is unknown.
    */
@@ -972,8 +994,11 @@ type Tool<
   };
   annotations?: {
     /**
-     * When true, the tool leverages incremental content streaming
-     * Return void for tools that handle all their output via streaming
+     * Advisory metadata signalling that the tool streams incremental content
+     * via {@link Context.streamContent}. Forwarded verbatim in `tools/list`.
+     *
+     * This has no effect on FastMCP's behavior: it neither enables nor is
+     * required by `streamContent`. No known client interprets it today.
      */
     streamingHint?: boolean;
   } & ToolAnnotations;

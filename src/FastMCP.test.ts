@@ -742,6 +742,62 @@ test(
   },
 );
 
+test("reportProgress forwards the optional message field", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const progressCalls: Array<{
+        message?: string;
+        progress: number;
+        total?: number;
+      }> = [];
+
+      await client.callTool(
+        {
+          arguments: {},
+          name: "progress-message-test",
+        },
+        undefined,
+        {
+          onprogress: (data) => {
+            progressCalls.push(data);
+          },
+        },
+      );
+
+      expect(progressCalls).toEqual([
+        { message: "Downloading chunk 1 of 2", progress: 0, total: 2 },
+        { progress: 2, total: 2 },
+      ]);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Test tool for progress messages",
+        execute: async (_args, { reportProgress }) => {
+          await reportProgress({
+            message: "Downloading chunk 1 of 2",
+            progress: 0,
+            total: 2,
+          });
+
+          // message is optional and must stay absent when not supplied.
+          await reportProgress({ progress: 2, total: 2 });
+
+          return "done";
+        },
+        name: "progress-message-test",
+        parameters: z.object({}),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("reportProgress is a no-op when the client did not request progress", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
@@ -3492,6 +3548,71 @@ test("supports streaming output from tools", async () => {
           return "Final result after streaming";
         },
         name: "streaming-with-result",
+        parameters: z.object({}),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("streamed content is observable by a client that registers a handler", async () => {
+  // Mirrors the client-side snippet documented in README "Consuming streamed
+  // content". `notifications/tool/streamContent` is a FastMCP extension, so a
+  // client only sees it by registering a handler for the method.
+  const StreamContentNotificationSchema = z.object({
+    method: z.literal("notifications/tool/streamContent"),
+    params: z.object({
+      content: z.array(z.any()),
+      toolName: z.string(),
+    }),
+  });
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const chunks: Array<{ text: string; toolName: string }> = [];
+
+      client.setNotificationHandler(
+        StreamContentNotificationSchema,
+        (notification) => {
+          chunks.push({
+            text: notification.params.content[0].text,
+            toolName: notification.params.toolName,
+          });
+        },
+      );
+
+      const result = (await client.callTool({
+        arguments: {},
+        name: "streaming-tool",
+      })) as ContentResult;
+
+      expect(chunks).toEqual([
+        { text: "chunk 1", toolName: "streaming-tool" },
+        { text: "chunk 2", toolName: "streaming-tool" },
+      ]);
+
+      // The final result stays authoritative and self-contained.
+      expect(result).toEqual({
+        content: [{ text: "chunk 1chunk 2", type: "text" }],
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        annotations: { streamingHint: true },
+        description: "Streams content and returns the complete result",
+        execute: async (_args, { streamContent }) => {
+          await streamContent({ text: "chunk 1", type: "text" });
+          await streamContent({ text: "chunk 2", type: "text" });
+
+          return "chunk 1chunk 2";
+        },
+        name: "streaming-tool",
         parameters: z.object({}),
       });
 

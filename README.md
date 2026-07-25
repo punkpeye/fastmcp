@@ -1228,15 +1228,32 @@ server.addTool({
 });
 ```
 
+`reportProgress` accepts an optional human-readable `message` alongside the numeric fields, which clients can display next to the progress indicator:
+
+```js
+await reportProgress({
+  progress: 40,
+  total: 100,
+  message: "Downloading chunk 4 of 10…",
+});
+```
+
+Progress notifications are only emitted when the client opts in by supplying a `progressToken` on the tool call; otherwise `reportProgress` is a no-op. Because `notifications/progress` is part of the MCP specification (the `message` field since revision 2025-06-18), this is the portable way to send incremental updates during a long-running tool call — see [Streaming Output](#streaming-output) below for the difference.
+
 #### Streaming Output
 
-FastMCP supports streaming partial results from tools while they're still executing, enabling responsive UIs and real-time feedback. This is particularly useful for:
+FastMCP can stream partial results from tools while they're still executing, enabling responsive UIs and real-time feedback. This is particularly useful for:
 
 - Long-running operations that generate content incrementally
 - Progressive generation of text, images, or other media
 - Operations where users benefit from seeing immediate partial results
 
-To enable streaming for a tool, add the `streamingHint` annotation and use the `streamContent` method:
+> [!IMPORTANT]
+> `streamContent` is a **FastMCP extension, not part of the MCP specification**. It emits a `notifications/tool/streamContent` notification, which the MCP specification does not define — as of revision `2025-11-25` there is no standard mechanism for streaming tool output ([SEP-2998](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2998) is the in-progress proposal to add one).
+>
+> Clients discard notifications they have no handler registered for, silently and without error. **This includes Claude Desktop, Cursor, and MCP Inspector.** Streaming is therefore only useful when you also control the client — see [Consuming streamed content](#consuming-streamed-content) below. If you need incremental updates that work on any client, use [`reportProgress`](#progress) with a `message` instead.
+
+To stream from a tool, use the `streamContent` method:
 
 ```js
 server.addTool({
@@ -1246,7 +1263,7 @@ server.addTool({
     prompt: z.string(),
   }),
   annotations: {
-    streamingHint: true, // Signals this tool uses streaming
+    streamingHint: true, // Advisory only; see below
     readOnlyHint: true,
   },
   execute: async (args, { streamContent }) => {
@@ -1260,18 +1277,44 @@ server.addTool({
       await new Promise((resolve) => setTimeout(resolve, 300)); // Simulate delay
     }
 
-    // When using streamContent, you can:
-    // 1. Return void (if all content was streamed)
-    // 2. Return a final result (which will be appended to streamed content)
-
-    // Option 1: All content was streamed, so return void
-    return;
-
-    // Option 2: Return final content that will be appended
-    // return "Generation complete!";
+    // Always return a final result. Returning nothing sends an empty tool
+    // result, so clients that ignore the streamed notifications see no output
+    // at all.
+    return "The quick brown fox jumps over the lazy dog.";
   },
 });
 ```
+
+> [!WARNING]
+> Returning `undefined` from `execute` produces a tool result with empty `content`. If you stream everything and return nothing, any client that does not handle `notifications/tool/streamContent` — which is most of them — receives an empty result with no indication that anything was lost. Return the complete result as well, and treat streamed content purely as a progressive-rendering enhancement.
+
+The `streamingHint` annotation is advisory metadata. It is forwarded verbatim to clients in `tools/list`, but it does not enable or gate `streamContent`, and FastMCP itself never reads it. No known client interprets it today.
+
+##### Consuming streamed content
+
+A client only receives these notifications if it registers a handler for the method:
+
+```ts
+import { z } from "zod";
+
+const StreamContentNotificationSchema = z.object({
+  method: z.literal("notifications/tool/streamContent"),
+  params: z.object({
+    content: z.array(z.any()),
+    toolName: z.string(),
+  }),
+});
+
+client.setNotificationHandler(
+  StreamContentNotificationSchema,
+  (notification) => {
+    const { content, toolName } = notification.params;
+    // Render the partial content however you like.
+  },
+);
+```
+
+Note that notifications carry only `toolName`, not a request or progress token, so concurrent calls to the same tool on one session cannot be told apart.
 
 Streaming works with all content types (text, image, audio) and can be combined with progress reporting:
 
@@ -1289,10 +1332,14 @@ server.addTool({
     const total = args.datasetSize;
 
     for (let i = 0; i < total; i++) {
-      // Report numeric progress
-      await reportProgress({ progress: i, total });
+      // Standard progress notification: reaches every spec-compliant client
+      await reportProgress({
+        progress: i,
+        total,
+        message: `Processed ${i} of ${total} items`,
+      });
 
-      // Stream intermediate results
+      // Richer partial content: only reaches clients that opt in
       if (i % 10 === 0) {
         await streamContent({
           type: "text",
