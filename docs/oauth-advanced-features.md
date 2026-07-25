@@ -311,9 +311,10 @@ const encryptionKey = await JWTIssuer.deriveKey(
 
 ### Storage Backend Selection
 
-- **MemoryTokenStorage**: Fast but loses data on restart. Good for development.
-- **DiskStore**: Persistent but slower. Good for single-server production.
+- **MemoryTokenStorage**: Fast but loses data on restart, and per-process. Good for development.
+- **DiskStore**: Persistent but slower. Good for single-host production, including several processes sharing one directory.
 - **EncryptedTokenStorage**: Additional overhead for encryption. Use when storing sensitive data.
+- **Custom (Redis/database)**: Required to run instances on more than one host. Must implement `take` — see [Running Multiple Instances](oauth-proxy-guide.md#running-multiple-instances).
 
 ### Cleanup Intervals
 
