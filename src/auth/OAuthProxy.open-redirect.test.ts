@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Regression tests for CWE-601 open-redirect / authorization-code theft in
  * OAuthProxy. See the SECURITY advisory for the full threat model.
@@ -17,9 +16,50 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AuthorizationParams, UpstreamTokenSet } from "./types.js";
+import type {
+  AuthorizationParams,
+  TokenStorage,
+  UpstreamTokenSet,
+} from "./types.js";
 
 import { OAuthProxy, OAuthProxyError } from "./OAuthProxy.js";
+
+/**
+ * Proxy state lives in the TokenStorage, so tests that need to tamper with a
+ * stored transaction reach in through this rather than through proxy
+ * internals. Values are held as-is (the proxy is configured with
+ * `encryptionKey: false`) so a test can read a record, modify it, and put it
+ * back the way a compromised backend would.
+ */
+class InspectableTokenStorage implements TokenStorage {
+  private store = new Map<string, unknown>();
+
+  async cleanup(): Promise<void> {}
+
+  async delete(key: string): Promise<void> {
+    this.store.delete(key);
+  }
+
+  async get(key: string): Promise<null | unknown> {
+    return this.store.get(key) ?? null;
+  }
+
+  keys(prefix: string): string[] {
+    return [...this.store.keys()].filter((key) => key.startsWith(prefix));
+  }
+
+  async save(key: string, value: unknown): Promise<void> {
+    this.store.set(key, value);
+  }
+
+  async take(key: string): Promise<null | unknown> {
+    const value = this.store.get(key) ?? null;
+    this.store.delete(key);
+    return value;
+  }
+}
+
+const TRANSACTION_PREFIX = "transaction:";
 
 const baseConfig = {
   allowedRedirectUriPatterns: ["https://client.example.com/*"],
@@ -79,9 +119,15 @@ function mockUpstreamTokenEndpoint() {
 
 describe("OAuthProxy CWE-601 open-redirect regression", () => {
   let proxy: OAuthProxy;
+  let storage: InspectableTokenStorage;
 
   beforeEach(() => {
-    proxy = new OAuthProxy(baseConfig);
+    storage = new InspectableTokenStorage();
+    proxy = new OAuthProxy({
+      ...baseConfig,
+      encryptionKey: false,
+      tokenStorage: storage,
+    });
   });
 
   describe("authorize() rejects unregistered redirect_uri", () => {
@@ -173,11 +219,7 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
       ).rejects.toBeInstanceOf(OAuthProxyError);
 
       // And no transaction should have been persisted.
-      const transactionsField = (proxy as any).transactions as Map<
-        string,
-        unknown
-      >;
-      expect(transactionsField.size).toBe(0);
+      expect(storage.keys(TRANSACTION_PREFIX)).toHaveLength(0);
     });
 
     it("an attacker cannot self-register a non-localhost URI with the default config", async () => {
@@ -226,10 +268,12 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
 
       // Simulate revocation / tampering: drop the URI from the registry and
       // hand-craft an attacker replacement inside the transaction record.
-      const transactions = (proxy as any).transactions as Map<string, any>;
-      const txn = transactions.get(transactionId);
+      const transactionKey = `${TRANSACTION_PREFIX}${transactionId}`;
+      const txn = (await storage.get(transactionKey)) as {
+        clientCallbackUrl: string;
+      };
       txn.clientCallbackUrl = EVIL_REDIRECT;
-      transactions.set(transactionId, txn);
+      await storage.save(transactionKey, txn);
 
       const cbReq = new Request(
         `${baseConfig.baseUrl}${baseConfig.redirectPath}?code=UP_CODE&state=${encodeURIComponent(
@@ -242,15 +286,18 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
       });
 
       // Transaction should be purged so an attacker can't replay it.
-      expect(transactions.has(transactionId)).toBe(false);
+      expect(await storage.get(transactionKey)).toBeNull();
     });
   });
 
   describe("handleConsent() deny branch defense-in-depth", () => {
     it("refuses to 302 to a tampered clientCallbackUrl on deny", async () => {
+      const consentStorage = new InspectableTokenStorage();
       const consentProxy = new OAuthProxy({
         ...baseConfig,
         consentRequired: true,
+        encryptionKey: false,
+        tokenStorage: consentStorage,
       });
       const dcr = await consentProxy.registerClient({
         redirect_uris: [LEGIT_REDIRECT],
@@ -262,13 +309,13 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
       // Consent HTML response is a 200, not a 302.
       expect(authResp.status).toBe(200);
 
-      const transactions = (consentProxy as any).transactions as Map<
-        string,
-        any
-      >;
-      const [transactionId, txn] = [...transactions.entries()][0];
+      const [transactionKey] = consentStorage.keys(TRANSACTION_PREFIX);
+      const transactionId = transactionKey.slice(TRANSACTION_PREFIX.length);
+      const txn = (await consentStorage.get(transactionKey)) as {
+        clientCallbackUrl: string;
+      };
       txn.clientCallbackUrl = EVIL_REDIRECT;
-      transactions.set(transactionId, txn);
+      await consentStorage.save(transactionKey, txn);
 
       const formBody = new URLSearchParams({
         action: "deny",
