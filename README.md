@@ -1238,7 +1238,7 @@ await reportProgress({
 });
 ```
 
-Progress notifications are only emitted when the client opts in by supplying a `progressToken` on the tool call; otherwise `reportProgress` is a no-op. Because `notifications/progress` is part of the MCP specification (the `message` field since revision 2025-06-18), this is the portable way to send incremental updates during a long-running tool call — see [Streaming Output](#streaming-output) below for the difference.
+Progress notifications are only emitted when the client opts in by supplying a `progressToken` on the tool call; otherwise `reportProgress` is a no-op. Because `notifications/progress` is part of the MCP specification (the `message` field since revision 2025-03-26), this is the portable way to send incremental updates during a long-running tool call — see [Streaming Output](#streaming-output) below for the difference.
 
 #### Streaming Output
 
@@ -1251,7 +1251,7 @@ FastMCP can stream partial results from tools while they're still executing, ena
 > [!IMPORTANT]
 > `streamContent` is a **FastMCP extension, not part of the MCP specification**. It emits a `notifications/tool/streamContent` notification, which the MCP specification does not define — as of revision `2025-11-25` there is no standard mechanism for streaming tool output ([SEP-2998](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2998) is the in-progress proposal to add one).
 >
-> Clients discard notifications they have no handler registered for, silently and without error. **This includes Claude Desktop, Cursor, and MCP Inspector.** Streaming is therefore only useful when you also control the client — see [Consuming streamed content](#consuming-streamed-content) below. If you need incremental updates that work on any client, use [`reportProgress`](#progress) with a `message` instead.
+> Clients discard notifications they have no handler registered for, silently and without error. A client only sees streamed content if it registers a handler for the method (or sets a `fallbackNotificationHandler`), and **no client is known to render it as tool output** — MCP Inspector, for example, logs it in its notifications pane via a fallback handler, but the tool result itself still shows only what `execute` returned. Streaming is therefore mainly useful when you also control the client — see [Consuming streamed content](#consuming-streamed-content) below. If you need incremental updates that work on any client, use [`reportProgress`](#progress) with a `message` instead.
 
 To stream from a tool, use the `streamContent` method:
 
@@ -1286,13 +1286,13 @@ server.addTool({
 ```
 
 > [!WARNING]
-> Returning `undefined` from `execute` produces a tool result with empty `content`. If you stream everything and return nothing, any client that does not handle `notifications/tool/streamContent` — which is most of them — receives an empty result with no indication that anything was lost. Return the complete result as well, and treat streamed content purely as a progressive-rendering enhancement.
+> Returning `undefined` from `execute` produces a tool result with empty `content`. If you stream everything and return nothing, the tool call resolves to an empty result with no indication that anything was lost — including on clients that do log the notification. Return the complete result as well, and treat streamed content purely as a progressive-rendering enhancement.
 
-The `streamingHint` annotation is advisory metadata. It is forwarded verbatim to clients in `tools/list`, but it does not enable or gate `streamContent`, and FastMCP itself never reads it. No known client interprets it today.
+The `streamingHint` annotation is advisory metadata. It is forwarded verbatim to clients in `tools/list`, but it does not enable or gate `streamContent`, and FastMCP itself never reads it. No client is known to act on it today, though [SEP-2998](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2998) proposes standardizing the same annotation name.
 
 ##### Consuming streamed content
 
-A client only receives these notifications if it registers a handler for the method:
+A client sees these notifications only if it registers a handler for the method (or sets a `fallbackNotificationHandler`):
 
 ```ts
 import { z } from "zod";

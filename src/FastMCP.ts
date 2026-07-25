@@ -255,13 +255,14 @@ type Context<T extends FastMCPSessionAuth> = {
    *
    * NOTE: this is a FastMCP extension, not part of the MCP specification. As of
    * revision 2025-11-25 the spec has no streaming tool output primitive (see
-   * SEP-2998 for the in-progress proposal). Clients that do not explicitly
-   * register a handler for this method — which includes Claude Desktop, Cursor
-   * and MCP Inspector — silently discard these notifications.
+   * SEP-2998 for the in-progress proposal). A client only receives these
+   * notifications if it registers a handler for the method or sets a
+   * `fallbackNotificationHandler`; otherwise the SDK drops them silently. No
+   * client is known to render them as tool output.
    *
    * Always return a final result from `execute` rather than relying on streamed
-   * content alone, otherwise such clients see an empty tool result. For
-   * incremental status that works everywhere, prefer
+   * content alone, otherwise clients that ignore the notification see an empty
+   * tool result. For incremental status that works everywhere, prefer
    * {@link Context.reportProgress} with a `message`.
    */
   streamContent: (content: Content | Content[]) => Promise<void>;
@@ -289,7 +290,7 @@ type Progress = {
   /**
    * An optional human-readable message describing the current progress.
    *
-   * Part of `notifications/progress` since MCP revision 2025-06-18, so unlike
+   * Part of `notifications/progress` since MCP revision 2025-03-26, so unlike
    * `streamContent` this reaches any spec-compliant client.
    */
   message?: string;
