@@ -55,7 +55,7 @@
     "zod-to-json-schema": "^3.25.0"
   },
   "peerDependencies": {
-    "jose": "^5.0.0"
+    "jose": "^5.0.0 || ^6.0.0"
   },
   "peerDependenciesMeta": {
     "jose": {
