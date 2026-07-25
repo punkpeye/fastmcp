@@ -33,6 +33,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 - [Configurable ping behavior](#configurable-ping-behavior)
 - [Health-check endpoint](#health-check-endpoint)
 - [Roots](#roots-management)
+- [In-memory transport](#unit-testing-with-an-in-memory-transport) for unit testing without binding a port
 - CLI for [testing](#test-with-mcp-cli) and [debugging](#inspect-with-mcp-inspector)
 
 ## When to use FastMCP over the official SDK?
@@ -2524,6 +2525,51 @@ session.on("error", (event) => {
 ```
 
 ## Running Your Server
+
+### Unit testing with an in-memory transport
+
+`server.connect(transport)` attaches the server to a transport you construct yourself, instead of letting `start()` create one. Paired with the SDK's `InMemoryTransport`, this lets you drive a server in-process — no port to bind, no subprocess to spawn — which is usually what you want for testing a `stdio` server:
+
+```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+
+async function createTestClient(server: FastMCP) {
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+
+  const [session] = await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+
+  return { client, session };
+}
+
+test("adds two numbers", async () => {
+  const { client } = await createTestClient(server);
+
+  expect(
+    await client.callTool({ arguments: { a: 2, b: 3 }, name: "add" }),
+  ).toEqual({
+    content: [{ text: "5", type: "text" }],
+  });
+
+  await client.close();
+});
+```
+
+The session is built from the tools, resources and prompts registered on the instance, exactly as `start()` builds it, so your tests exercise the same wiring the real server uses — including `canAccess` filtering and the `connect`/`disconnect` events.
+
+Pass session auth as the second argument, equivalent to what your `authenticate` function would return:
+
+```ts
+await server.connect(serverTransport, { id: 7, role: "admin" });
+```
+
+`connect` returns the [`FastMCPSession`](#fastmcpsession), so you can assert on `session.clientCapabilities`, `session.roots`, and the rest. The transport's lifecycle belongs to you: `stop()` does not close transports passed to `connect`, so close the client (and the session, if you need `disconnect` to fire) when the test finishes.
 
 ### Test with `mcp-cli`
 

@@ -2664,6 +2664,66 @@ export class FastMCP<
   }
 
   /**
+   * Connects the server to a transport you constructed yourself, instead of
+   * letting {@link FastMCP.start} create one.
+   *
+   * The session is built from the tools, resources and prompts registered on
+   * this instance — exactly as `start()` does — so tests exercise the same
+   * wiring the real server uses. The main use case is driving a server
+   * in-process over `InMemoryTransport` without binding a port:
+   *
+   * ```ts
+   * const [clientTransport, serverTransport] =
+   *   InMemoryTransport.createLinkedPair();
+   *
+   * await Promise.all([
+   *   server.connect(serverTransport),
+   *   client.connect(clientTransport),
+   * ]);
+   * ```
+   *
+   * The transport's lifecycle belongs to the caller: `stop()` does not close
+   * transports passed here. Close the returned session (or the transport) when
+   * you are done with it.
+   *
+   * @param transport - An already-constructed MCP server transport.
+   * @param auth - Session auth, equivalent to what `authenticate` would return.
+   * @returns The session bound to the transport.
+   */
+  public async connect(
+    transport: Transport,
+    auth?: T,
+  ): Promise<FastMCPSession<T>> {
+    const session = this.#createSession(auth);
+
+    await session.connect(transport);
+
+    this.#sessions.push(session);
+
+    session.once("error", () => {
+      this.#removeSession(session);
+    });
+
+    const originalOnClose = transport.onclose;
+
+    transport.onclose = () => {
+      this.#removeSession(session);
+
+      if (originalOnClose) {
+        originalOnClose();
+      }
+    };
+
+    this.emit("connect", {
+      session: session as FastMCPSession<FastMCPSessionAuth>,
+    });
+
+    this.#serverState = ServerState.Running;
+
+    return session;
+  }
+
+  /**
    * Embeds a resource by URI, making it easy to include resources in tool responses.
    *
    * @param uri - The URI of the resource to embed
