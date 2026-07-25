@@ -3843,6 +3843,12 @@ export type {
 
 export { DiscoveryDocumentCache } from "./DiscoveryDocumentCache.js";
 
+export {
+  jsonSchemaAdapter,
+  type JsonSchemaObject,
+  type JsonSchemaStandardSchema,
+} from "./jsonSchemaAdapter.js";
+
 export type {
   AudioContent,
   Content,

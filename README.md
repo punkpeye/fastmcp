@@ -594,6 +594,48 @@ server.addTool({
 });
 ```
 
+**Plain JSON Schema Example:**
+
+If you already have a JSON Schema — from an OpenAPI document, a config file, or
+another server — `jsonSchemaAdapter` wraps it so it can be used directly, with
+no schema library in between.
+
+It requires the peer dependency `ajv`, which does the validation, plus
+`ajv-formats` if your schema uses `format` keywords such as `email` or `uri`.
+Both are imported the first time a tool is called, so servers that don't use
+this pay nothing for it.
+
+```bash
+npm install ajv ajv-formats
+```
+
+```typescript
+import { jsonSchemaAdapter } from "fastmcp";
+
+server.addTool({
+  name: "fetch-json-schema",
+  description: "Fetch the content of a url (using plain JSON Schema)",
+  parameters: jsonSchemaAdapter({
+    type: "object",
+    properties: {
+      url: { type: "string", format: "uri" },
+    },
+    required: ["url"],
+  }),
+  execute: async (args) => {
+    const { url } = args as { url: string };
+    return await fetchWebpageContent(url);
+  },
+});
+```
+
+Works for `outputSchema` too. Note that FastMCP advertises every tool schema
+with `additionalProperties: false`, whatever your schema said — the same
+treatment Zod and Valibot schemas get.
+
+Unlike the schema libraries above, a plain JSON Schema carries no TypeScript
+types, so `execute` receives `unknown` arguments. Cast or narrow them yourself.
+
 #### Tools Without Parameters
 
 When creating tools that don't require parameters, you have two options:
