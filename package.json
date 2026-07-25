@@ -45,19 +45,27 @@
     "file-type": "^21.1.1",
     "fuse.js": "^7.1.0",
     "hono": "^4.11.5",
-    "mcp-proxy": "^6.4.0",
+    "mcp-proxy": "^6.4.6",
     "strict-event-emitter-types": "^2.0.0",
     "undici": "^7.16.0",
     "uri-templates": "^0.2.0",
-    "xsschema": "0.4.0-beta.5",
+    "xsschema": "^0.4.3",
     "yargs": "^18.0.0",
     "zod": "^4.1.13",
     "zod-to-json-schema": "^3.25.0"
   },
   "peerDependencies": {
-    "jose": "^5.0.0"
+    "ajv": "^8.0.0",
+    "ajv-formats": "^3.0.0",
+    "jose": "^5.0.0 || ^6.0.0"
   },
   "peerDependenciesMeta": {
+    "ajv": {
+      "optional": true
+    },
+    "ajv-formats": {
+      "optional": true
+    },
     "jose": {
       "optional": true
     }
@@ -91,6 +99,8 @@
     "@types/yargs": "^17.0.35",
     "@valibot/to-json-schema": "^1.4.0",
     "@wong2/mcp-cli": "^1.13.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "arktype": "^2.1.28",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",

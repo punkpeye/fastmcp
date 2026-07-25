@@ -39,6 +39,21 @@ import {
 } from "./utils/tokenStore.js";
 
 /**
+ * Authorization request parameters owned by the proxy. Entries in
+ * `extraAuthorizationParams` with these keys are ignored so configuration
+ * can never override the security-critical core of the upstream request.
+ */
+const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
+  "client_id",
+  "code_challenge",
+  "code_challenge_method",
+  "redirect_uri",
+  "response_type",
+  "scope",
+  "state",
+]);
+
+/**
  * OAuth 2.1 Proxy
  * Acts as transparent intermediary between MCP clients and upstream OAuth providers
  */
@@ -49,13 +64,15 @@ export class OAuthProxy {
   private config: OAuthProxyConfig;
   private consentManager: ConsentManager;
   private jwtIssuer?: JWTIssuer;
+  /** Keyed by redirect_uri for defence-in-depth checks in handleCallback/handleConsent */
   private registeredClients: Map<string, ProxyDCRClient> = new Map();
+  /** Keyed by proxy-issued client_id for authorize/token-exchange lookups */
+  private registeredClientsByClientId: Map<string, ProxyDCRClient> = new Map();
   private tokenStorage: TokenStorage;
   private transactions: Map<string, OAuthTransaction> = new Map();
 
   constructor(config: OAuthProxyConfig) {
     this.config = {
-      allowedRedirectUriPatterns: ["https://*", "http://localhost:*"],
       authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
       consentRequired: true,
       enableTokenSwap: true, // Enabled by default for security
@@ -133,6 +150,27 @@ export class OAuthProxy {
       );
     }
 
+    // RFC 6749 §5.2 - reject unknown clients with invalid_client.
+    // MCP clients receive a proxy-issued client_id during DCR (not the upstream
+    // provider's credentials), so we look up by that proxy client_id.
+    const registeredClient = this.registeredClientsByClientId.get(
+      params.client_id,
+    );
+    if (!registeredClient) {
+      throw new OAuthProxyError("invalid_client", "Unknown client_id");
+    }
+
+    // RFC 6749 §3.1.2.3 / RFC 6819 §4.1.5 - the redirect_uri MUST be one
+    // that was registered by this specific client. Skipping this check is
+    // CWE-601: an attacker can steal an authorization code by passing their
+    // own URL as redirect_uri.
+    if (!registeredClient.redirectUris.includes(params.redirect_uri)) {
+      throw new OAuthProxyError(
+        "invalid_request",
+        "redirect_uri is not registered for this client",
+      );
+    }
+
     // Validate PKCE if provided
     if (params.code_challenge && !params.code_challenge_method) {
       throw new OAuthProxyError(
@@ -168,6 +206,7 @@ export class OAuthProxy {
     this.transactions.clear();
     this.clientCodes.clear();
     this.registeredClients.clear();
+    this.registeredClientsByClientId.clear();
   }
 
   /**
@@ -181,6 +220,13 @@ export class OAuthProxy {
         "unsupported_grant_type",
         "Only authorization_code grant type is supported",
       );
+    }
+
+    // RFC 6749 §5.2 - reject unknown clients. Only proxy-issued client_ids
+    // (obtained via DCR) are accepted, so stolen codes cannot be exchanged by
+    // arbitrary callers.
+    if (!this.registeredClientsByClientId.has(request.client_id)) {
+      throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
 
     const clientCode = this.clientCodes.get(request.code);
@@ -347,6 +393,17 @@ export class OAuthProxy {
       throw new OAuthProxyError("invalid_request", "Invalid or expired state");
     }
 
+    // Defense-in-depth: the transaction's stored callback URL must still be
+    // registered. Guards against any code path that could persist an
+    // unvalidated URI, and against registration being revoked mid-flow.
+    if (!this.registeredClients.has(transaction.clientCallbackUrl)) {
+      this.transactions.delete(state);
+      throw new OAuthProxyError(
+        "invalid_request",
+        "Transaction callback URL is not registered",
+      );
+    }
+
     // Exchange code with upstream provider
     const upstreamTokens = await this.exchangeUpstreamCode(code, transaction);
 
@@ -395,6 +452,13 @@ export class OAuthProxy {
     if (action === "deny") {
       // User denied consent
       this.transactions.delete(transactionId);
+      // Defense-in-depth: never redirect to an unregistered URI.
+      if (!this.registeredClients.has(transaction.clientCallbackUrl)) {
+        throw new OAuthProxyError(
+          "invalid_request",
+          "Transaction callback URL is not registered",
+        );
+      }
       const redirectUrl = new URL(transaction.clientCallbackUrl);
       redirectUrl.searchParams.set("error", "access_denied");
       redirectUrl.searchParams.set(
@@ -475,12 +539,17 @@ export class OAuthProxy {
       }
     }
 
-    // Store client registration (indexed by primary redirect URI)
-    const clientId = this.config.upstreamClientId;
+    // Generate proxy-specific credentials for this MCP client.
+    // We deliberately do NOT return the upstream provider's client_id/secret here:
+    // exposing those would (a) leak credentials to every MCP client and (b) let a
+    // client bypass the proxy and talk directly to the upstream provider.
+    const proxyClientId = randomBytes(16).toString("hex");
+    const proxyClientSecret = randomBytes(32).toString("base64url");
+
     const client: ProxyDCRClient = {
       callbackUrl: request.redirect_uris[0],
-      clientId,
-      clientSecret: this.config.upstreamClientSecret,
+      clientId: proxyClientId,
+      clientSecret: proxyClientSecret,
       metadata: {
         client_name: request.client_name,
         client_uri: request.client_uri,
@@ -494,18 +563,26 @@ export class OAuthProxy {
         software_version: request.software_version,
         tos_uri: request.tos_uri,
       },
+      redirectUris: request.redirect_uris,
       registeredAt: new Date(),
     };
 
-    this.registeredClients.set(request.redirect_uris[0], client);
+    // Index by proxy client_id for authorize/token-exchange lookups.
+    this.registeredClientsByClientId.set(proxyClientId, client);
 
-    // Return RFC 7591 compliant response
+    // Also index by every redirect_uri for defence-in-depth checks in
+    // handleCallback/handleConsent (RFC 6749 §3.1.2.3).
+    for (const uri of request.redirect_uris) {
+      this.registeredClients.set(uri, client);
+    }
+
+    // Return RFC 7591 compliant response with proxy-issued credentials.
     const response: DCRResponse = {
-      client_id: clientId,
+      client_id: proxyClientId,
       client_id_issued_at: Math.floor(Date.now() / 1000),
       // Echo back optional metadata
       client_name: request.client_name,
-      client_secret: this.config.upstreamClientSecret,
+      client_secret: proxyClientSecret,
       client_secret_expires_at: 0, // Never expires
       client_uri: request.client_uri,
       contacts: request.contacts,
@@ -638,14 +715,19 @@ export class OAuthProxy {
     });
 
     if (!tokenResponse.ok) {
-      const error = (await tokenResponse.json()) as {
-        error?: string;
-        error_description?: string;
-      };
-      throw new OAuthProxyError(
-        error.error || "server_error",
-        error.error_description,
-      );
+      let errorCode = "server_error";
+      let errorDescription: string | undefined;
+      try {
+        const error = (await tokenResponse.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+        errorCode = error.error || "server_error";
+        errorDescription = error.error_description;
+      } catch {
+        errorDescription = `Upstream returned HTTP ${tokenResponse.status} ${tokenResponse.statusText}`;
+      }
+      throw new OAuthProxyError(errorCode, errorDescription);
     }
 
     const tokens = await this.parseTokenResponse(tokenResponse);
@@ -818,14 +900,19 @@ export class OAuthProxy {
     });
 
     if (!tokenResponse.ok) {
-      const error = (await tokenResponse.json()) as {
-        error?: string;
-        error_description?: string;
-      };
-      throw new OAuthProxyError(
-        error.error || "invalid_grant",
-        error.error_description,
-      );
+      let errorCode = "invalid_grant";
+      let errorDescription: string | undefined;
+      try {
+        const error = (await tokenResponse.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+        errorCode = error.error || "invalid_grant";
+        errorDescription = error.error_description;
+      } catch {
+        errorDescription = `Upstream returned HTTP ${tokenResponse.status} ${tokenResponse.statusText}`;
+      }
+      throw new OAuthProxyError(errorCode, errorDescription);
     }
 
     const tokens = await this.parseTokenResponse(tokenResponse);
@@ -1183,6 +1270,18 @@ export class OAuthProxy {
   private redirectToUpstream(transaction: OAuthTransaction): Response {
     const authUrl = new URL(this.config.upstreamAuthorizationEndpoint);
 
+    // Provider-specific extras (e.g. Google's access_type=offline) go first
+    // so the proxy-controlled core parameters below always win on conflict.
+    if (this.config.extraAuthorizationParams) {
+      for (const [key, value] of Object.entries(
+        this.config.extraAuthorizationParams,
+      )) {
+        if (!RESERVED_AUTHORIZATION_PARAMS.has(key)) {
+          authUrl.searchParams.set(key, value);
+        }
+      }
+    }
+
     authUrl.searchParams.set("client_id", this.config.upstreamClientId);
     authUrl.searchParams.set(
       "redirect_uri",
@@ -1251,14 +1350,19 @@ export class OAuthProxy {
     });
 
     if (!tokenResponse.ok) {
-      const error = (await tokenResponse.json()) as {
-        error?: string;
-        error_description?: string;
-      };
-      throw new OAuthProxyError(
-        error.error || "invalid_grant",
-        error.error_description || "Upstream refresh failed",
-      );
+      let errorCode = "invalid_grant";
+      let errorDescription: string | undefined = "Upstream refresh failed";
+      try {
+        const error = (await tokenResponse.json()) as {
+          error?: string;
+          error_description?: string;
+        };
+        errorCode = error.error || "invalid_grant";
+        errorDescription = error.error_description || "Upstream refresh failed";
+      } catch {
+        errorDescription = `Upstream returned HTTP ${tokenResponse.status} ${tokenResponse.statusText}`;
+      }
+      throw new OAuthProxyError(errorCode, errorDescription);
     }
 
     const tokens = await this.parseTokenResponse(tokenResponse);
@@ -1287,28 +1391,43 @@ export class OAuthProxy {
   }
 
   /**
-   * Validate redirect URI against allowed patterns
+   * Validate a redirect URI against the configured allow-list.
+   *
+   * Behaviour by configuration value:
+   *   - `undefined` (not set): allow localhost/127.0.0.1 only — safe default
+   *     that covers the common MCP use-case of dynamic loopback ports without
+   *     opening the proxy to arbitrary redirect URIs.
+   *   - `[]` (empty array): reject every URI — opt-in strict mode for deployments
+   *     that want full control and will configure patterns explicitly.
+   *   - `["pattern", ...]`: accept URIs matching any of the glob patterns.
+   *
+   * Prior versions defaulted to `["https://*", "http://localhost:*"]` which
+   * matched any https URL, enabling CWE-601 open-redirect / authorization-code
+   * theft. Do not loosen the default beyond loopback addresses.
    */
   private validateRedirectUri(uri: string): boolean {
     try {
-      const url = new URL(uri);
-      const patterns = this.config.allowedRedirectUriPatterns || [];
-
-      for (const pattern of patterns) {
-        if (this.matchesPattern(uri, pattern)) {
-          return true;
-        }
-      }
-
-      // Default: allow https and localhost
-      return (
-        url.protocol === "https:" ||
-        url.hostname === "localhost" ||
-        url.hostname === "127.0.0.1"
-      );
+      new URL(uri); // syntactic check only — throws on malformed input
     } catch {
       return false;
     }
+
+    const patterns = this.config.allowedRedirectUriPatterns;
+
+    // Explicitly set to empty array → strict mode, reject everything.
+    if (Array.isArray(patterns) && patterns.length === 0) {
+      return false;
+    }
+
+    // Not configured → localhost-only default (covers MCP dynamic loopback ports).
+    const effectivePatterns = patterns ?? [
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+    ];
+
+    return effectivePatterns.some((pattern) =>
+      this.matchesPattern(uri, pattern),
+    );
   }
 }
 

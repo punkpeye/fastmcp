@@ -15,6 +15,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
 
     // Create OAuth Proxy
     const authProxy = new OAuthProxy({
+      allowedRedirectUriPatterns: ["https://client.example.com/*"],
       baseUrl: `http://localhost:${port}`,
       scopes: ["openid", "profile"],
       upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
@@ -63,11 +64,92 @@ describe("FastMCP OAuth Proxy Integration", () => {
       );
 
       expect(metadataResponse.status).toBe(200);
-      const metadata = await metadataResponse.json();
+      const metadata = (await metadataResponse.json()) as Record<
+        string,
+        unknown
+      >;
       expect(metadata).toHaveProperty("issuer");
       expect(metadata).toHaveProperty("authorization_endpoint");
       expect(metadata).toHaveProperty("token_endpoint");
       expect(metadata).toHaveProperty("registration_endpoint");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("should register OAuth proxy endpoints under an issuer path base", async () => {
+    const port = await getRandomPort();
+
+    const authProxy = new OAuthProxy({
+      allowedRedirectUriPatterns: ["https://client.example.com/*"],
+      baseUrl: `http://localhost:${port}/issuer1`,
+      scopes: ["openid", "profile"],
+      upstreamAuthorizationEndpoint: "https://example.com/oauth/authorize",
+      upstreamClientId: "test-client-id",
+      upstreamClientSecret: "test-client-secret",
+      upstreamTokenEndpoint: "https://example.com/oauth/token",
+    });
+
+    const server = new FastMCP({
+      name: "Test Server",
+      oauth: {
+        authorizationServer: authProxy.getAuthorizationServerMetadata(),
+        enabled: true,
+        proxy: authProxy,
+      },
+      version: "1.0.0",
+    });
+
+    await server.start({
+      httpStream: { basePath: "/issuer1", port },
+      transportType: "httpStream",
+    });
+
+    try {
+      const dcrResponse = await fetch(
+        `http://localhost:${port}/issuer1/oauth/register`,
+        {
+          body: JSON.stringify({
+            redirect_uris: ["https://client.example.com/callback"],
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        },
+      );
+
+      expect(dcrResponse.status).toBe(201);
+      const dcrData = await dcrResponse.json();
+      expect(dcrData).toHaveProperty("client_id");
+      expect(dcrData).toHaveProperty("client_secret");
+
+      const rootDcrResponse = await fetch(
+        `http://localhost:${port}/oauth/register`,
+        {
+          body: JSON.stringify({
+            redirect_uris: ["https://client.example.com/callback"],
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        },
+      );
+      expect(rootDcrResponse.status).toBe(404);
+
+      const metadataResponse = await fetch(
+        `http://localhost:${port}/.well-known/oauth-authorization-server/issuer1`,
+      );
+
+      expect(metadataResponse.status).toBe(200);
+      const metadata = (await metadataResponse.json()) as Record<
+        string,
+        unknown
+      >;
+      expect(metadata).toHaveProperty("issuer");
+      expect(metadata).toHaveProperty("authorization_endpoint");
+      expect(metadata).toHaveProperty("token_endpoint");
+      expect(metadata).toHaveProperty("registration_endpoint");
+      expect(metadata.registration_endpoint).toBe(
+        `http://localhost:${port}/issuer1/oauth/register`,
+      );
     } finally {
       await server.stop();
     }
@@ -126,6 +208,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
     const port = await getRandomPort();
 
     const authProxy = new OAuthProxy({
+      allowedRedirectUriPatterns: ["https://client.example.com/*"],
       baseUrl: `http://localhost:${port}`,
       consentRequired: false, // Disable consent for testing
       scopes: ["openid"],
@@ -151,18 +234,19 @@ describe("FastMCP OAuth Proxy Integration", () => {
     });
 
     try {
-      // First register a client
-      await fetch(`http://localhost:${port}/oauth/register`, {
+      // First register a client and capture the proxy-issued client_id
+      const dcrResp = await fetch(`http://localhost:${port}/oauth/register`, {
         body: JSON.stringify({
           redirect_uris: ["https://client.example.com/callback"],
         }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
       });
+      const dcrData = (await dcrResp.json()) as { client_id: string };
 
       // Test authorization endpoint - should redirect
       const authParams = new URLSearchParams({
-        client_id: "test-client-id",
+        client_id: dcrData.client_id,
         code_challenge: "test-challenge",
         code_challenge_method: "S256",
         redirect_uri: "https://client.example.com/callback",

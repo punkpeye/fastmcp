@@ -22,7 +22,7 @@ interface StorageEntry {
  * Encrypts values using AES-256-GCM before storing
  */
 export class EncryptedTokenStorage implements TokenStorage {
-  private algorithm = "aes-256-gcm";
+  private algorithm: import("crypto").CipherGCMTypes = "aes-256-gcm";
   private backend: TokenStorage;
   private encryptionKey: Buffer;
 
@@ -78,7 +78,9 @@ export class EncryptedTokenStorage implements TokenStorage {
     const iv = Buffer.from(ivHex, "hex");
     const authTag = Buffer.from(authTagHex, "hex");
 
-    const decipher = createDecipheriv(this.algorithm, key, iv);
+    const decipher = createDecipheriv(this.algorithm, key, iv, {
+      authTagLength: 16,
+    });
     // Use type assertion for GCM-specific method
     (decipher as unknown as { setAuthTag(buffer: Buffer): void }).setAuthTag(
       authTag,
@@ -92,7 +94,9 @@ export class EncryptedTokenStorage implements TokenStorage {
 
   private async encrypt(plaintext: string, key: Buffer): Promise<string> {
     const iv = randomBytes(16);
-    const cipher = createCipheriv(this.algorithm, key, iv);
+    const cipher = createCipheriv(this.algorithm, key, iv, {
+      authTagLength: 16,
+    });
 
     let encrypted = cipher.update(plaintext, "utf8", "hex");
     encrypted += cipher.final("hex");

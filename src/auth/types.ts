@@ -200,7 +200,25 @@ export interface OAuthProviderConfig {
 export interface OAuthProxyConfig {
   /** Access token TTL in seconds (default: 3600) */
   accessTokenTtl?: number;
-  /** Allowed redirect URI patterns for client registration */
+  /**
+   * Allow-list of redirect URI patterns accepted by Dynamic Client Registration.
+   *
+   * A client calling POST /oauth/register must present a `redirect_uri` that
+   * matches one of these patterns (exact string or glob with `*` / `?`);
+   * otherwise the registration is rejected with `invalid_redirect_uri`. Once
+   * registered, the same exact URI must be echoed back at /oauth/authorize —
+   * the proxy performs an exact per-client match per RFC 6749 §3.1.2.3.
+   *
+   * Behaviour by value:
+   *   - `undefined` (default): allow `http://localhost:*` and `http://127.0.0.1:*`
+   *     only. Covers the standard MCP use-case of dynamic loopback ports.
+   *   - `[]` (empty array): DCR rejects every URI — use for deployments that
+   *     configure patterns explicitly and want no implicit fallback.
+   *   - `["pattern", ...]`: accept URIs matching any glob pattern in the list.
+   *
+   * Do not widen the default beyond loopback addresses — allowing arbitrary
+   * https URLs enables CWE-601 open-redirect / authorization-code theft.
+   */
   allowedRedirectUriPatterns?: string[];
   /** Authorization code TTL in seconds (default: 300) */
   authorizationCodeTtl?: number;
@@ -223,6 +241,18 @@ export interface OAuthProxyConfig {
   enableTokenSwap?: boolean;
   /** Encryption key for token storage (default: auto-generated). Set to false to disable encryption. */
   encryptionKey?: false | string;
+  /**
+   * Extra query parameters appended to the upstream authorization URL.
+   * Required by providers such as Google, which only issues a refresh_token
+   * when the authorization request carries `access_type=offline` (and
+   * re-issues it on re-auth with `prompt=consent`). Without these, access
+   * expires after the upstream token TTL and can never be renewed.
+   *
+   * Core OAuth parameters managed by the proxy (client_id, redirect_uri,
+   * response_type, state, scope, code_challenge, code_challenge_method)
+   * cannot be overridden — entries with those keys are ignored.
+   */
+  extraAuthorizationParams?: Record<string, string>;
   /** Forward client's PKCE to upstream (default: false) */
   forwardPkce?: boolean;
   /** Secret key for signing JWTs when token swap is enabled */
@@ -297,14 +327,16 @@ export interface PKCEPair {
  * Dynamic client registration data
  */
 export interface ProxyDCRClient {
-  /** Registered callback URL */
+  /** Primary (first) registered callback URL */
   callbackUrl: string;
-  /** Generated or assigned client ID */
+  /** Proxy-issued client ID (not the upstream provider's client_id) */
   clientId: string;
-  /** Client secret (optional) */
+  /** Proxy-issued client secret (not the upstream provider's client_secret) */
   clientSecret?: string;
   /** Client metadata from registration request */
   metadata?: DCRClientMetadata;
+  /** All redirect URIs registered by this client */
+  redirectUris: string[];
   /** Client registration timestamp */
   registeredAt: Date;
 }

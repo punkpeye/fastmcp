@@ -140,6 +140,43 @@ describe("EncryptedTokenStorage", () => {
     });
   });
 
+  describe("GCM auth tag length security fix", () => {
+    it("should encrypt and decrypt with correct GCM authentication tag length (regression test for #268)", async () => {
+      const value = { sensitive: "data-requiring-gcm-integrity" };
+      await storage.save("gcm-key", value);
+
+      const encrypted = await backend.get("gcm-key");
+      expect(typeof encrypted).toBe("string");
+
+      // Verify format: iv:authTag:encrypted (3 parts)
+      const parts = (encrypted as string).split(":");
+      expect(parts.length).toBe(3);
+
+      // Auth tag should be 32 hex chars = 16 bytes = 128 bits
+      const authTagHex = parts[1];
+      expect(authTagHex.length).toBe(32);
+
+      // Should decrypt correctly
+      const decrypted = await storage.get("gcm-key");
+      expect(decrypted).toEqual(value);
+    });
+
+    it("should produce consistent 128-bit auth tags across multiple encryptions", async () => {
+      const values = ["a", "b", "c"];
+      const tagLengths: number[] = [];
+
+      for (const val of values) {
+        await storage.save(`tag-test-${val}`, val);
+        const encrypted = (await backend.get(`tag-test-${val}`)) as string;
+        const parts = encrypted.split(":");
+        tagLengths.push(parts[1].length);
+      }
+
+      // All auth tags should be exactly 32 hex chars (16 bytes / 128 bits)
+      expect(tagLengths.every((len) => len === 32)).toBe(true);
+    });
+  });
+
   describe("delete", () => {
     it("should delete encrypted values", async () => {
       await storage.save("delete-key", "value");

@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 
 import { execa } from "execa";
+import { mkdtemp, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
+
+import { buildDevCommand, buildDevConfig } from "./devCommand.js";
 
 await yargs(hideBin(process.argv))
   .scriptName("fastmcp")
@@ -14,6 +19,19 @@ await yargs(hideBin(process.argv))
         .positional("file", {
           demandOption: true,
           describe: "The path to the server file",
+          type: "string",
+        })
+
+        .option("args", {
+          describe:
+            "JSON arguments passed to the tool (requires --tool), e.g. '{\"a\":1}'",
+          type: "string",
+        })
+
+        .option("tool", {
+          alias: "t",
+          describe:
+            "Call a tool non-interactively instead of launching the inspector",
           type: "string",
         })
 
@@ -33,25 +51,56 @@ await yargs(hideBin(process.argv))
     },
 
     async (argv) => {
+      let configDir: string | undefined;
+
       try {
-        const command = argv.watch
-          ? `npx @wong2/mcp-cli npx tsx --watch ${argv.file}`
-          : `npx @wong2/mcp-cli npx tsx ${argv.file}`;
+        if (argv.args !== undefined && !argv.tool) {
+          console.error("[FastMCP Error] --args requires --tool");
+          process.exitCode = 1;
+          return;
+        }
+
+        if (argv.tool && argv.watch) {
+          console.warn(
+            "[FastMCP] --watch is ignored when calling a tool with --tool: the server runs for a single call.",
+          );
+        }
+
+        let configPath: string | undefined;
+
+        if (argv.tool) {
+          configDir = await mkdtemp(join(tmpdir(), "fastmcp-dev-"));
+          configPath = join(configDir, "mcp-cli.json");
+          await writeFile(configPath, buildDevConfig(argv.file), "utf8");
+        }
+
+        const [command, ...commandArgs] = buildDevCommand({
+          configPath,
+          file: argv.file,
+          tool: argv.tool,
+          toolArgs: argv.args,
+          watch: argv.watch,
+        });
 
         if (argv.verbose) {
-          console.log(`[FastMCP] Starting server: ${command}`);
+          console.log(
+            `[FastMCP] Starting server: ${[command, ...commandArgs].join(" ")}`,
+          );
           console.log(`[FastMCP] File: ${argv.file}`);
           console.log(
             `[FastMCP] Watch mode: ${argv.watch ? "enabled" : "disabled"}`,
           );
+
+          if (argv.tool) {
+            console.log(`[FastMCP] Tool: ${argv.tool}`);
+          }
         }
 
-        await execa({
-          shell: true,
+        await execa(command, commandArgs, {
           stderr: "inherit",
           stdin: "inherit",
           stdout: "inherit",
-        })`${command}`;
+        });
       } catch (error) {
         console.error(
           "[FastMCP Error] Failed to start development server:",
@@ -62,7 +111,13 @@ await yargs(hideBin(process.argv))
           console.error("[FastMCP Debug] Stack trace:", error.stack);
         }
 
-        process.exit(1);
+        // Not process.exit(): that would skip the `finally` block below and
+        // leak the temporary config directory on every failed tool call.
+        process.exitCode = 1;
+      } finally {
+        if (configDir) {
+          await rm(configDir, { force: true, recursive: true });
+        }
       }
     },
   )
