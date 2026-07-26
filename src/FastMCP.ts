@@ -323,6 +323,19 @@ export abstract class FastMCPError extends Error {
   }
 }
 
+/**
+ * An error raised when a session encounters a problem (e.g. connection
+ * failures, protocol violations).  Consumers can use this class to
+ * distinguish fastmcp session errors from unrelated runtime errors:
+ *
+ * ```ts
+ * server.on("error", ({ error }) => {
+ *   if (error instanceof SessionError) { ... }
+ * });
+ * ```
+ */
+export class SessionError extends FastMCPError {}
+
 export class UnexpectedStateError extends FastMCPError {
   public extras?: Extras;
 
@@ -337,19 +350,6 @@ export class UnexpectedStateError extends FastMCPError {
  * An error that is meant to be surfaced to the user.
  */
 export class UserError extends UnexpectedStateError {}
-
-/**
- * An error raised when a session encounters a problem (e.g. connection
- * failures, protocol violations).  Consumers can use this class to
- * distinguish fastmcp session errors from unrelated runtime errors:
- *
- * ```ts
- * server.on("error", ({ error }) => {
- *   if (error instanceof SessionError) { ... }
- * });
- * ```
- */
-export class SessionError extends FastMCPError {}
 
 const TextContentZodSchema = z
   .object({
