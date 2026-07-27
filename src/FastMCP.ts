@@ -316,12 +316,25 @@ type TextContent = {
 
 type ToolParameters = StandardSchemaV1;
 
-abstract class FastMCPError extends Error {
+export abstract class FastMCPError extends Error {
   public constructor(message?: string) {
     super(message);
     this.name = new.target.name;
   }
 }
+
+/**
+ * An error raised when a session encounters a problem (e.g. connection
+ * failures, protocol violations).  Consumers can use this class to
+ * distinguish fastmcp session errors from unrelated runtime errors:
+ *
+ * ```ts
+ * server.on("error", ({ error }) => {
+ *   if (error instanceof SessionError) { ... }
+ * });
+ * ```
+ */
+export class SessionError extends FastMCPError {}
 
 export class UnexpectedStateError extends FastMCPError {
   public extras?: Extras;

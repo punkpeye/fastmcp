@@ -23,8 +23,10 @@ import {
   audioContent,
   type ContentResult,
   FastMCP,
+  FastMCPError,
   FastMCPSession,
   imageContent,
+  SessionError,
   type TextContent,
   UserError,
 } from "./FastMCP.js";
@@ -5695,4 +5697,22 @@ test("httpStream respects cors: false by not setting CORS headers", async () => 
   } finally {
     await server.stop();
   }
+});
+
+test("exports SessionError and FastMCPError from the package root", () => {
+  // Both classes must be importable so consumers can narrow error types.
+  expect(typeof SessionError).toBe("function");
+  expect(typeof FastMCPError).toBe("function");
+
+  const err = new SessionError("test");
+
+  expect(err).toBeInstanceOf(SessionError);
+  expect(err).toBeInstanceOf(FastMCPError);
+  expect(err).toBeInstanceOf(Error);
+  expect(err.message).toBe("test");
+  expect(err.name).toBe("SessionError");
+
+  // UserError and UnexpectedStateError also extend FastMCPError,
+  // so the base class can serve as a catch-all for all fastmcp errors.
+  expect(new UserError("u")).toBeInstanceOf(FastMCPError);
 });
