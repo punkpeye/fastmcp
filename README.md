@@ -1,5 +1,7 @@
 # FastMCP
 
+[![MCP Toplist](https://mcptoplist.com/badge/mcp.so%2Ffastmcp%2Fpunkpeye.svg)](https://mcptoplist.com/server/mcp.so%2Ffastmcp%2Fpunkpeye)
+
 A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable of handling client sessions.
 
 > [!NOTE]
