@@ -3,7 +3,7 @@
  * Handles user consent flow for OAuth authorization
  */
 
-import { createHmac } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 
 import type { ConsentData, OAuthTransaction } from "../types.js";
 
@@ -277,7 +277,14 @@ export class ConsentManager {
       const payload = Buffer.from(payloadB64, "base64").toString("utf8");
       const expectedSignature = this.sign(payload);
 
-      if (signature !== expectedSignature) {
+      // Constant-time HMAC comparison (CWE-208): a plain `!==` leaks, via
+      // timing, how many leading bytes of the cookie signature are correct.
+      const actualBuf = Buffer.from(signature);
+      const expectedBuf = Buffer.from(expectedSignature);
+      if (
+        actualBuf.length !== expectedBuf.length ||
+        !timingSafeEqual(actualBuf, expectedBuf)
+      ) {
         return null;
       }
 

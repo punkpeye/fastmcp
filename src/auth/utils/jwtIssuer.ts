@@ -3,7 +3,7 @@
  * Issues and validates short-lived JWTs that reference upstream provider tokens
  */
 
-import { createHmac, pbkdf2, randomBytes } from "crypto";
+import { createHmac, pbkdf2, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 
 import {
@@ -172,9 +172,18 @@ export class JWTIssuer {
 
       const [headerB64, payloadB64, signatureB64] = parts;
 
-      // Verify signature
+      // Verify signature in constant time. A plain `!==` on the base64url HMAC
+      // short-circuits on the first differing byte, leaking via response timing
+      // how many leading bytes are correct — an oracle for forging a valid MAC
+      // (CWE-208). timingSafeEqual requires equal-length buffers, so a length
+      // mismatch (the signature length is not secret) is rejected up front.
       const expectedSignature = this.sign(`${headerB64}.${payloadB64}`);
-      if (signatureB64 !== expectedSignature) {
+      const actualBuf = Buffer.from(signatureB64);
+      const expectedBuf = Buffer.from(expectedSignature);
+      if (
+        actualBuf.length !== expectedBuf.length ||
+        !timingSafeEqual(actualBuf, expectedBuf)
+      ) {
         return {
           error: "Invalid signature",
           valid: false,
