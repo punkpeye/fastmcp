@@ -120,6 +120,37 @@ describe("JWTIssuer", () => {
       expect(result.error).toBe("Invalid signature");
     });
 
+    // Regression tests for CWE-208 (observable timing discrepancy). The
+    // signature is compared with crypto.timingSafeEqual behind a length guard;
+    // these lock that behaviour in.
+    it("should reject a same-length forged signature", async () => {
+      const token = issuer.issueAccessToken("client-123", ["read"]);
+      const [header, payload, signature] = token.split(".");
+      // Flip one character while preserving length so the comparison reaches
+      // timingSafeEqual, not just the length pre-check.
+      const forged = (signature[0] === "A" ? "B" : "A") + signature.slice(1);
+      expect(forged).toHaveLength(signature.length);
+      expect(forged).not.toBe(signature);
+
+      const result = await issuer.verify(`${header}.${payload}.${forged}`);
+
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe("Invalid signature");
+    });
+
+    it("should reject a longer signature without throwing", async () => {
+      const token = issuer.issueAccessToken("client-123", ["read"]);
+      const [header, payload, signature] = token.split(".");
+      // The length guard must reject this as "Invalid signature" rather than
+      // letting timingSafeEqual throw (which would surface the generic catch).
+      const result = await issuer.verify(
+        `${header}.${payload}.${signature}extra`,
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe("Invalid signature");
+    });
+
     it("should reject expired tokens", async () => {
       const shortLivedIssuer = new JWTIssuer({
         accessTokenTtl: 1, // 1 second
