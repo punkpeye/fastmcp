@@ -76,6 +76,14 @@ type FastMCPSessionEvents = {
   rootsChanged: (event: { roots: Root[] }) => void;
 };
 
+/**
+ * Timeout for image/audio URL fetches (in milliseconds). The OAuth upstream
+ * fetches (#304) use 10s because they are short interactive exchanges; media
+ * downloads can be larger and slower, so 30s is the balance between hanging
+ * forever on an unresponsive server and false positives on slow connections.
+ */
+export const MEDIA_FETCH_TIMEOUT_MS = 30000;
+
 export const imageContent = async (
   input: { buffer: Buffer } | { path: string } | { url: string },
 ): Promise<ImageContent> => {
@@ -84,7 +92,9 @@ export const imageContent = async (
   try {
     if ("url" in input) {
       try {
-        const response = await fetch(input.url);
+        const response = await fetch(input.url, {
+          signal: AbortSignal.timeout(MEDIA_FETCH_TIMEOUT_MS),
+        });
 
         if (!response.ok) {
           throw new Error(
@@ -94,6 +104,15 @@ export const imageContent = async (
 
         rawData = Buffer.from(await response.arrayBuffer());
       } catch (error) {
+        if (
+          error instanceof Error &&
+          (error.name === "AbortError" || error.name === "TimeoutError")
+        ) {
+          throw new Error(
+            `Failed to fetch image from URL (${input.url}): timed out after ${MEDIA_FETCH_TIMEOUT_MS}ms`,
+          );
+        }
+
         throw new Error(
           `Failed to fetch image from URL (${input.url}): ${
             error instanceof Error ? error.message : String(error)
@@ -153,7 +172,9 @@ export const audioContent = async (
   try {
     if ("url" in input) {
       try {
-        const response = await fetch(input.url);
+        const response = await fetch(input.url, {
+          signal: AbortSignal.timeout(MEDIA_FETCH_TIMEOUT_MS),
+        });
 
         if (!response.ok) {
           throw new Error(
@@ -163,6 +184,15 @@ export const audioContent = async (
 
         rawData = Buffer.from(await response.arrayBuffer());
       } catch (error) {
+        if (
+          error instanceof Error &&
+          (error.name === "AbortError" || error.name === "TimeoutError")
+        ) {
+          throw new Error(
+            `Failed to fetch audio from URL (${input.url}): timed out after ${MEDIA_FETCH_TIMEOUT_MS}ms`,
+          );
+        }
+
         throw new Error(
           `Failed to fetch audio from URL (${input.url}): ${
             error instanceof Error ? error.message : String(error)
