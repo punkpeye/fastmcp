@@ -13,6 +13,11 @@ export const DEFAULT_AUTHORIZATION_CODE_TTL = 300; // 5 minutes
 export const DEFAULT_TRANSACTION_TTL = 600; // 10 minutes
 
 /**
+ * Default timeout for upstream token/refresh HTTP requests (in milliseconds)
+ */
+export const DEFAULT_UPSTREAM_REQUEST_TIMEOUT_MS = 10000; // 10 seconds
+
+/**
  * OAuth authorization request parameters
  */
 export interface AuthorizationParams {
@@ -275,6 +280,8 @@ export interface OAuthProxyConfig {
   upstreamClientId: string;
   /** Pre-registered client secret with upstream provider */
   upstreamClientSecret: string;
+  /** Timeout in milliseconds for upstream token/refresh HTTP requests (default: 10000) */
+  upstreamRequestTimeoutMs?: number;
   /** Upstream provider's token endpoint URL */
   upstreamTokenEndpoint: string;
   /** Upstream token endpoint authentication method (default: "client_secret_basic") */

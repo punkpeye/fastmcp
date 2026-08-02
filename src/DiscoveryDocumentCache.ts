@@ -13,13 +13,17 @@ export class DiscoveryDocumentCache {
 
   #inFlight: Map<string, Promise<unknown>> = new Map();
 
+  #timeoutMs: number;
+
   #ttl: number;
 
   /**
    * @param options - configuration options
+   * @param options.timeoutMs - timeout in miliseconds for the upstream fetch
    * @param options.ttl - time-to-live in miliseconds
    */
-  public constructor(options: { ttl?: number } = {}) {
+  public constructor(options: { timeoutMs?: number; ttl?: number } = {}) {
+    this.#timeoutMs = options.timeoutMs ?? 10000; // default 10 seconds
     this.#ttl = options.ttl ?? 3600000; // default 1 hour
   }
 
@@ -97,8 +101,23 @@ export class DiscoveryDocumentCache {
   }
 
   async #fetchAndCache(url: string): Promise<unknown> {
-    // fetch fresh document
-    const res = await fetch(url);
+    // fetch fresh document, bounded by the configured timeout
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.name === "AbortError" || error.name === "TimeoutError")
+      ) {
+        throw new Error(
+          `Failed to fetch discovery document from ${url}: timed out after ${this.#timeoutMs}ms`,
+        );
+      }
+      throw error;
+    }
 
     if (!res.ok) {
       throw new Error(

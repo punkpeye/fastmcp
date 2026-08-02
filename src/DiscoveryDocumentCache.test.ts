@@ -340,3 +340,41 @@ test("handles concurrent requests with slow fetch correctly", async () => {
 
   fetchSpy.mockRestore();
 });
+
+test("times out when the upstream discovery endpoint hangs", async () => {
+  const cache = new DiscoveryDocumentCache({ timeoutMs: 50 });
+  const testUrl = "https://auth.example.com/.well-known/openid-configuration";
+  // simulate an upstream that never answers: the promise only rejects when
+  // the caller's AbortSignal fires, mirroring an in-flight fetch abort
+  const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(
+    (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation timed out.", "TimeoutError"));
+        });
+      }),
+  );
+
+  await expect(cache.get(testUrl)).rejects.toThrow(
+    `Failed to fetch discovery document from ${testUrl}: timed out after 50ms`,
+  );
+
+  fetchSpy.mockRestore();
+});
+
+test("passes an AbortSignal to the discovery fetch", async () => {
+  const cache = new DiscoveryDocumentCache();
+  const testUrl = "https://auth.example.com/.well-known/openid-configuration";
+  const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
+    json: async () => ({}),
+    ok: true,
+  } as Response);
+
+  await cache.get(testUrl);
+
+  const init = fetchSpy.mock.calls[0]?.[1];
+
+  expect(init?.signal).toBeInstanceOf(AbortSignal);
+
+  fetchSpy.mockRestore();
+});
