@@ -29,6 +29,7 @@ import {
   DEFAULT_AUTHORIZATION_CODE_TTL,
   DEFAULT_REFRESH_TOKEN_TTL,
   DEFAULT_TRANSACTION_TTL,
+  DEFAULT_UPSTREAM_REQUEST_TIMEOUT_MS,
 } from "./types.js";
 import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
@@ -81,6 +82,7 @@ export class OAuthProxy {
       enableTokenSwap: true, // Enabled by default for security
       redirectPath: "/oauth/callback",
       transactionTtl: DEFAULT_TRANSACTION_TTL,
+      upstreamRequestTimeoutMs: DEFAULT_UPSTREAM_REQUEST_TIMEOUT_MS,
       upstreamTokenEndpointAuthMethod: "client_secret_basic",
       ...config,
     };
@@ -719,11 +721,7 @@ export class OAuthProxy {
       headers["Authorization"] = this.getBasicAuthHeader();
     }
 
-    const tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
-      body: new URLSearchParams(bodyParams),
-      headers,
-      method: "POST",
-    });
+    const tokenResponse = await this.fetchUpstream(bodyParams, headers);
 
     if (!tokenResponse.ok) {
       let errorCode = "server_error";
@@ -810,6 +808,39 @@ export class OAuthProxy {
     }
 
     return Object.keys(allClaims).length > 0 ? allClaims : null;
+  }
+
+  /**
+   * POST to the upstream token endpoint with a bounded wait.
+   *
+   * Maps an abort of the configured timeout signal to a clean OAuth error
+   * instead of letting the raw `TimeoutError`/`AbortError` propagate.
+   */
+  private async fetchUpstream(
+    bodyParams: Record<string, string>,
+    headers: Record<string, string>,
+  ): Promise<Response> {
+    let tokenResponse: Response;
+    try {
+      tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
+        body: new URLSearchParams(bodyParams),
+        headers,
+        method: "POST",
+        signal: AbortSignal.timeout(
+          this.config.upstreamRequestTimeoutMs ??
+            DEFAULT_UPSTREAM_REQUEST_TIMEOUT_MS,
+        ),
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.name === "AbortError" || error.name === "TimeoutError")
+      ) {
+        throw new OAuthProxyError("server_error", "Upstream request timed out");
+      }
+      throw error;
+    }
+    return tokenResponse;
   }
 
   /**
@@ -904,11 +935,7 @@ export class OAuthProxy {
     }
 
     // Exchange refresh token with upstream provider
-    const tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
-      body: new URLSearchParams(bodyParams),
-      headers,
-      method: "POST",
-    });
+    const tokenResponse = await this.fetchUpstream(bodyParams, headers);
 
     if (!tokenResponse.ok) {
       let errorCode = "invalid_grant";
@@ -1354,11 +1381,7 @@ export class OAuthProxy {
     }
 
     // Exchange refresh token with upstream provider
-    const tokenResponse = await fetch(this.config.upstreamTokenEndpoint, {
-      body: new URLSearchParams(bodyParams),
-      headers,
-      method: "POST",
-    });
+    const tokenResponse = await this.fetchUpstream(bodyParams, headers);
 
     if (!tokenResponse.ok) {
       let errorCode = "invalid_grant";
