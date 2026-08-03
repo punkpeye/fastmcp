@@ -104,6 +104,7 @@ export const imageContent = async (
 
         rawData = Buffer.from(await response.arrayBuffer());
       } catch (error) {
+        // "AbortError" is unreachable today (no caller signal); kept as insurance.
         if (
           error instanceof Error &&
           (error.name === "AbortError" || error.name === "TimeoutError")
@@ -184,6 +185,7 @@ export const audioContent = async (
 
         rawData = Buffer.from(await response.arrayBuffer());
       } catch (error) {
+        // "AbortError" is unreachable today (no caller signal); kept as insurance.
         if (
           error instanceof Error &&
           (error.name === "AbortError" || error.name === "TimeoutError")
