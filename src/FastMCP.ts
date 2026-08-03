@@ -2490,6 +2490,14 @@ function parseBasicAuthHeader(
   }
 }
 
+/**
+ * Maximum request body size (in bytes) accepted by the OAuth proxy endpoints
+ * (registration, consent and token). These endpoints receive small JSON or
+ * form-urlencoded payloads, so 1 MiB is a generous bound that prevents
+ * unbounded memory growth from slow or malicious clients.
+ */
+const OAUTH_PROXY_MAX_BODY_SIZE = 1024 * 1024; // 1 MiB
+
 function stripBasePath(
   path: string,
   basePath: "" | `/${string}`,
@@ -3513,8 +3521,37 @@ export class FastMCP<
         if (req.method === "POST" && oauthPath === "/oauth/register") {
           await new Promise<void>((resolve) => {
             let body = "";
-            req.on("data", (chunk) => (body += chunk));
+            let bodySize = 0;
+            let failed = false;
+            const fail = () => {
+              if (failed || res.headersSent) {
+                resolve();
+                return;
+              }
+              failed = true;
+              res
+                .writeHead(400, { "Content-Type": "application/json" })
+                .end(JSON.stringify({ error: "invalid_request" }));
+              resolve();
+            };
+            req.on("data", (chunk) => {
+              if (failed) {
+                return;
+              }
+              body += chunk;
+              bodySize += chunk.length;
+              if (bodySize > OAUTH_PROXY_MAX_BODY_SIZE) {
+                fail();
+              }
+            });
+            // An aborted/errored request never emits "end"; settle the promise
+            // instead of leaving the handler pending forever.
+            req.on("aborted", fail);
+            req.on("error", fail);
             req.on("end", async () => {
+              if (failed) {
+                return;
+              }
               try {
                 const request = JSON.parse(body);
                 const response = await oauthProxy.registerClient(request);
@@ -3605,8 +3642,37 @@ export class FastMCP<
         if (req.method === "POST" && oauthPath === "/oauth/consent") {
           await new Promise<void>((resolve) => {
             let body = "";
-            req.on("data", (chunk) => (body += chunk));
+            let bodySize = 0;
+            let failed = false;
+            const fail = () => {
+              if (failed || res.headersSent) {
+                resolve();
+                return;
+              }
+              failed = true;
+              res
+                .writeHead(400, { "Content-Type": "application/json" })
+                .end(JSON.stringify({ error: "invalid_request" }));
+              resolve();
+            };
+            req.on("data", (chunk) => {
+              if (failed) {
+                return;
+              }
+              body += chunk;
+              bodySize += chunk.length;
+              if (bodySize > OAUTH_PROXY_MAX_BODY_SIZE) {
+                fail();
+              }
+            });
+            // An aborted/errored request never emits "end"; settle the promise
+            // instead of leaving the handler pending forever.
+            req.on("aborted", fail);
+            req.on("error", fail);
             req.on("end", async () => {
+              if (failed) {
+                return;
+              }
               try {
                 const mockRequest = new Request(
                   `http://${host}${url.pathname}${url.search}`,
@@ -3646,8 +3712,37 @@ export class FastMCP<
         if (req.method === "POST" && oauthPath === "/oauth/token") {
           await new Promise<void>((resolve) => {
             let body = "";
-            req.on("data", (chunk) => (body += chunk));
+            let bodySize = 0;
+            let failed = false;
+            const fail = () => {
+              if (failed || res.headersSent) {
+                resolve();
+                return;
+              }
+              failed = true;
+              res
+                .writeHead(400, { "Content-Type": "application/json" })
+                .end(JSON.stringify({ error: "invalid_request" }));
+              resolve();
+            };
+            req.on("data", (chunk) => {
+              if (failed) {
+                return;
+              }
+              body += chunk;
+              bodySize += chunk.length;
+              if (bodySize > OAUTH_PROXY_MAX_BODY_SIZE) {
+                fail();
+              }
+            });
+            // An aborted/errored request never emits "end"; settle the promise
+            // instead of leaving the handler pending forever.
+            req.on("aborted", fail);
+            req.on("error", fail);
             req.on("end", async () => {
+              if (failed) {
+                return;
+              }
               try {
                 const params = new URLSearchParams(body);
                 const grantType = params.get("grant_type");
