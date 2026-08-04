@@ -2015,20 +2015,23 @@ For more control over OAuth behavior, you can use the `oauth` option directly:
 import { FastMCP } from "fastmcp";
 import { GoogleProvider } from "fastmcp/auth";
 
-const authProxy = new GoogleProvider({
-  clientId: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+const authProvider = new GoogleProvider({
   baseUrl: "https://your-server.com",
+  clientId: process.env.GOOGLE_CLIENT_ID!,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
   scopes: ["openid", "profile", "email"],
 });
 
 const server = new FastMCP({
   name: "My Server",
   oauth: {
+    authorizationServer: authProvider
+      .getProxy()
+      .getAuthorizationServerMetadata(),
     enabled: true,
-    authorizationServer: authProxy.getAuthorizationServerMetadata(),
-    proxy: authProxy,
+    proxy: authProvider.getProxy(),
   },
+  version: "1.0.0",
 });
 ```
 

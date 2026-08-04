@@ -125,6 +125,7 @@ const server = new FastMCP({
     authorizationServer: authProxy.getAuthorizationServerMetadata(),
     proxy: authProxy,
   },
+  version: "1.0.0",
 });
 
 await server.start({
