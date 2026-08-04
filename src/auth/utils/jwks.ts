@@ -153,8 +153,15 @@ export class JWKSVerifier implements TokenVerifier {
       );
 
       // Map jose claims to TokenVerificationResult format
-      // Store all claims as Record<string, unknown> for compatibility
+      // Store all claims as Record<string, unknown> for compatibility.
+      //
+      // `...payload` comes first so the normalized entries below win. Spreading
+      // it last would undo them: `scope` in particular is declared `string[]`
+      // on JWTClaims, but RFC 9068 puts it in the token as a space-delimited
+      // string, so the raw value would leak through and break every consumer
+      // that treats it as an array.
       const claims: Record<string, unknown> = {
+        ...payload, // Include all other claims
         aud: payload.aud,
         client_id: payload.client_id || payload.sub,
         exp: payload.exp,
@@ -162,7 +169,6 @@ export class JWKSVerifier implements TokenVerifier {
         iss: payload.iss,
         jti: payload.jti || "",
         scope: this.parseScope(payload.scope),
-        ...payload, // Include all other claims
       };
 
       return {
