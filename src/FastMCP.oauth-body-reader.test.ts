@@ -27,13 +27,14 @@ function requestHead(
   contentType: string,
   path: string,
   port: number,
+  connection = "close",
 ): string {
   return [
     `POST ${path} HTTP/1.1`,
     `Host: localhost:${port}`,
     `Content-Type: ${contentType}`,
     `Content-Length: ${contentLength}`,
-    "Connection: close",
+    `Connection: ${connection}`,
     "",
     "",
   ].join("\r\n");
@@ -162,6 +163,45 @@ describe("OAuth proxy body readers", () => {
     }
   });
 
+  it("closes a keep-alive request after rejecting an over-limit body", async () => {
+    const port = await getRandomPort();
+    const server = await startOAuthProxyServer(port);
+
+    try {
+      const socket = await openSocket(port);
+      socket.on("error", () => {});
+
+      let response = "";
+      let serverClosedSocket = false;
+      socket.on("data", (chunk) => (response += chunk));
+      socket.once("end", () => {
+        serverClosedSocket = true;
+      });
+
+      socket.write(
+        requestHead(
+          4 * 1024 * 1024,
+          "application/x-www-form-urlencoded",
+          "/oauth/token",
+          port,
+          "keep-alive",
+        ),
+      );
+      socket.write("x".repeat(1280 * 1024));
+
+      await vi.waitFor(
+        () => {
+          expect(response).toContain("400");
+          expect(response).toContain("invalid_request");
+          expect(serverClosedSocket).toBe(true);
+        },
+        { interval: 50, timeout: 3000 },
+      );
+    } finally {
+      await server.stop();
+    }
+  });
+
   it("still accepts a valid body delivered in slow chunks", async () => {
     const port = await getRandomPort();
     const server = await startOAuthProxyServer(port);
@@ -185,6 +225,50 @@ describe("OAuth proxy body readers", () => {
         () => {
           expect(response).toContain("201");
           expect(response).toContain("client_id");
+        },
+        { interval: 50, timeout: 3000 },
+      );
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("preserves a UTF-8 character split across request chunks", async () => {
+    const port = await getRandomPort();
+    const server = await startOAuthProxyServer(port);
+
+    try {
+      const clientName = "Café 日本語 клиент";
+      const body = Buffer.from(
+        JSON.stringify({
+          client_name: clientName,
+          redirect_uris: ["https://client.example.com/callback"],
+        }),
+        "utf8",
+      );
+      const accentStart = body.indexOf(Buffer.from("é", "utf8"));
+      expect(accentStart).toBeGreaterThanOrEqual(0);
+
+      const socket = await openSocket(port);
+      socket.write(
+        requestHead(
+          body.byteLength,
+          "application/json",
+          "/oauth/register",
+          port,
+        ),
+      );
+      socket.write(body.subarray(0, accentStart + 1));
+      await sleep(100);
+      socket.end(body.subarray(accentStart + 1));
+
+      let response = "";
+      socket.on("data", (chunk) => (response += chunk));
+
+      await vi.waitFor(
+        () => {
+          expect(response).toContain("201");
+          expect(response).toContain(clientName);
         },
         { interval: 50, timeout: 3000 },
       );

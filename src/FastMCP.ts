@@ -3597,7 +3597,7 @@ export class FastMCP<
         // DCR endpoint - POST /oauth/register
         if (req.method === "POST" && oauthPath === "/oauth/register") {
           await new Promise<void>((resolve) => {
-            let body = "";
+            const bodyChunks: Buffer[] = [];
             let bodySize = 0;
             let failed = false;
             const fail = () => {
@@ -3607,7 +3607,10 @@ export class FastMCP<
               }
               failed = true;
               res
-                .writeHead(400, { "Content-Type": "application/json" })
+                .writeHead(400, {
+                  Connection: "close",
+                  "Content-Type": "application/json",
+                })
                 .end(JSON.stringify({ error: "invalid_request" }));
               resolve();
             };
@@ -3615,11 +3618,12 @@ export class FastMCP<
               if (failed) {
                 return;
               }
-              body += chunk;
               bodySize += chunk.length;
               if (bodySize > OAUTH_PROXY_MAX_BODY_SIZE) {
                 fail();
+                return;
               }
+              bodyChunks.push(chunk);
             });
             // An aborted/errored request never emits "end"; settle the promise
             // instead of leaving the handler pending forever.
@@ -3630,7 +3634,9 @@ export class FastMCP<
                 return;
               }
               try {
-                const request = JSON.parse(body);
+                const request = JSON.parse(
+                  Buffer.concat(bodyChunks).toString("utf8"),
+                );
                 const response = await oauthProxy.registerClient(request);
                 res
                   .writeHead(201, { "Content-Type": "application/json" })
@@ -3718,7 +3724,7 @@ export class FastMCP<
         // Consent endpoint - POST /oauth/consent
         if (req.method === "POST" && oauthPath === "/oauth/consent") {
           await new Promise<void>((resolve) => {
-            let body = "";
+            const bodyChunks: Buffer[] = [];
             let bodySize = 0;
             let failed = false;
             const fail = () => {
@@ -3728,7 +3734,10 @@ export class FastMCP<
               }
               failed = true;
               res
-                .writeHead(400, { "Content-Type": "application/json" })
+                .writeHead(400, {
+                  Connection: "close",
+                  "Content-Type": "application/json",
+                })
                 .end(JSON.stringify({ error: "invalid_request" }));
               resolve();
             };
@@ -3736,11 +3745,12 @@ export class FastMCP<
               if (failed) {
                 return;
               }
-              body += chunk;
               bodySize += chunk.length;
               if (bodySize > OAUTH_PROXY_MAX_BODY_SIZE) {
                 fail();
+                return;
               }
+              bodyChunks.push(chunk);
             });
             // An aborted/errored request never emits "end"; settle the promise
             // instead of leaving the handler pending forever.
@@ -3754,7 +3764,7 @@ export class FastMCP<
                 const mockRequest = new Request(
                   `http://${host}${url.pathname}${url.search}`,
                   {
-                    body,
+                    body: Buffer.concat(bodyChunks).toString("utf8"),
                     headers: {
                       "Content-Type": "application/x-www-form-urlencoded",
                     },
@@ -3788,7 +3798,7 @@ export class FastMCP<
         // Token endpoint - POST /oauth/token
         if (req.method === "POST" && oauthPath === "/oauth/token") {
           await new Promise<void>((resolve) => {
-            let body = "";
+            const bodyChunks: Buffer[] = [];
             let bodySize = 0;
             let failed = false;
             const fail = () => {
@@ -3798,7 +3808,10 @@ export class FastMCP<
               }
               failed = true;
               res
-                .writeHead(400, { "Content-Type": "application/json" })
+                .writeHead(400, {
+                  Connection: "close",
+                  "Content-Type": "application/json",
+                })
                 .end(JSON.stringify({ error: "invalid_request" }));
               resolve();
             };
@@ -3806,11 +3819,12 @@ export class FastMCP<
               if (failed) {
                 return;
               }
-              body += chunk;
               bodySize += chunk.length;
               if (bodySize > OAUTH_PROXY_MAX_BODY_SIZE) {
                 fail();
+                return;
               }
+              bodyChunks.push(chunk);
             });
             // An aborted/errored request never emits "end"; settle the promise
             // instead of leaving the handler pending forever.
@@ -3821,7 +3835,9 @@ export class FastMCP<
                 return;
               }
               try {
-                const params = new URLSearchParams(body);
+                const params = new URLSearchParams(
+                  Buffer.concat(bodyChunks).toString("utf8"),
+                );
                 const grantType = params.get("grant_type");
 
                 // Parse Basic auth header (RFC 6749 Section 2.3.1)
