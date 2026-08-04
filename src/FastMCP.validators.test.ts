@@ -15,6 +15,36 @@ import { FastMCP, FastMCPSession } from "./FastMCP.js";
 // validation on tools/call — so a regression in the non-Zod validators or
 // their JSON-Schema conversion can't slip through unnoticed.
 
+describe("tool schema registration", () => {
+  it("rejects parameters without Standard Schema support before starting a server", () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+
+    expect(() =>
+      server.addTool({
+        execute: async () => "ok",
+        name: "legacy-zod",
+        parameters: {} as never,
+      }),
+    ).toThrow(
+      "Tool 'legacy-zod' parameters must implement Standard Schema. If you are using Zod, upgrade to version 3.24 or later.",
+    );
+  });
+
+  it("rejects output schemas without Standard Schema support before starting a server", () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+
+    expect(() =>
+      server.addTool({
+        execute: async () => ({ answer: "ok" }),
+        name: "legacy-zod-output",
+        outputSchema: {} as never,
+      }),
+    ).toThrow(
+      "Tool 'legacy-zod-output' outputSchema must implement Standard Schema. If you are using Zod, upgrade to version 3.24 or later.",
+    );
+  });
+});
+
 const runWithTestServer = async ({
   run,
   server: providedServer,

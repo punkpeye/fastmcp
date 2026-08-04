@@ -351,6 +351,38 @@ export class UnexpectedStateError extends FastMCPError {
  */
 export class UserError extends UnexpectedStateError {}
 
+function assertStandardSchema(
+  toolName: string,
+  schemaName: "outputSchema" | "parameters",
+  schema: ToolParameters,
+): void {
+  const standard = (schema as { "~standard"?: { validate?: unknown } })[
+    "~standard"
+  ];
+
+  if (typeof standard?.validate === "function") {
+    return;
+  }
+
+  throw new UserError(
+    `Tool '${toolName}' ${schemaName} must implement Standard Schema. If you are using Zod, upgrade to version 3.24 or later.`,
+  );
+}
+
+function assertToolSchemas(tool: {
+  name: string;
+  outputSchema?: ToolParameters;
+  parameters?: ToolParameters;
+}): void {
+  if (tool.parameters) {
+    assertStandardSchema(tool.name, "parameters", tool.parameters);
+  }
+
+  if (tool.outputSchema) {
+    assertStandardSchema(tool.name, "outputSchema", tool.outputSchema);
+  }
+}
+
 const TextContentZodSchema = z
   .object({
     /**
@@ -2656,6 +2688,8 @@ export class FastMCP<
    * Adds a tool to the server.
    */
   public addTool<Params extends ToolParameters>(tool: Tool<T, Params>) {
+    assertToolSchemas(tool);
+
     // Remove existing tool with the same name
     this.#tools = this.#tools.filter((t) => t.name !== tool.name);
     this.#tools.push(tool as unknown as Tool<T>);
@@ -2667,6 +2701,8 @@ export class FastMCP<
    * Adds tools to the server.
    */
   public addTools<Params extends ToolParameters>(tools: Tool<T, Params>[]) {
+    tools.forEach(assertToolSchemas);
+
     const newToolNames = new Set(tools.map((tool) => tool.name));
     this.#tools = this.#tools.filter((t) => !newToolNames.has(t.name));
     this.#tools.push(...(tools as unknown as Tool<T>[]));
