@@ -84,16 +84,23 @@ type FastMCPSessionEvents = {
  */
 export const MEDIA_FETCH_TIMEOUT_MS = 30000;
 
+type MediaContentInput =
+  | { buffer: Buffer }
+  | { path: string }
+  | { timeoutMs?: number; url: string };
+
 export const imageContent = async (
-  input: { buffer: Buffer } | { path: string } | { url: string },
+  input: MediaContentInput,
 ): Promise<ImageContent> => {
   let rawData: Buffer;
 
   try {
     if ("url" in input) {
+      const timeoutMs = input.timeoutMs ?? MEDIA_FETCH_TIMEOUT_MS;
+
       try {
         const response = await fetch(input.url, {
-          signal: AbortSignal.timeout(MEDIA_FETCH_TIMEOUT_MS),
+          signal: AbortSignal.timeout(timeoutMs),
         });
 
         if (!response.ok) {
@@ -110,7 +117,7 @@ export const imageContent = async (
           (error.name === "AbortError" || error.name === "TimeoutError")
         ) {
           throw new Error(
-            `Failed to fetch image from URL (${input.url}): timed out after ${MEDIA_FETCH_TIMEOUT_MS}ms`,
+            `Failed to fetch image from URL (${input.url}): timed out after ${timeoutMs}ms`,
           );
         }
 
@@ -166,15 +173,17 @@ export const imageContent = async (
 };
 
 export const audioContent = async (
-  input: { buffer: Buffer } | { path: string } | { url: string },
+  input: MediaContentInput,
 ): Promise<AudioContent> => {
   let rawData: Buffer;
 
   try {
     if ("url" in input) {
+      const timeoutMs = input.timeoutMs ?? MEDIA_FETCH_TIMEOUT_MS;
+
       try {
         const response = await fetch(input.url, {
-          signal: AbortSignal.timeout(MEDIA_FETCH_TIMEOUT_MS),
+          signal: AbortSignal.timeout(timeoutMs),
         });
 
         if (!response.ok) {
@@ -191,7 +200,7 @@ export const audioContent = async (
           (error.name === "AbortError" || error.name === "TimeoutError")
         ) {
           throw new Error(
-            `Failed to fetch audio from URL (${input.url}): timed out after ${MEDIA_FETCH_TIMEOUT_MS}ms`,
+            `Failed to fetch audio from URL (${input.url}): timed out after ${timeoutMs}ms`,
           );
         }
 

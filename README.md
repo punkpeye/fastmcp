@@ -848,6 +848,7 @@ server.addTool({
 The `imageContent` function takes the following options:
 
 - `url`: The URL of the image.
+- `timeoutMs`: Optional timeout for a URL download in milliseconds (defaults to 30 seconds).
 - `path`: The path to the image file.
 - `buffer`: The image data as a buffer.
 
@@ -1025,6 +1026,7 @@ server.addTool({
 The `audioContent` function takes the following options:
 
 - `url`: The URL of the audio.
+- `timeoutMs`: Optional timeout for a URL download in milliseconds (defaults to 30 seconds).
 - `path`: The path to the audio file.
 - `buffer`: The audio data as a buffer.
 
