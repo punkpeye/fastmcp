@@ -3611,7 +3611,12 @@ export class FastMCP<
                   Connection: "close",
                   "Content-Type": "application/json",
                 })
-                .end(JSON.stringify({ error: "invalid_request" }));
+                .end(
+                  JSON.stringify({
+                    error: "invalid_request",
+                    error_description: "Request body exceeds 1 MiB",
+                  }),
+                );
               resolve();
             };
             req.on("data", (chunk) => {
@@ -3738,7 +3743,12 @@ export class FastMCP<
                   Connection: "close",
                   "Content-Type": "application/json",
                 })
-                .end(JSON.stringify({ error: "invalid_request" }));
+                .end(
+                  JSON.stringify({
+                    error: "invalid_request",
+                    error_description: "Request body exceeds 1 MiB",
+                  }),
+                );
               resolve();
             };
             req.on("data", (chunk) => {
@@ -3812,7 +3822,12 @@ export class FastMCP<
                   Connection: "close",
                   "Content-Type": "application/json",
                 })
-                .end(JSON.stringify({ error: "invalid_request" }));
+                .end(
+                  JSON.stringify({
+                    error: "invalid_request",
+                    error_description: "Request body exceeds 1 MiB",
+                  }),
+                );
               resolve();
             };
             req.on("data", (chunk) => {

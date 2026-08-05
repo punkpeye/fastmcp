@@ -151,6 +151,7 @@ describe("OAuth proxy body readers", () => {
         () => {
           expect(response).toContain("400");
           expect(response).toContain("invalid_request");
+          expect(response).toContain("Request body exceeds 1 MiB");
         },
         { interval: 50, timeout: 3000 },
       );
@@ -193,6 +194,7 @@ describe("OAuth proxy body readers", () => {
         () => {
           expect(response).toContain("400");
           expect(response).toContain("invalid_request");
+          expect(response).toContain("Request body exceeds 1 MiB");
           expect(serverClosedSocket).toBe(true);
         },
         { interval: 50, timeout: 3000 },
@@ -311,14 +313,14 @@ describe("OAuth proxy body readers", () => {
 
       // Send chunks until we exceed 1 MiB limit
       const chunkSize = 256 * 1024; // 256 KiB per chunk
-      const chunkData = Buffer.alloc(chunkSize, 'a');
+      const chunkData = Buffer.alloc(chunkSize, "a");
 
       for (let sent = 0; sent < 1.5 * 1024 * 1024; sent += chunkSize) {
         if (socket.destroyed) break;
         // Write chunk in HTTP chunked format: size-in-hex CRLF data CRLF
         socket.write(`${chunkSize.toString(16)}\r\n`);
         socket.write(chunkData);
-        socket.write('\r\n');
+        socket.write("\r\n");
         await sleep(10);
       }
 
@@ -326,6 +328,7 @@ describe("OAuth proxy body readers", () => {
         () => {
           expect(response).toContain("400");
           expect(response).toContain("invalid_request");
+          expect(response).toContain("Request body exceeds 1 MiB");
           expect(serverClosedSocket).toBe(true);
         },
         { interval: 50, timeout: 5000 },
@@ -359,22 +362,23 @@ describe("OAuth proxy body readers", () => {
 
       // Split "Café 日本語 клиент" across two chunks
       const part1 = '{"client_name":"Caf';
-      const part2 = 'é 日本語 клиент","redirect_uris":["https://client.example.com/callback"]}';
+      const part2 =
+        'é 日本語 клиент","redirect_uris":["https://client.example.com/callback"]}';
 
       // First chunk
       socket.write(`${Buffer.byteLength(part1).toString(16)}\r\n`);
       socket.write(part1);
-      socket.write('\r\n');
+      socket.write("\r\n");
 
       await sleep(50);
 
       // Second chunk
       socket.write(`${Buffer.byteLength(part2).toString(16)}\r\n`);
       socket.write(part2);
-      socket.write('\r\n');
+      socket.write("\r\n");
 
       // Terminating chunk
-      socket.write('0\r\n\r\n');
+      socket.write("0\r\n\r\n");
 
       await vi.waitFor(
         () => {
@@ -414,17 +418,17 @@ describe("OAuth proxy body readers", () => {
       const chunk1 = "grant_type=authorization_code&code=abc";
       socket.write(`${Buffer.byteLength(chunk1).toString(16)}\r\n`);
       socket.write(chunk1);
-      socket.write('\r\n');
+      socket.write("\r\n");
 
       await sleep(50);
 
       // Abort before sending terminating chunk
       socket.destroy();
 
-      await vi.waitFor(
-        () => expect(socketClosed).toBe(true),
-        { interval: 50, timeout: 2000 },
-      );
+      await vi.waitFor(() => expect(socketClosed).toBe(true), {
+        interval: 50,
+        timeout: 2000,
+      });
 
       // Verify server is still responsive after abort
       const healthSocket = await openSocket(port);
@@ -433,10 +437,10 @@ describe("OAuth proxy body readers", () => {
       healthSocket.on("data", (chunk) => (healthResponse += chunk));
       healthSocket.write(`GET / HTTP/1.1\r\nHost: localhost\r\n\r\n`);
 
-      await vi.waitFor(
-        () => expect(healthResponse.length).toBeGreaterThan(0),
-        { interval: 50, timeout: 2000 },
-      );
+      await vi.waitFor(() => expect(healthResponse.length).toBeGreaterThan(0), {
+        interval: 50,
+        timeout: 2000,
+      });
 
       healthSocket.end();
     } finally {
