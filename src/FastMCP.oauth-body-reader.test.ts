@@ -276,4 +276,171 @@ describe("OAuth proxy body readers", () => {
       await server.stop();
     }
   });
+
+  // ============================================================================
+  // CHUNKED ENCODING TESTS — validates the streaming counter design rationale
+  // ============================================================================
+  // These three tests lock in the guarantee that the streaming counter protects
+  // chunked and dishonest bodies. Without them, a future "optimization" that
+  // trusts only Content-Length would pass the existing suite and silently break
+  // the chunked path (Transfer-Encoding: chunked uses no Content-Length header).
+
+  it("rejects an oversize chunked body (no Content-Length)", async () => {
+    const port = await getRandomPort();
+    const server = await startOAuthProxyServer(port);
+
+    try {
+      const socket = await openSocket(port);
+      let response = "";
+      let serverClosedSocket = false;
+
+      socket.on("data", (chunk) => (response += chunk));
+      socket.on("close", () => (serverClosedSocket = true));
+
+      // Send chunked request (no Content-Length header)
+      const headers = [
+        `POST /oauth/register HTTP/1.1`,
+        `Host: localhost:${port}`,
+        `Transfer-Encoding: chunked`,
+        `Content-Type: application/json`,
+        ``,
+        ``,
+      ].join("\r\n");
+
+      socket.write(headers);
+
+      // Send chunks until we exceed 1 MiB limit
+      const chunkSize = 256 * 1024; // 256 KiB per chunk
+      const chunkData = Buffer.alloc(chunkSize, 'a');
+
+      for (let sent = 0; sent < 1.5 * 1024 * 1024; sent += chunkSize) {
+        if (socket.destroyed) break;
+        // Write chunk in HTTP chunked format: size-in-hex CRLF data CRLF
+        socket.write(`${chunkSize.toString(16)}\r\n`);
+        socket.write(chunkData);
+        socket.write('\r\n');
+        await sleep(10);
+      }
+
+      await vi.waitFor(
+        () => {
+          expect(response).toContain("400");
+          expect(response).toContain("invalid_request");
+          expect(serverClosedSocket).toBe(true);
+        },
+        { interval: 50, timeout: 5000 },
+      );
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("preserves UTF-8 characters split across chunked wire boundaries", async () => {
+    const port = await getRandomPort();
+    const server = await startOAuthProxyServer(port);
+
+    try {
+      const socket = await openSocket(port);
+      let response = "";
+
+      socket.on("data", (chunk) => (response += chunk));
+
+      // Send chunked request with UTF-8 character split across chunks
+      const headers = [
+        `POST /oauth/register HTTP/1.1`,
+        `Host: localhost:${port}`,
+        `Transfer-Encoding: chunked`,
+        `Content-Type: application/json`,
+        ``,
+        ``,
+      ].join("\r\n");
+
+      socket.write(headers);
+
+      // Split "Café 日本語 клиент" across two chunks
+      const part1 = '{"client_name":"Caf';
+      const part2 = 'é 日本語 клиент","redirect_uris":["https://client.example.com/callback"]}';
+
+      // First chunk
+      socket.write(`${Buffer.byteLength(part1).toString(16)}\r\n`);
+      socket.write(part1);
+      socket.write('\r\n');
+
+      await sleep(50);
+
+      // Second chunk
+      socket.write(`${Buffer.byteLength(part2).toString(16)}\r\n`);
+      socket.write(part2);
+      socket.write('\r\n');
+
+      // Terminating chunk
+      socket.write('0\r\n\r\n');
+
+      await vi.waitFor(
+        () => {
+          expect(response).toContain("201");
+          expect(response).toContain("Café 日本語 клиент");
+        },
+        { interval: 50, timeout: 3000 },
+      );
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("handles chunked request aborted before terminating chunk", async () => {
+    const port = await getRandomPort();
+    const server = await startOAuthProxyServer(port);
+
+    try {
+      const socket = await openSocket(port);
+      let socketClosed = false;
+
+      socket.on("close", () => (socketClosed = true));
+
+      // Send chunked request headers
+      const headers = [
+        `POST /oauth/token HTTP/1.1`,
+        `Host: localhost:${port}`,
+        `Transfer-Encoding: chunked`,
+        `Content-Type: application/x-www-form-urlencoded`,
+        ``,
+        ``,
+      ].join("\r\n");
+
+      socket.write(headers);
+
+      // Send one chunk
+      const chunk1 = "grant_type=authorization_code&code=abc";
+      socket.write(`${Buffer.byteLength(chunk1).toString(16)}\r\n`);
+      socket.write(chunk1);
+      socket.write('\r\n');
+
+      await sleep(50);
+
+      // Abort before sending terminating chunk
+      socket.destroy();
+
+      await vi.waitFor(
+        () => expect(socketClosed).toBe(true),
+        { interval: 50, timeout: 2000 },
+      );
+
+      // Verify server is still responsive after abort
+      const healthSocket = await openSocket(port);
+      let healthResponse = "";
+
+      healthSocket.on("data", (chunk) => (healthResponse += chunk));
+      healthSocket.write(`GET / HTTP/1.1\r\nHost: localhost\r\n\r\n`);
+
+      await vi.waitFor(
+        () => expect(healthResponse.length).toBeGreaterThan(0),
+        { interval: 50, timeout: 2000 },
+      );
+
+      healthSocket.end();
+    } finally {
+      await server.stop();
+    }
+  });
 });
