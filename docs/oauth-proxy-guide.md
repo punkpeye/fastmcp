@@ -658,12 +658,13 @@ const authProxy = new OAuthProxy({
 });
 ```
 
-**3. Implement `TokenStorage.take`.** Authorization codes and transactions are
-single-use (RFC 6749 §4.1.2). The proxy consumes them through `take`, which
-must atomically return a value and delete it so that at most one caller
-receives it. Without it the proxy falls back to a non-atomic get + delete, and
-two concurrent requests landing on different instances can both redeem the same
-authorization code.
+**3. Implement `TokenStorage.take`.** Authorization codes, transactions and
+refresh tokens are single-use (RFC 6749 §4.1.2, §10.4). The proxy consumes them
+through `take`, which must atomically return a value and delete it so that at
+most one caller receives it. Without it the proxy falls back to a non-atomic
+read-then-delete, and two concurrent requests can both redeem the same
+authorization code, or both redeem the same refresh token and walk away with two
+independent token chains — which defeats rotation as a stolen-token tripwire.
 
 Most backends have a primitive for this:
 

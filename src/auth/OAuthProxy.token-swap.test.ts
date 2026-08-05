@@ -1375,4 +1375,265 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     proxy.destroy();
   });
+
+  it("should enforce one-time use across concurrent refreshes", async () => {
+    // The single-use check and the consume straddle the upstream round-trip, so
+    // without an atomic claim both requests pass the check before either
+    // consumes, and one refresh token mints two independent token chains.
+    fetchSpy.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve(
+                new Response(
+                  JSON.stringify({
+                    access_token: "new-upstream-access-token",
+                    expires_in: 3600,
+                    refresh_token: "new-upstream-refresh-token",
+                    scope: "read write",
+                    token_type: "Bearer",
+                  }),
+                  {
+                    headers: { "Content-Type": "application/json" },
+                    status: 200,
+                  },
+                ),
+              ),
+            20,
+          ),
+        ) as any,
+    );
+
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    const initialTokens = await getInitialTokens(proxy);
+
+    const refresh = () =>
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+      });
+
+    const results = await Promise.allSettled([refresh(), refresh()]);
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
+      code: "invalid_grant",
+    });
+
+    // The loser must not reach the upstream either — a second redemption of the
+    // same upstream refresh token can trip the provider's own reuse detection.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    proxy.destroy();
+    tokenStorage.destroy();
+  });
+
+  it("should keep the refresh token usable when the upstream refresh fails", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage,
+    });
+
+    const initialTokens = await getInitialTokens(proxy);
+
+    // A transient upstream failure must not consume the refresh token, or every
+    // upstream blip logs the user out.
+    fetchSpy.mockImplementationOnce(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 503,
+        }),
+      ),
+    );
+
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+      }),
+    ).rejects.toThrow("temporarily_unavailable");
+
+    // Retrying the same refresh token succeeds once the upstream recovers.
+    const retried = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+    });
+
+    expect(retried.access_token).toBeDefined();
+    expect(retried.refresh_token).toBeDefined();
+
+    // ...but only once: the successful rotation still consumes it.
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+      }),
+    ).rejects.toThrow("invalid_grant");
+
+    proxy.destroy();
+    tokenStorage.destroy();
+  });
+
+  it("should restore a failed rotation with the lifetime the token had left", async () => {
+    // Restoring with a fresh TTL would silently extend the lifetime of a
+    // credential, so the remaining lifetime has to be carried over.
+    const backend = new MemoryTokenStorage();
+    const savedTtls: Array<[string, number | undefined]> = [];
+    const tokenStorage: TokenStorage = {
+      cleanup: () => backend.cleanup(),
+      delete: (key) => backend.delete(key),
+      get: (key) => backend.get(key),
+      save: (key, value, ttl) => {
+        savedTtls.push([key, ttl]);
+        return backend.save(key, value, ttl);
+      },
+      take: (key) => backend.take(key),
+    };
+
+    const refreshTokenTtl = 600;
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      encryptionKey: false,
+      refreshTokenTtl,
+      tokenStorage,
+    });
+
+    const initialTokens = await getInitialTokens(proxy);
+
+    fetchSpy.mockImplementationOnce(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 503,
+        }),
+      ),
+    );
+
+    savedTtls.length = 0;
+
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+      }),
+    ).rejects.toThrow("temporarily_unavailable");
+
+    const restored = savedTtls.filter(([key]) => key.startsWith("mapping:"));
+    expect(restored).toHaveLength(1);
+    expect(restored[0][1]).toBeLessThanOrEqual(refreshTokenTtl);
+    expect(restored[0][1]).toBeGreaterThan(refreshTokenTtl - 60);
+
+    proxy.destroy();
+    backend.destroy();
+  });
+
+  it("should report the upstream failure even when the restore fails", async () => {
+    // The restore is best-effort. If it throws, the caller still needs the
+    // error that actually broke the refresh.
+    const backend = new MemoryTokenStorage();
+    let failMappingSaves = false;
+    const tokenStorage: TokenStorage = {
+      cleanup: () => backend.cleanup(),
+      delete: (key) => backend.delete(key),
+      get: (key) => backend.get(key),
+      save: (key, value, ttl) => {
+        if (failMappingSaves && key.startsWith("mapping:")) {
+          return Promise.reject(new Error("storage unavailable"));
+        }
+        return backend.save(key, value, ttl);
+      },
+      take: (key) => backend.take(key),
+    };
+
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      encryptionKey: false,
+      tokenStorage,
+    });
+
+    const initialTokens = await getInitialTokens(proxy);
+
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    fetchSpy.mockImplementationOnce(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+          headers: { "Content-Type": "application/json" },
+          status: 503,
+        }),
+      ),
+    );
+    failMappingSaves = true;
+
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+      }),
+    ).rejects.toThrow("temporarily_unavailable");
+
+    expect(consoleErrorSpy).toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
+    proxy.destroy();
+    backend.destroy();
+  });
+
+  it("should still rotate on storage that does not implement take", async () => {
+    // The fallback is racy by construction — that is documented on
+    // TokenStorage.take — but it must still enforce single use sequentially.
+    const backend = new MemoryTokenStorage();
+    const tokenStorage: TokenStorage = {
+      cleanup: () => backend.cleanup(),
+      delete: (key) => backend.delete(key),
+      get: (key) => backend.get(key),
+      save: (key, value, ttl) => backend.save(key, value, ttl),
+    };
+
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      encryptionKey: false,
+      tokenStorage,
+    });
+
+    const initialTokens = await getInitialTokens(proxy);
+
+    const refreshed = await proxy.exchangeRefreshToken({
+      client_id: "upstream-client-id",
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+    });
+
+    expect(refreshed.access_token).toBeDefined();
+
+    await expect(
+      proxy.exchangeRefreshToken({
+        client_id: "upstream-client-id",
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+      }),
+    ).rejects.toThrow("invalid_grant");
+
+    proxy.destroy();
+    backend.destroy();
+  });
 });

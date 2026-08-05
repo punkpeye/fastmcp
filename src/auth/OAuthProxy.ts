@@ -988,8 +988,12 @@ export class OAuthProxy {
       throw new OAuthProxyError("invalid_grant", "Refresh token missing JTI");
     }
 
-    const mapping = (await this.tokenStorage.get(`mapping:${jti}`)) as {
+    // Claim the mapping atomically: whoever takes it owns this rotation, so two
+    // concurrent refreshes — on this instance or another one sharing the
+    // storage — cannot both redeem the same single-use refresh token.
+    const mapping = (await this.takeMapping(jti)) as {
       clientId: string;
+      expiresAt?: Date | string;
       scope: string[];
       upstreamTokenKey: string;
     } | null;
@@ -1001,54 +1005,72 @@ export class OAuthProxy {
       );
     }
 
-    const upstreamTokens = (await this.tokenStorage.get(
-      `upstream:${mapping.upstreamTokenKey}`,
-    )) as null | UpstreamTokenSet;
+    try {
+      const upstreamTokens = (await this.tokenStorage.get(
+        `upstream:${mapping.upstreamTokenKey}`,
+      )) as null | UpstreamTokenSet;
 
-    if (!upstreamTokens) {
-      throw new OAuthProxyError(
-        "invalid_grant",
-        "Upstream tokens not found or expired",
+      if (!upstreamTokens) {
+        throw new OAuthProxyError(
+          "invalid_grant",
+          "Upstream tokens not found or expired",
+        );
+      }
+
+      if (!upstreamTokens.refreshToken) {
+        throw new OAuthProxyError(
+          "invalid_grant",
+          "No upstream refresh token available",
+        );
+      }
+
+      const refreshedUpstreamTokens = await this.refreshUpstreamTokens(
+        upstreamTokens.refreshToken,
+        request.scope,
       );
-    }
 
-    if (!upstreamTokens.refreshToken) {
-      throw new OAuthProxyError(
-        "invalid_grant",
-        "No upstream refresh token available",
+      if (refreshedUpstreamTokens.scope.length === 0) {
+        refreshedUpstreamTokens.scope = upstreamTokens.scope;
+      }
+
+      const refreshTokenTtl =
+        refreshedUpstreamTokens.refreshExpiresIn ??
+        this.config.refreshTokenTtl ??
+        DEFAULT_REFRESH_TOKEN_TTL;
+      const accessTokenTtl = this.calculateAccessTokenTtl(
+        refreshedUpstreamTokens,
       );
+      const upstreamStorageTtl = Math.max(accessTokenTtl, refreshTokenTtl, 1);
+
+      await this.tokenStorage.save(
+        `upstream:${mapping.upstreamTokenKey}`,
+        refreshedUpstreamTokens,
+        upstreamStorageTtl,
+      );
+
+      return await this.issueSwappedTokensForRefresh(
+        mapping.clientId,
+        refreshedUpstreamTokens,
+        mapping.upstreamTokenKey,
+      );
+    } catch (error) {
+      // No tokens reached the client, so hand the refresh token back rather
+      // than logging the user out over a transient upstream failure. Restoring
+      // cannot allow a double redemption: any concurrent attempt was already
+      // rejected, and a rotation that throws returns nothing the caller can
+      // use, even when it failed partway through issuance.
+      try {
+        await this.restoreMapping(jti, mapping);
+      } catch (restoreError) {
+        // Surface the failure that actually broke the refresh, not this one.
+        console.error(
+          `Failed to restore refresh token mapping ${jti}:`,
+          restoreError,
+        );
+      }
+
+      throw error;
     }
-
-    const refreshedUpstreamTokens = await this.refreshUpstreamTokens(
-      upstreamTokens.refreshToken,
-      request.scope,
-    );
-
-    if (refreshedUpstreamTokens.scope.length === 0) {
-      refreshedUpstreamTokens.scope = upstreamTokens.scope;
-    }
-
-    const refreshTokenTtl =
-      refreshedUpstreamTokens.refreshExpiresIn ??
-      this.config.refreshTokenTtl ??
-      DEFAULT_REFRESH_TOKEN_TTL;
-    const accessTokenTtl = this.calculateAccessTokenTtl(
-      refreshedUpstreamTokens,
-    );
-    const upstreamStorageTtl = Math.max(accessTokenTtl, refreshTokenTtl, 1);
-
-    await this.tokenStorage.save(
-      `upstream:${mapping.upstreamTokenKey}`,
-      refreshedUpstreamTokens,
-      upstreamStorageTtl,
-    );
-
-    return await this.issueSwappedTokensForRefresh(
-      mapping.clientId,
-      refreshedUpstreamTokens,
-      mapping.upstreamTokenKey,
-      jti,
-    );
   }
 
   /**
@@ -1164,13 +1186,10 @@ export class OAuthProxy {
     clientId: string,
     upstreamTokens: UpstreamTokenSet,
     upstreamTokenKey: string,
-    oldJti: string,
   ): Promise<TokenResponse> {
     if (!this.jwtIssuer) {
       throw new Error("JWT issuer not initialized");
     }
-
-    await this.tokenStorage.delete(`mapping:${oldJti}`);
 
     const customClaims = await this.extractUpstreamClaims(upstreamTokens);
 
@@ -1416,12 +1435,68 @@ export class OAuthProxy {
   }
 
   /**
+   * Put a claimed refresh-token mapping back after a rotation failed, keeping
+   * whatever lifetime it had left.
+   *
+   * A mapping that is already expired, or that carries no usable expiry, is
+   * dropped instead. Inventing a TTL here would extend the lifetime of a
+   * credential in a security path, and every mapping this proxy writes records
+   * `expiresAt`.
+   */
+  private async restoreMapping(
+    jti: string,
+    mapping: { expiresAt?: Date | string },
+  ): Promise<void> {
+    if (!mapping.expiresAt) {
+      return;
+    }
+
+    const expiresAt = new Date(mapping.expiresAt).getTime();
+
+    if (Number.isNaN(expiresAt)) {
+      return;
+    }
+
+    const ttl = Math.ceil((expiresAt - Date.now()) / 1000);
+
+    if (ttl <= 0) {
+      return;
+    }
+
+    await this.tokenStorage.save(`mapping:${jti}`, mapping, ttl);
+  }
+
+  /**
    * Start periodic cleanup of expired transactions and codes
    */
   private startCleanup(): void {
     this.cleanupInterval = setInterval(() => {
       this.cleanup();
     }, 60000); // Run every minute
+  }
+
+  /**
+   * Atomically claim a token mapping, mirroring `OAuthProxyStateStore`: at most
+   * one caller — across all processes sharing the storage — can receive a given
+   * mapping, which is what makes single use enforceable. Falls back to a
+   * non-atomic get + delete for storages that do not implement `take`.
+   */
+  private async takeMapping(jti: string): Promise<null | unknown> {
+    const key = `mapping:${jti}`;
+
+    if (this.tokenStorage.take) {
+      return await this.tokenStorage.take(key);
+    }
+
+    const stored = await this.tokenStorage.get(key);
+
+    if (stored === null) {
+      return null;
+    }
+
+    await this.tokenStorage.delete(key);
+
+    return stored;
   }
 
   /**

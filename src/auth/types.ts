@@ -418,11 +418,14 @@ export interface TokenStorage {
    * Atomically retrieve a value and delete it, returning `null` if the key was
    * absent. At most one caller may observe a given value.
    *
-   * Optional, but **required for correctness when more than one process shares
-   * this storage**: the OAuth proxy consumes authorization codes and
-   * transactions through it, and single-use enforcement depends on the
-   * atomicity. Without it the proxy falls back to a non-atomic get + delete,
-   * where two concurrent requests can both redeem the same authorization code.
+   * Optional, but **required for correctness whenever concurrent requests can
+   * reach the same record** — which includes a single process, since the check
+   * and the delete straddle an await. The OAuth proxy consumes authorization
+   * codes, transactions and refresh-token mappings through it, and single-use
+   * enforcement depends on the atomicity. Without it the proxy falls back to a
+   * non-atomic get + delete, where two concurrent requests can both redeem the
+   * same authorization code, or both redeem the same refresh token and walk
+   * away with two independent token chains.
    *
    * Most backends expose a suitable primitive: Redis `GETDEL`, DynamoDB
    * `DeleteItem` with `ReturnValues: "ALL_OLD"`, or SQL
