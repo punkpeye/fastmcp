@@ -2,9 +2,9 @@
 
 A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable of handling client sessions.
 
-> [!NOTE]
+> [!IMPORTANT]
 >
-> For a Python implementation, see [FastMCP](https://github.com/jlowin/fastmcp).
+> FastMCP implements the legacy, handshake-based MCP revisions (`2025-11-25` and earlier). It does not support the current specification, [`2026-07-28`](https://modelcontextprotocol.io/specification/2026-07-28/), which made the protocol stateless — no `initialize` handshake and no `Mcp-Session-Id`. For a framework targeting the current spec, use [ViteMCP](https://github.com/vitemcp/server).
 
 ## Features
 
