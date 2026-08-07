@@ -3,7 +3,7 @@
  * Implements RFC 7636 for OAuth 2.0 public clients
  */
 
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 
 import type { PKCEPair } from "../types.js";
 
@@ -84,12 +84,20 @@ export class PKCEUtils {
     }
 
     if (method === "plain") {
-      return verifier === challenge;
+      // `verifier` arrives straight from the token request and `challenge` is
+      // the stored secret, so this is the comparison that has to be constant
+      // time: with `===` the number of matching leading bytes is observable.
+      return equalsConstantTime(verifier, challenge);
     }
 
     if (method === "S256") {
       const computedChallenge = PKCEUtils.generateChallenge(verifier, "S256");
-      return computedChallenge === challenge;
+      // Weaker exposure than the plain branch — `challenge` travelled in the
+      // authorization request and is not secret, so timing here reveals how
+      // close a hash is to a value the attacker already holds. Compared the
+      // same way anyway: one comparison helper is easier to keep correct than
+      // two, and a future caller should not have to know which branch is safe.
+      return equalsConstantTime(computedChallenge, challenge);
     }
 
     // Unknown method
@@ -108,4 +116,19 @@ export class PKCEUtils {
       .replace(/\//g, "_")
       .replace(/=/g, "");
   }
+}
+
+/**
+ * Constant-time string comparison (CWE-208).
+ *
+ * `timingSafeEqual` throws when the two buffers differ in length, so the length
+ * check has to come first — same guard already used for cookie signatures in
+ * `consent.ts` and JWT signatures in `jwtIssuer.ts`. Comparing lengths is not a
+ * leak worth worrying about here: the verifier length is bounded by RFC 7636 to
+ * 43-128 characters and is not secret.
+ */
+function equalsConstantTime(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
 }
