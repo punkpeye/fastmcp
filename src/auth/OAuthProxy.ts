@@ -66,6 +66,14 @@ export class OAuthProxy {
   private consentManager: ConsentManager;
   private jwtIssuer?: JWTIssuer;
   /**
+   * The fallback storage this proxy created for itself, if any. It runs a
+   * cleanup timer that keeps the event loop alive, so `destroy()` has to stop
+   * it — and once the storage is wrapped for encryption it is reachable
+   * through nothing else. A caller-supplied storage is deliberately not
+   * recorded here: its lifetime belongs to the caller.
+   */
+  private ownedTokenStorage: MemoryTokenStorage | null = null;
+  /**
    * Keyed by proxy-issued client_id for authorize/token-exchange lookups and
    * for the defence-in-depth callback checks. A registration never changes
    * after it is written, so caching it locally cannot go stale; it is also
@@ -88,7 +96,12 @@ export class OAuthProxy {
     };
 
     // Set up token storage with encryption by default (matches Python's secure defaults)
-    let storage = config.tokenStorage || new MemoryTokenStorage();
+    let storage = config.tokenStorage;
+
+    if (!storage) {
+      this.ownedTokenStorage = new MemoryTokenStorage();
+      storage = this.ownedTokenStorage;
+    }
 
     // Wrap storage with encryption if not already encrypted
     // Check if it's already an EncryptedTokenStorage instance
@@ -210,6 +223,10 @@ export class OAuthProxy {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
     }
+
+    // Only the storage this proxy created for itself; a caller-supplied one is
+    // theirs to destroy.
+    this.ownedTokenStorage?.destroy();
 
     this.registeredClientsByClientId.clear();
   }
