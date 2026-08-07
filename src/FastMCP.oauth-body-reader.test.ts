@@ -70,7 +70,12 @@ async function startOAuthProxyServer(port: number) {
   return server;
 }
 
-describe("OAuth proxy body readers", () => {
+// Every case here starts a real server, drives it over a raw socket and stops
+// it again, around a vi.waitFor that is itself allowed 3-5 s. Under vitest's
+// default 5 s per-test budget that leaves no headroom — the 5 s waitFor below
+// cannot even reach its own limit without failing the test first — so these
+// went red under parallel load with "Test timed out", not an assertion.
+describe("OAuth proxy body readers", { timeout: 15000 }, () => {
   it.each(["/oauth/register", "/oauth/consent", "/oauth/token"])(
     "settles with 400 invalid_request when the client aborts mid-body (%s)",
     async (path) => {
@@ -175,7 +180,13 @@ describe("OAuth proxy body readers", () => {
       let response = "";
       let serverClosedSocket = false;
       socket.on("data", (chunk) => (response += chunk));
-      socket.once("end", () => {
+      // "close", not "end": the server answers 400 and tears the connection
+      // down while the client is still writing the oversized body, so the
+      // client sees an RST roughly as often as a clean FIN and "end" never
+      // fires on that path. Both outcomes mean the server closed the
+      // connection, and "close" is emitted either way — matching the
+      // aborted-body test below.
+      socket.once("close", () => {
         serverClosedSocket = true;
       });
 
