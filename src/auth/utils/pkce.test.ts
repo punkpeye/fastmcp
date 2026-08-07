@@ -92,6 +92,54 @@ describe("PKCEUtils", () => {
       expect(PKCEUtils.validateChallenge("", "challenge", "S256")).toBe(false);
       expect(PKCEUtils.validateChallenge("verifier", "", "S256")).toBe(false);
     });
+
+    // Regression tests for CWE-208: both branches compare with
+    // crypto.timingSafeEqual behind a length guard, like the cookie signature
+    // in consent.ts and the JWT signature in jwtIssuer.ts.
+    //
+    // These pin behaviour and the length guard, not the timing itself: a
+    // statistical timing assertion is flaky in CI and would be the kind of test
+    // that fails for reasons unrelated to the change.
+    it("rejects a same-length wrong verifier in the plain branch", () => {
+      const verifier = PKCEUtils.generateVerifier();
+      // Flip one character while preserving length → reaches timingSafeEqual
+      // instead of short-circuiting on the length guard.
+      const forged = (verifier[0] === "a" ? "b" : "a") + verifier.slice(1);
+      expect(forged).toHaveLength(verifier.length);
+      expect(forged).not.toBe(verifier);
+
+      expect(PKCEUtils.validateChallenge(forged, verifier, "plain")).toBe(
+        false,
+      );
+      expect(PKCEUtils.validateChallenge(verifier, verifier, "plain")).toBe(
+        true,
+      );
+    });
+
+    // timingSafeEqual throws on length mismatch, so without the length guard
+    // this would be a 500 from the token endpoint instead of invalid_grant.
+    it("rejects a different-length verifier without throwing", () => {
+      const verifier = PKCEUtils.generateVerifier();
+
+      expect(() =>
+        PKCEUtils.validateChallenge(`${verifier}extra`, verifier, "plain"),
+      ).not.toThrow();
+      expect(
+        PKCEUtils.validateChallenge(`${verifier}extra`, verifier, "plain"),
+      ).toBe(false);
+    });
+
+    it("rejects a same-length wrong challenge in the S256 branch", () => {
+      const verifier = PKCEUtils.generateVerifier();
+      const challenge = PKCEUtils.generateChallenge(verifier, "S256");
+      const forged = (challenge[0] === "a" ? "b" : "a") + challenge.slice(1);
+      expect(forged).toHaveLength(challenge.length);
+
+      expect(PKCEUtils.validateChallenge(verifier, forged, "S256")).toBe(false);
+      expect(PKCEUtils.validateChallenge(verifier, challenge, "S256")).toBe(
+        true,
+      );
+    });
   });
 
   describe("generatePair", () => {
