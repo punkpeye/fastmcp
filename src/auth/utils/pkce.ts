@@ -3,9 +3,11 @@
  * Implements RFC 7636 for OAuth 2.0 public clients
  */
 
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { createHash, randomBytes } from "crypto";
 
 import type { PKCEPair } from "../types.js";
+
+import { equalsConstantTime } from "./constantTime.js";
 
 /**
  * PKCE utility class for generating and validating code challenges
@@ -116,19 +118,4 @@ export class PKCEUtils {
       .replace(/\//g, "_")
       .replace(/=/g, "");
   }
-}
-
-/**
- * Constant-time string comparison (CWE-208).
- *
- * `timingSafeEqual` throws when the two buffers differ in length, so the length
- * check has to come first — same guard already used for cookie signatures in
- * `consent.ts` and JWT signatures in `jwtIssuer.ts`. Comparing lengths is not a
- * leak worth worrying about here: the verifier length is bounded by RFC 7636 to
- * 43-128 characters and is not secret.
- */
-function equalsConstantTime(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, "utf8");
-  const bufB = Buffer.from(b, "utf8");
-  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
 }

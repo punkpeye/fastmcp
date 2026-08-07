@@ -3,9 +3,11 @@
  * Handles user consent flow for OAuth authorization
  */
 
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac } from "crypto";
 
 import type { ConsentData, OAuthTransaction } from "../types.js";
+
+import { equalsConstantTime } from "./constantTime.js";
 
 /**
  * Manages consent screens and cookie signing
@@ -279,12 +281,9 @@ export class ConsentManager {
 
       // Constant-time HMAC comparison (CWE-208): a plain `!==` leaks, via
       // timing, how many leading bytes of the cookie signature are correct.
-      const actualBuf = Buffer.from(signature);
-      const expectedBuf = Buffer.from(expectedSignature);
-      if (
-        actualBuf.length !== expectedBuf.length ||
-        !timingSafeEqual(actualBuf, expectedBuf)
-      ) {
+      // Both operands are fixed-length hex digests, so the length check inside
+      // the helper reveals nothing.
+      if (!equalsConstantTime(signature, expectedSignature)) {
         return null;
       }
 

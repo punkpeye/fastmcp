@@ -3,13 +3,14 @@
  * Issues and validates short-lived JWTs that reference upstream provider tokens
  */
 
-import { createHmac, pbkdf2, randomBytes, timingSafeEqual } from "crypto";
+import { createHmac, pbkdf2, randomBytes } from "crypto";
 import { promisify } from "util";
 
 import {
   DEFAULT_ACCESS_TOKEN_TTL,
   DEFAULT_REFRESH_TOKEN_TTL,
 } from "../types.js";
+import { equalsConstantTime } from "./constantTime.js";
 
 const pbkdf2Async = promisify(pbkdf2);
 
@@ -175,14 +176,17 @@ export class JWTIssuer {
       // Verify signature in constant time. A plain `!==` on the base64url HMAC
       // short-circuits on the first differing byte, leaking via response timing
       // how many leading bytes are correct — an oracle for forging a valid MAC
-      // (CWE-208). timingSafeEqual requires equal-length buffers, so a length
-      // mismatch (the signature length is not secret) is rejected up front.
+      // (CWE-208). The signature length is not secret, so the helper's length
+      // check up front costs nothing.
+      //
+      // The empty check is explicit rather than implied: the helper treats two
+      // empty strings as equal, and relying on `sign()` always returning a
+      // fixed-length digest to rule that out would be an accident, not a
+      // guarantee.
       const expectedSignature = this.sign(`${headerB64}.${payloadB64}`);
-      const actualBuf = Buffer.from(signatureB64);
-      const expectedBuf = Buffer.from(expectedSignature);
       if (
-        actualBuf.length !== expectedBuf.length ||
-        !timingSafeEqual(actualBuf, expectedBuf)
+        !signatureB64 ||
+        !equalsConstantTime(signatureB64, expectedSignature)
       ) {
         return {
           error: "Invalid signature",
