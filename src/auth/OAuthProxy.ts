@@ -85,6 +85,7 @@ export class OAuthProxy {
 
   constructor(config: OAuthProxyConfig) {
     this.config = {
+      allowPlainPkce: true,
       authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
       consentRequired: true,
       enableTokenSwap: true, // Enabled by default for security
@@ -200,6 +201,20 @@ export class OAuthProxy {
       );
     }
 
+    // With `plain` the challenge is the verifier, so anyone who sees this
+    // request can replay a stolen code (RFC 7636 §7.2). Refuse it here rather
+    // than at the token endpoint so the client fails before a user is sent
+    // through an upstream consent screen for a doomed transaction.
+    if (
+      params.code_challenge_method === "plain" &&
+      !this.config.allowPlainPkce
+    ) {
+      throw new OAuthProxyError(
+        "invalid_request",
+        "code_challenge_method 'plain' is not supported; use S256",
+      );
+    }
+
     // Create transaction
     const transaction = await this.createTransaction(params);
 
@@ -294,6 +309,19 @@ export class OAuthProxy {
         );
       }
 
+      // Codes are persisted, so one issued while `plain` was still allowed can
+      // outlive the config change that disallowed it. Refuse it rather than
+      // honour a mode this proxy no longer accepts.
+      if (
+        clientCode.codeChallengeMethod === "plain" &&
+        !this.config.allowPlainPkce
+      ) {
+        throw new OAuthProxyError(
+          "invalid_grant",
+          "code_challenge_method 'plain' is not supported; use S256",
+        );
+      }
+
       const valid = PKCEUtils.validateChallenge(
         request.code_verifier,
         clientCode.codeChallenge,
@@ -382,7 +410,9 @@ export class OAuthProxy {
   } {
     return {
       authorizationEndpoint: `${this.config.baseUrl}/oauth/authorize`,
-      codeChallengeMethodsSupported: ["S256", "plain"],
+      codeChallengeMethodsSupported: this.config.allowPlainPkce
+        ? ["S256", "plain"]
+        : ["S256"],
       grantTypesSupported: ["authorization_code", "refresh_token"],
       issuer: this.config.baseUrl,
       registrationEndpoint: `${this.config.baseUrl}/oauth/register`,

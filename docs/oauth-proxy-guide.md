@@ -263,6 +263,7 @@ interface OAuthProxyConfig {
   redirectPath?: string; // default: "/oauth/callback"
   scopes?: string[]; // provider-specific defaults
   forwardPkce?: boolean; // default: false
+  allowPlainPkce?: boolean; // default: true — set false to require S256
   consentRequired?: boolean; // default: true
   consentSigningKey?: string; // auto-generated if not provided
   allowedRedirectUriPatterns?: string[];

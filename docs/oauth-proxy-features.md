@@ -28,7 +28,8 @@ Enhanced security through dual PKCE validation:
 
 - **Client-to-Proxy PKCE**: Validates client's code verifier
 - **Proxy-to-Upstream PKCE**: Protects communication with OAuth provider
-- Supports both S256 (SHA-256) and plain challenge methods
+- Supports both S256 (SHA-256) and plain challenge methods; set
+  `allowPlainPkce: false` to require S256 (see [Requiring S256](#requiring-s256))
 - Prevents authorization code interception attacks
 
 ### 4. User Consent Flow
@@ -295,6 +296,29 @@ Optional PKCE forwarding to upstream provider:
 
 - `forwardPkce: false` (default): Proxy generates own PKCE
 - `forwardPkce: true`: Forwards client's PKCE to upstream
+
+#### Requiring S256
+
+The proxy accepts both `S256` and `plain` code challenge methods. With `plain`
+the challenge _is_ the verifier, so it travels in the authorization request in
+the clear and anyone who observes that request — a proxy, a server log, browser
+history — can redeem a stolen authorization code. RFC 7636 §7.2 says to prefer
+`S256`; OAuth 2.1 §7.5.2 and the MCP authorization spec require it.
+
+Set `allowPlainPkce: false` to refuse `plain`. It is then dropped from
+`code_challenge_methods_supported` in the discovery metadata, rejected with
+`invalid_request` at `/oauth/authorize`, and any code already issued under it is
+refused at `/oauth/token`:
+
+```typescript
+const authProxy = new OAuthProxy({
+  // ... other config
+  allowPlainPkce: false, // require S256
+});
+```
+
+It defaults to `true` because turning it off breaks clients that still ask for
+`plain`. Recommended for new deployments.
 
 ### 12. Refresh Token Support
 
