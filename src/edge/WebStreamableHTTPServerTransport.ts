@@ -9,7 +9,9 @@
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   isInitializeRequest,
+  isJSONRPCError,
   isJSONRPCNotification,
+  isJSONRPCRequest,
   isJSONRPCResponse,
   JSONRPCMessage,
   JSONRPCMessageSchema,
@@ -147,9 +149,16 @@ export class WebStreamableHTTPServerTransport implements Transport {
     this._pendingResponses.push(message);
 
     // Send to SSE streams
-    const streamId = options?.relatedRequestId
-      ? this._requestToStreamMapping.get(options.relatedRequestId)
-      : this._standaloneSseStreamId;
+    let requestId = options?.relatedRequestId;
+    if (isJSONRPCResponse(message) || isJSONRPCError(message)) {
+      // Responses are routed by the id of the request they answer
+      requestId = message.id;
+    }
+
+    const streamId =
+      requestId === undefined
+        ? this._standaloneSseStreamId
+        : this._requestToStreamMapping.get(requestId);
 
     if (streamId) {
       const writer = this._streamMapping.get(streamId);
@@ -163,6 +172,21 @@ export class WebStreamableHTTPServerTransport implements Transport {
             await this.writeSSEEventWithId(writer, eventId, message);
           } else {
             await this.writeSSEEvent(writer, message);
+          }
+
+          // Close the POST stream once all of its requests are answered
+          if (
+            requestId !== undefined &&
+            (isJSONRPCResponse(message) || isJSONRPCError(message))
+          ) {
+            this._requestToStreamMapping.delete(requestId);
+            const streamInUse = Array.from(
+              this._requestToStreamMapping.values(),
+            ).includes(streamId);
+            if (!streamInUse) {
+              this._streamMapping.delete(streamId);
+              await writer.close();
+            }
           }
         } catch (error) {
           this.onerror?.(
@@ -423,6 +447,28 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
 
+    const isOnlyNotificationsOrResponses = messages.every(
+      (msg) => isJSONRPCNotification(msg) || isJSONRPCResponse(msg),
+    );
+    const useJsonResponse =
+      this._enableJsonResponse &&
+      Boolean(acceptHeader?.includes("application/json"));
+
+    // Open the SSE response stream before dispatching: the SDK produces
+    // responses asynchronously and send() routes them back by request id.
+    let sseReadable: ReadableStream<Uint8Array> | undefined;
+    if (!isOnlyNotificationsOrResponses && !useJsonResponse) {
+      const { readable, writable } = new TransformStream<Uint8Array>();
+      const streamId = `post_${Date.now()}`;
+      this._streamMapping.set(streamId, writable.getWriter());
+      for (const message of messages) {
+        if (isJSONRPCRequest(message)) {
+          this._requestToStreamMapping.set(message.id, streamId);
+        }
+      }
+      sseReadable = readable;
+    }
+
     // Process messages through the transport
     this._pendingResponses = [];
     for (const message of messages) {
@@ -430,11 +476,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     }
 
     // If all messages are notifications/responses, return 202
-    if (
-      messages.every(
-        (msg) => isJSONRPCNotification(msg) || isJSONRPCResponse(msg),
-      )
-    ) {
+    if (isOnlyNotificationsOrResponses) {
       return new Response(null, {
         headers: this.getResponseHeaders(),
         status: 202,
@@ -442,10 +484,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     }
 
     // Return JSON response if enabled and client accepts it
-    if (
-      this._enableJsonResponse &&
-      acceptHeader?.includes("application/json")
-    ) {
+    if (useJsonResponse) {
       // Wait a tick for responses to be collected
       await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -464,25 +503,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     }
 
     // Return SSE stream
-    const { readable, writable } = new TransformStream<Uint8Array>();
-    const writer = writable.getWriter();
-    const streamId = `post_${Date.now()}`;
-    this._streamMapping.set(streamId, writer);
-
-    // Send any pending responses as SSE events
-    (async () => {
-      try {
-        for (const response of this._pendingResponses) {
-          await this.writeSSEEvent(writer, response);
-        }
-      } catch (error) {
-        this.onerror?.(
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    })();
-
-    return new Response(readable, {
+    return new Response(sseReadable ?? null, {
       headers: {
         ...this.getResponseHeaders(),
         "Cache-Control": "no-cache, no-transform",
