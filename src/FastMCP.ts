@@ -2443,11 +2443,15 @@ export class FastMCPSession<
           result = ContentResultZodSchema.parse({
             content: [{ text: maybeStringResult, type: "text" }],
           });
-        } else if ("type" in maybeStringResult) {
-          result = ContentResultZodSchema.parse({
-            content: [maybeStringResult],
-          });
-        } else if ("content" in maybeStringResult) {
+        } else if (
+          "content" in maybeStringResult &&
+          Array.isArray(maybeStringResult.content)
+        ) {
+          // Explicit ContentResult: the tool returned MCP content directly
+          // (`{ content: [...], structuredContent? }`). An array-valued
+          // `content` is the ContentResult signature, so this takes precedence
+          // over outputSchema, letting a tool ship custom content blocks
+          // alongside its structured payload.
           result = ContentResultZodSchema.parse(maybeStringResult);
           if (result.structuredContent !== undefined && tool.outputSchema) {
             result.structuredContent = await this.#validateStructuredContent(
@@ -2457,6 +2461,12 @@ export class FastMCPSession<
             );
           }
         } else if (tool.outputSchema) {
+          // A tool that declares an outputSchema returns its structured payload
+          // directly, so outputSchema wins over the `type`/`content` shorthands
+          // below. Without this precedence a payload whose top-level shape
+          // happens to include a `type` key (the common discriminated-union
+          // case) or a non-array `content` key would be misrouted as MCP
+          // content and never surface as structuredContent.
           const structuredContent = await this.#validateStructuredContent(
             tool,
             maybeStringResult,
@@ -2471,6 +2481,12 @@ export class FastMCPSession<
             ],
             structuredContent,
           });
+        } else if ("type" in maybeStringResult) {
+          result = ContentResultZodSchema.parse({
+            content: [maybeStringResult],
+          });
+        } else if ("content" in maybeStringResult) {
+          result = ContentResultZodSchema.parse(maybeStringResult);
         } else {
           result = ContentResultZodSchema.parse(maybeStringResult);
         }
