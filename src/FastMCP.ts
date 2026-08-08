@@ -1219,7 +1219,14 @@ export interface RouteOptions {
   public?: boolean;
 }
 
-type Authenticate<T> = (request: http.IncomingMessage) => Promise<T>;
+/**
+ * Returning a nullish value signals that authentication failed; FastMCP turns
+ * it into a 401 rather than creating a session. This is what the built-in
+ * OAuth `AuthProvider` does for a missing or invalid bearer token.
+ */
+type Authenticate<T> = (
+  request: http.IncomingMessage,
+) => Promise<null | T | undefined>;
 
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
 
@@ -3045,9 +3052,10 @@ export class FastMCP<
 
       if (this.#authenticate) {
         try {
-          auth = await this.#authenticate(
-            undefined as unknown as http.IncomingMessage,
-          );
+          auth =
+            (await this.#authenticate(
+              undefined as unknown as http.IncomingMessage,
+            )) ?? undefined;
         } catch (error) {
           this.#logger.error(
             "[FastMCP error] Authentication failed for stdio transport:",
@@ -3145,14 +3153,9 @@ export class FastMCP<
             let auth: T | undefined;
 
             if (this.#authenticate) {
-              auth = await this.#authenticate(request);
-
-              // In stateless mode, authentication is REQUIRED
-              if (auth === undefined || auth === null) {
-                throw this.#createUnauthorizedResponse(
-                  "Authentication required",
-                );
-              }
+              auth = this.#requireAuthenticated(
+                await this.#authenticate(request),
+              );
             }
 
             // Extract session ID from headers
@@ -3213,7 +3216,9 @@ export class FastMCP<
             let auth: T | undefined;
 
             if (this.#authenticate) {
-              auth = await this.#authenticate(request);
+              auth = this.#requireAuthenticated(
+                await this.#authenticate(request),
+              );
             }
 
             // Extract session ID from headers
@@ -4079,6 +4084,7 @@ export class FastMCP<
       session.promptsListChanged(prompts);
     }
   }
+
   #removeSession(session: FastMCPSession<T>): void {
     const sessionIndex = this.#sessions.indexOf(session);
 
@@ -4089,6 +4095,31 @@ export class FastMCP<
       });
     }
   }
+
+  /**
+   * Rejects a failed authentication result before it can become a session.
+   *
+   * Authentication is REQUIRED whenever an `authenticate` function is
+   * configured. mcp-proxy gates the HTTP Stream endpoint before `createServer`
+   * runs, but it does not gate the SSE endpoint it serves at `/sse` by default:
+   * `handleSSERequest` never receives `authenticate`. Throwing here is what
+   * stops `/sse` from handing out a session — with access to every tool, since
+   * `#createSession` skips `canAccess` filtering when `auth` is falsy — to a
+   * client that `/mcp` would have answered with a 401.
+   *
+   * The falsy test matches mcp-proxy's own check so that both endpoints agree
+   * on what counts as a failed authentication. Returning a nullish value is the
+   * idiomatic way to signal failure, and is what the built-in OAuth
+   * `AuthProvider` does for a missing or invalid bearer token.
+   */
+  #requireAuthenticated<TAuth>(auth: TAuth): NonNullable<TAuth> {
+    if (!auth) {
+      throw this.#createUnauthorizedResponse("Authentication required");
+    }
+
+    return auth as NonNullable<TAuth>;
+  }
+
   /**
    * Notifies all sessions that the resources list has changed.
    */
