@@ -2,6 +2,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   CallToolRequestSchema,
@@ -29,6 +30,8 @@ import {
   RootsListChangedNotificationSchema,
   Tool as SDKTool,
   ServerCapabilities,
+  ServerNotification,
+  ServerRequest,
   SetLevelRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
@@ -55,9 +58,13 @@ import type {
 
 export interface Logger {
   debug(...args: unknown[]): void;
+
   error(...args: unknown[]): void;
+
   info(...args: unknown[]): void;
+
   log(...args: unknown[]): void;
+
   warn(...args: unknown[]): void;
 }
 
@@ -423,6 +430,10 @@ function assertToolSchemas(tool: {
     assertStandardSchema(tool.name, "outputSchema", tool.outputSchema);
   }
 }
+
+const STREAM_KEEPALIVE_LOGGER = "fastmcp-keepalive";
+
+const STREAM_KEEPALIVE_DEFAULT_INTERVAL_MS = 20_000;
 
 const TextContentZodSchema = z
   .object({
@@ -1050,6 +1061,36 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
     enabled?: boolean;
   };
   /**
+   * Writes periodically to an in-flight tool call's own response stream, so a
+   * proxy or load balancer does not close the connection as idle while a
+   * long-running tool produces no output.
+   *
+   * Unlike {@link ServerOptions.ping}, these messages are related to the
+   * request being served, so they travel on that request's stream instead of
+   * the standalone server-to-client stream. That makes them the only option
+   * that works with `httpStream.stateless`, where no standing server-to-client
+   * stream exists.
+   */
+  streamKeepalive?: {
+    /**
+     * Whether to write keepalives. Opt-in.
+     * @default false
+     */
+    enabled?: boolean;
+    /**
+     * Interval between keepalives. Keep it comfortably below the shortest idle
+     * timeout on the path (AWS ALB defaults to 60s). Values below 1ms fall back
+     * to the default.
+     * @default 20000 (20s)
+     */
+    intervalMs?: number;
+    /**
+     * Level reported on the keepalive notification.
+     * @default 'debug'
+     */
+    logLevel?: LoggingLevel;
+  };
+  /**
    * General utilities
    */
   utils?: {
@@ -1168,11 +1209,15 @@ export interface FastMCPRequest<
   auth?: T;
   body?: unknown;
   headers: http.IncomingHttpHeaders;
+
   json(): Promise<unknown>;
+
   method: string;
   params: Record<string, string>;
   query: Record<string, string | string[]>;
+
   text(): Promise<string>;
+
   url: string;
 }
 
@@ -1181,9 +1226,13 @@ export interface FastMCPRequest<
  */
 export interface FastMCPResponse {
   end(data?: Buffer | string): void;
+
   json(data: unknown): void;
+
   send(data: Buffer | string): void;
+
   setHeader(name: string, value: number | string | string[]): FastMCPResponse;
+
   status(code: number): FastMCPResponse;
 }
 
@@ -1231,30 +1280,38 @@ type Authenticate<T> = (
 type FastMCPSessionAuth = Record<string, unknown> | undefined;
 
 class FastMCPSessionEventEmitter extends FastMCPSessionEventEmitterBase {}
+
 export class FastMCPSession<
   T extends FastMCPSessionAuth = FastMCPSessionAuth,
 > extends FastMCPSessionEventEmitter {
   public get clientCapabilities(): ClientCapabilities | null {
     return this.#clientCapabilities ?? null;
   }
+
   public get isReady(): boolean {
     return this.#connectionState === "ready";
   }
+
   public get loggingLevel(): LoggingLevel {
     return this.#loggingLevel;
   }
+
   public get roots(): Root[] {
     return this.#roots;
   }
+
   public get server(): Server {
     return this.#server;
   }
+
   public get sessionId(): string | undefined {
     return this.#sessionId;
   }
+
   public set sessionId(value: string | undefined) {
     this.#sessionId = value;
   }
+
   #auth: T | undefined;
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
@@ -1292,6 +1349,8 @@ export class FastMCPSession<
    */
   #stateless: boolean;
 
+  #streamKeepaliveConfig: ServerOptions<T>["streamKeepalive"];
+
   /**
    * Resource URIs the connected client has subscribed to via
    * `resources/subscribe`. Used to scope `notifications/resources/updated`
@@ -1314,6 +1373,7 @@ export class FastMCPSession<
     roots,
     sessionId,
     stateless = false,
+    streamKeepalive,
     tools,
     transportType,
     utils,
@@ -1331,6 +1391,7 @@ export class FastMCPSession<
     roots?: ServerOptions<T>["roots"];
     sessionId?: string;
     stateless?: boolean;
+    streamKeepalive?: ServerOptions<T>["streamKeepalive"];
     tools: Tool<T>[];
     transportType?: "httpStream" | "stdio";
     utils?: ServerOptions<T>["utils"];
@@ -1345,6 +1406,7 @@ export class FastMCPSession<
     this.#rootsConfig = roots;
     this.#sessionId = sessionId;
     this.#stateless = stateless;
+    this.#streamKeepaliveConfig = streamKeepalive;
     this.#needsEventLoopFlush = transportType === "httpStream";
 
     if (tools.length) {
@@ -1765,6 +1827,67 @@ export class FastMCPSession<
     };
   }
 
+  /**
+   * Periodically writes to the response stream of an in-flight tool call, so an
+   * idle-connection timeout (proxy, load balancer) does not close it while a
+   * long-running tool produces no output of its own.
+   *
+   * The notification is related to the tool call, so it travels on that
+   * request's own stream, which is the only server-to-client route that exists
+   * when running stateless.
+   *
+   * @returns a function that stops the keepalive.
+   */
+  #startStreamKeepalive(
+    extra: Pick<
+      RequestHandlerExtra<ServerRequest, ServerNotification>,
+      "sendNotification" | "signal"
+    >,
+    toolName: string,
+  ): () => void {
+    const config = this.#streamKeepaliveConfig;
+
+    if (!config?.enabled) {
+      return () => {};
+    }
+
+    // A non-positive interval would fire on every tick and flood the stream.
+    const intervalMs =
+      config.intervalMs && config.intervalMs > 0
+        ? config.intervalMs
+        : STREAM_KEEPALIVE_DEFAULT_INTERVAL_MS;
+
+    const timer = setInterval(() => {
+      extra
+        .sendNotification({
+          method: "notifications/message",
+          params: {
+            data: { message: `keepalive while '${toolName}' is running` },
+            level: config.logLevel ?? "debug",
+            logger: STREAM_KEEPALIVE_LOGGER,
+          },
+        })
+        .catch((error: unknown) => {
+          // Left running: the caller stops it when the request finishes, and a
+          // transient write failure should not silence the connection.
+          this.#logger.debug(
+            `[FastMCP debug] stream keepalive for '${toolName}' failed:`,
+            error instanceof Error ? error.message : String(error),
+          );
+        });
+    }, intervalMs);
+
+    timer.unref?.();
+
+    const stop = () => clearInterval(timer);
+
+    // A cancelled or disconnected request stops waiting for the tool, so the
+    // keepalive must not outlive the abort.
+    extra.signal?.addEventListener("abort", stop, { once: true });
+
+    return stop;
+  }
+
   async #validateStructuredContent(
     tool: Tool<T>,
     value: Record<string, unknown>,
@@ -1944,11 +2067,13 @@ export class FastMCPSession<
       });
     });
   }
+
   private setupErrorHandling() {
     this.#server.onerror = (error) => {
       this.#logger.error("[FastMCP error]", error);
     };
   }
+
   private setupLoggingHandlers() {
     this.#server.setRequestHandler(SetLevelRequestSchema, (request) => {
       this.#loggingLevel = request.params.level;
@@ -1956,6 +2081,7 @@ export class FastMCPSession<
       return {};
     });
   }
+
   private setupPromptHandlers() {
     let cachedPromptsList: ListPromptsResult["prompts"] | null = null;
 
@@ -2285,226 +2411,240 @@ export class FastMCPSession<
       };
     });
 
-    this.#server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const tool = toolsMap.get(request.params.name);
+    this.#server.setRequestHandler(
+      CallToolRequestSchema,
+      async (request, extra) => {
+        const tool = toolsMap.get(request.params.name);
 
-      if (!tool) {
-        throw new McpError(
-          ErrorCode.MethodNotFound,
-          `Unknown tool: ${request.params.name}`,
-        );
-      }
-
-      let args: unknown = undefined;
-
-      if (tool.parameters) {
-        const parsed = await tool.parameters["~standard"].validate(
-          request.params.arguments,
-        );
-
-        if (parsed.issues) {
-          const friendlyErrors = this.#formatSchemaIssues(parsed.issues);
-
+        if (!tool) {
           throw new McpError(
-            ErrorCode.InvalidParams,
-            `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`,
+            ErrorCode.MethodNotFound,
+            `Unknown tool: ${request.params.name}`,
           );
         }
 
-        args = parsed.value;
-      }
+        let args: unknown = undefined;
 
-      const progressToken = request.params?._meta?.progressToken;
+        if (tool.parameters) {
+          const parsed = await tool.parameters["~standard"].validate(
+            request.params.arguments,
+          );
 
-      let result: ContentResult;
+          if (parsed.issues) {
+            const friendlyErrors = this.#formatSchemaIssues(parsed.issues);
 
-      try {
-        const reportProgress = async (progress: Progress) => {
-          // Progress notifications must reference the progressToken supplied by
-          // the client in the initiating request. If the client did not request
-          // progress, there is nothing to associate the update with, and sending
-          // a notification without a token produces an invalid message.
-          if (progressToken === undefined) {
-            return;
-          }
-
-          try {
-            await this.#server.notification({
-              method: "notifications/progress",
-              params: {
-                ...progress,
-                progressToken,
-              },
-            });
-
-            if (this.#needsEventLoopFlush) {
-              await new Promise((resolve) => setImmediate(resolve));
-            }
-          } catch (progressError) {
-            this.#logger.warn(
-              `[FastMCP warning] Failed to report progress for tool '${request.params.name}':`,
-              progressError instanceof Error
-                ? progressError.message
-                : String(progressError),
+            throw new McpError(
+              ErrorCode.InvalidParams,
+              `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`,
             );
           }
-        };
 
-        const log = this.#createLog();
-
-        // Create a promise for tool execution
-        // Streams partial results while a tool is still executing
-        // Enables progressive rendering and real-time feedback
-        const streamContent = async (content: Content | Content[]) => {
-          const contentArray = Array.isArray(content) ? content : [content];
-
-          try {
-            await this.#server.notification({
-              method: "notifications/tool/streamContent",
-              params: {
-                content: contentArray,
-                toolName: request.params.name,
-              },
-            });
-
-            if (this.#needsEventLoopFlush) {
-              await new Promise((resolve) => setImmediate(resolve));
-            }
-          } catch (streamError) {
-            this.#logger.warn(
-              `[FastMCP warning] Failed to stream content for tool '${request.params.name}':`,
-              streamError instanceof Error
-                ? streamError.message
-                : String(streamError),
-            );
-          }
-        };
-
-        if (this.#onToolCall) {
-          await this.#onToolCall({
-            arguments: (args ?? {}) as Record<string, unknown>,
-            toolName: request.params.name,
-          });
+          args = parsed.value;
         }
 
-        const executeToolPromise = tool.execute(args, {
-          client: {
-            version: this.#server.getClientVersion(),
-          },
-          elicit: (
-            params: ElicitRequestFormParams | ElicitRequestURLParams,
-            options?: RequestOptions,
-          ) => this.#server.elicitInput(params, options),
-          log,
-          reportProgress,
-          requestId:
-            typeof request.params?._meta?.requestId === "string"
-              ? request.params._meta.requestId
-              : undefined,
-          session: this.#auth,
-          sessionId: this.#sessionId,
-          streamContent,
-        });
+        const progressToken = request.params?._meta?.progressToken;
 
-        // Handle timeout if specified
-        const maybeStringResult = (await (tool.timeoutMs
-          ? Promise.race([
-              executeToolPromise,
-              new Promise<never>((_, reject) => {
-                const timeoutId = setTimeout(() => {
-                  reject(
-                    new UserError(
-                      `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
-                    ),
-                  );
-                }, tool.timeoutMs);
+        let result: ContentResult;
 
-                // If promise resolves first
-                executeToolPromise.then(
-                  () => clearTimeout(timeoutId),
-                  () => clearTimeout(timeoutId),
-                );
-              }),
-            ])
-          : executeToolPromise)) as
-          | AudioContent
-          | ContentResult
-          | ImageContent
-          | null
-          | Record<string, unknown>
-          | ResourceContent
-          | ResourceLink
-          | string
-          | TextContent
-          | undefined;
+        try {
+          const reportProgress = async (progress: Progress) => {
+            // Progress notifications must reference the progressToken supplied by
+            // the client in the initiating request. If the client did not request
+            // progress, there is nothing to associate the update with, and sending
+            // a notification without a token produces an invalid message.
+            if (progressToken === undefined) {
+              return;
+            }
 
-        // Without this test, we are running into situations where the last progress update is not reported.
-        // See the 'reports multiple progress updates without buffering' test in FastMCP.test.ts before refactoring.
-        await delay(1);
+            try {
+              await this.#server.notification({
+                method: "notifications/progress",
+                params: {
+                  ...progress,
+                  progressToken,
+                },
+              });
 
-        if (maybeStringResult === undefined || maybeStringResult === null) {
-          result = ContentResultZodSchema.parse({
-            content: [],
-          });
-        } else if (typeof maybeStringResult === "string") {
-          result = ContentResultZodSchema.parse({
-            content: [{ text: maybeStringResult, type: "text" }],
-          });
-        } else if ("type" in maybeStringResult) {
-          result = ContentResultZodSchema.parse({
-            content: [maybeStringResult],
-          });
-        } else if ("content" in maybeStringResult) {
-          result = ContentResultZodSchema.parse(maybeStringResult);
-          if (result.structuredContent !== undefined && tool.outputSchema) {
-            result.structuredContent = await this.#validateStructuredContent(
-              tool,
-              result.structuredContent,
-              request.params.name,
-            );
+              if (this.#needsEventLoopFlush) {
+                await new Promise((resolve) => setImmediate(resolve));
+              }
+            } catch (progressError) {
+              this.#logger.warn(
+                `[FastMCP warning] Failed to report progress for tool '${request.params.name}':`,
+                progressError instanceof Error
+                  ? progressError.message
+                  : String(progressError),
+              );
+            }
+          };
+
+          const log = this.#createLog();
+
+          // Create a promise for tool execution
+          // Streams partial results while a tool is still executing
+          // Enables progressive rendering and real-time feedback
+          const streamContent = async (content: Content | Content[]) => {
+            const contentArray = Array.isArray(content) ? content : [content];
+
+            try {
+              await this.#server.notification({
+                method: "notifications/tool/streamContent",
+                params: {
+                  content: contentArray,
+                  toolName: request.params.name,
+                },
+              });
+
+              if (this.#needsEventLoopFlush) {
+                await new Promise((resolve) => setImmediate(resolve));
+              }
+            } catch (streamError) {
+              this.#logger.warn(
+                `[FastMCP warning] Failed to stream content for tool '${request.params.name}':`,
+                streamError instanceof Error
+                  ? streamError.message
+                  : String(streamError),
+              );
+            }
+          };
+
+          if (this.#onToolCall) {
+            await this.#onToolCall({
+              arguments: (args ?? {}) as Record<string, unknown>,
+              toolName: request.params.name,
+            });
           }
-        } else if (tool.outputSchema) {
-          const structuredContent = await this.#validateStructuredContent(
-            tool,
-            maybeStringResult,
+
+          const executeToolPromise = Promise.resolve(
+            tool.execute(args, {
+              client: {
+                version: this.#server.getClientVersion(),
+              },
+              elicit: (
+                params: ElicitRequestFormParams | ElicitRequestURLParams,
+                options?: RequestOptions,
+              ) => this.#server.elicitInput(params, options),
+              log,
+              reportProgress,
+              requestId:
+                typeof request.params?._meta?.requestId === "string"
+                  ? request.params._meta.requestId
+                  : undefined,
+              session: this.#auth,
+              sessionId: this.#sessionId,
+              streamContent,
+            }),
+          );
+
+          // Started only once execute has returned a promise, so a tool that
+          // throws synchronously cannot leave a timer behind.
+          const stopStreamKeepalive = this.#startStreamKeepalive(
+            extra,
             request.params.name,
           );
-          result = ContentResultZodSchema.parse({
+
+          // Handle timeout if specified
+          const maybeStringResult = (await (
+            tool.timeoutMs
+              ? Promise.race([
+                  executeToolPromise,
+                  new Promise<never>((_, reject) => {
+                    const timeoutId = setTimeout(() => {
+                      reject(
+                        new UserError(
+                          `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
+                        ),
+                      );
+                    }, tool.timeoutMs);
+
+                    // If promise resolves first
+                    executeToolPromise.then(
+                      () => clearTimeout(timeoutId),
+                      () => clearTimeout(timeoutId),
+                    );
+                  }),
+                ])
+              : executeToolPromise
+          ).finally(stopStreamKeepalive)) as
+            | AudioContent
+            | ContentResult
+            | ImageContent
+            | null
+            | Record<string, unknown>
+            | ResourceContent
+            | ResourceLink
+            | string
+            | TextContent
+            | undefined;
+
+          // Without this test, we are running into situations where the last progress update is not reported.
+          // See the 'reports multiple progress updates without buffering' test in FastMCP.test.ts before refactoring.
+          await delay(1);
+
+          if (maybeStringResult === undefined || maybeStringResult === null) {
+            result = ContentResultZodSchema.parse({
+              content: [],
+            });
+          } else if (typeof maybeStringResult === "string") {
+            result = ContentResultZodSchema.parse({
+              content: [{ text: maybeStringResult, type: "text" }],
+            });
+          } else if ("type" in maybeStringResult) {
+            result = ContentResultZodSchema.parse({
+              content: [maybeStringResult],
+            });
+          } else if ("content" in maybeStringResult) {
+            result = ContentResultZodSchema.parse(maybeStringResult);
+            if (result.structuredContent !== undefined && tool.outputSchema) {
+              result.structuredContent = await this.#validateStructuredContent(
+                tool,
+                result.structuredContent,
+                request.params.name,
+              );
+            }
+          } else if (tool.outputSchema) {
+            const structuredContent = await this.#validateStructuredContent(
+              tool,
+              maybeStringResult,
+              request.params.name,
+            );
+            result = ContentResultZodSchema.parse({
+              content: [
+                {
+                  text: JSON.stringify(structuredContent),
+                  type: "text",
+                },
+              ],
+              structuredContent,
+            });
+          } else {
+            result = ContentResultZodSchema.parse(maybeStringResult);
+          }
+        } catch (error) {
+          if (error instanceof UserError) {
+            return {
+              content: [{ text: error.message, type: "text" }],
+              isError: true,
+              ...(error.extras ? { structuredContent: error.extras } : {}),
+            };
+          }
+
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          return {
             content: [
               {
-                text: JSON.stringify(structuredContent),
+                text: `Tool '${request.params.name}' execution failed: ${errorMessage}`,
                 type: "text",
               },
             ],
-            structuredContent,
-          });
-        } else {
-          result = ContentResultZodSchema.parse(maybeStringResult);
-        }
-      } catch (error) {
-        if (error instanceof UserError) {
-          return {
-            content: [{ text: error.message, type: "text" }],
             isError: true,
-            ...(error.extras ? { structuredContent: error.extras } : {}),
           };
         }
 
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        return {
-          content: [
-            {
-              text: `Tool '${request.params.name}' execution failed: ${errorMessage}`,
-              type: "text",
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      return result;
-    });
+        return result;
+      },
+    );
   }
 }
 
@@ -2613,6 +2753,7 @@ export class FastMCP<
   public get sessions(): FastMCPSession<T>[] {
     return this.#sessions;
   }
+
   #authenticate: Authenticate<T> | undefined;
   #honoApp = new Hono();
   #httpStreamServer: null | SSEServer = null;
@@ -2666,6 +2807,7 @@ export class FastMCP<
       this.#promptsListChanged(this.#prompts);
     }
   }
+
   /**
    * Adds prompts to the server.
    */
@@ -2680,6 +2822,7 @@ export class FastMCP<
       this.#promptsListChanged(this.#prompts);
     }
   }
+
   /**
    * Adds a resource to the server.
    */
@@ -2691,6 +2834,7 @@ export class FastMCP<
       this.#resourcesListChanged(this.#resources);
     }
   }
+
   /**
    * Adds resources to the server.
    */
@@ -2707,6 +2851,7 @@ export class FastMCP<
       this.#resourcesListChanged(this.#resources);
     }
   }
+
   /**
    * Adds a resource template to the server.
    */
@@ -2722,6 +2867,7 @@ export class FastMCP<
       this.#resourceTemplatesListChanged(this.#resourcesTemplates);
     }
   }
+
   /**
    * Adds resource templates to the server.
    */
@@ -2740,6 +2886,7 @@ export class FastMCP<
       this.#resourceTemplatesListChanged(this.#resourcesTemplates);
     }
   }
+
   /**
    * Adds a tool to the server.
    */
@@ -2753,6 +2900,7 @@ export class FastMCP<
       this.#toolsListChanged(this.#tools);
     }
   }
+
   /**
    * Adds tools to the server.
    */
@@ -2891,6 +3039,7 @@ export class FastMCP<
 
     throw new UnexpectedStateError(`Resource not found: ${uri}`, { uri });
   }
+
   /**
    * Returns the underlying Hono app instance for direct access to Hono's native API.
    * This allows you to add custom routes, middleware, and handlers using Hono's standard methods.
@@ -2915,6 +3064,7 @@ export class FastMCP<
   public getApp(): Hono {
     return this.#honoApp;
   }
+
   /**
    * Removes a prompt from the server.
    */
@@ -2924,6 +3074,7 @@ export class FastMCP<
       this.#promptsListChanged(this.#prompts);
     }
   }
+
   /**
    * Removes prompts from the server.
    */
@@ -2945,6 +3096,7 @@ export class FastMCP<
       this.#resourcesListChanged(this.#resources);
     }
   }
+
   /**
    * Removes resources from the server.
    */
@@ -2956,6 +3108,7 @@ export class FastMCP<
       this.#resourcesListChanged(this.#resources);
     }
   }
+
   /**
    * Removes a resource template from the server.
    */
@@ -2967,6 +3120,7 @@ export class FastMCP<
       this.#resourceTemplatesListChanged(this.#resourcesTemplates);
     }
   }
+
   /**
    * Removes resource templates from the server.
    */
@@ -3076,6 +3230,7 @@ export class FastMCP<
         resources: this.#resources,
         resourcesTemplates: this.#resourcesTemplates,
         roots: this.#options.roots,
+        streamKeepalive: this.#options.streamKeepalive,
         tools: this.#tools,
         transportType: "stdio",
         utils: this.#options.utils,
@@ -3340,6 +3495,7 @@ export class FastMCP<
       roots: this.#options.roots,
       sessionId,
       stateless,
+      streamKeepalive: this.#options.streamKeepalive,
       tools: allowedTools,
       transportType: "httpStream",
       utils: this.#options.utils,
@@ -4128,6 +4284,7 @@ export class FastMCP<
       session.resourcesListChanged(resources);
     }
   }
+
   /**
    * Notifies all sessions that the resource templates list has changed.
    */
@@ -4136,6 +4293,7 @@ export class FastMCP<
       session.resourceTemplatesListChanged(templates);
     }
   }
+
   /**
    * Notifies all sessions that the tools list has changed.
    */

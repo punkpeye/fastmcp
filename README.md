@@ -903,6 +903,52 @@ By default, ping behavior is optimized for each transport type:
 
 This configurable approach helps reduce log verbosity and optimize performance for different usage scenarios.
 
+#### Keeping Long Tool Calls Alive (`streamKeepalive`)
+
+Pings travel on the standalone server-to-client stream, so they never keep an
+individual tool call's connection open — and in `stateless` mode that stream does
+not exist at all. A tool that runs for minutes without producing output leaves
+its response connection silent, and an idle-connection timeout in front of the
+server (AWS ALB defaults to 60 seconds) closes it before the result is written.
+
+This applies to **both** session modes. A stateful deployment keeps its
+standalone stream warm with pings while the connection carrying the tool call
+goes idle and is closed anyway; stateless has no standalone stream to begin
+with.
+
+`streamKeepalive` writes periodically to the in-flight tool call's own response
+stream, which is the connection that would otherwise be closed. It is opt-in:
+
+```ts
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  streamKeepalive: {
+    // Opt in; disabled by default
+    enabled: true,
+    // Keep comfortably below the shortest idle timeout on the path
+    intervalMs: 20000,
+  },
+});
+```
+
+Each keepalive is a `notifications/message` (level configurable via `logLevel`,
+default `debug`) tagged with the logger `fastmcp-keepalive`, related to the tool
+call being served. Keepalives start when a tool begins executing and stop when
+the request stops waiting for it — on success, error, timeout, or client
+cancellation — so idle connections stay quiet. Because the messages are related
+to the request, this works in stateful and `stateless` mode alike, and needs no
+client support beyond the standard logging notification.
+
+Limits worth knowing:
+
+- It has no effect with `httpStream.enableJsonResponse`, which buffers a single
+  JSON reply instead of streaming, so there is no open stream to write to.
+- It only covers tool calls. Other long-running requests (`resources/read`,
+  `prompts/get`) still write nothing until they finish.
+- On `stdio` there is no proxy to keep alive, so enabling it there only adds
+  notification traffic.
+
 ### Health-check Endpoint
 
 When you run FastMCP with the `httpStream` transport you can optionally expose a
