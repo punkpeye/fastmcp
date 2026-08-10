@@ -2614,11 +2614,19 @@ export class FastMCPSession<
             result = ContentResultZodSchema.parse({
               content: [{ text: maybeStringResult, type: "text" }],
             });
-          } else if ("type" in maybeStringResult) {
-            result = ContentResultZodSchema.parse({
-              content: [maybeStringResult],
-            });
-          } else if ("content" in maybeStringResult) {
+          } else if (
+            "content" in maybeStringResult &&
+            Array.isArray(maybeStringResult.content) &&
+            (!tool.outputSchema ||
+              ContentResultZodSchema.safeParse(maybeStringResult).success)
+          ) {
+            // Explicit ContentResult: the tool returned MCP content directly
+            // (`{ content: [...], structuredContent? }`), so it takes precedence
+            // over outputSchema and a tool can ship custom content blocks
+            // alongside its structured payload. When an outputSchema is
+            // declared, only claim the value if it really parses as a
+            // ContentResult — otherwise an array-valued `content` field in the
+            // structured payload itself would be misread as content blocks.
             result = ContentResultZodSchema.parse(maybeStringResult);
             if (result.structuredContent !== undefined && tool.outputSchema) {
               result.structuredContent = await this.#validateStructuredContent(
@@ -2628,6 +2636,12 @@ export class FastMCPSession<
               );
             }
           } else if (tool.outputSchema) {
+            // A tool that declares an outputSchema returns its structured
+            // payload directly, so outputSchema wins over the `type`/`content`
+            // shorthands below. Without this precedence a payload whose
+            // top-level shape happens to carry a `type` key (the common
+            // discriminated-union case) or a `content` key would be misrouted
+            // as MCP content and never surface as structuredContent.
             const structuredContent = await this.#validateStructuredContent(
               tool,
               maybeStringResult,
@@ -2641,6 +2655,10 @@ export class FastMCPSession<
                 },
               ],
               structuredContent,
+            });
+          } else if ("type" in maybeStringResult) {
+            result = ContentResultZodSchema.parse({
+              content: [maybeStringResult],
             });
           } else {
             result = ContentResultZodSchema.parse(maybeStringResult);
