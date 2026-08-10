@@ -5505,6 +5505,156 @@ test("validates explicit structuredContent against outputSchema", async () => {
   });
 });
 
+test("returns structuredContent when the outputSchema result has a top-level `type` key", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            city: "San Francisco",
+          },
+          name: "get-forecast",
+        }),
+      ).toEqual({
+        content: [
+          {
+            text: JSON.stringify({ temperature: 72, type: "sunny" }),
+            type: "text",
+          },
+        ],
+        structuredContent: {
+          temperature: 72,
+          type: "sunny",
+        },
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get a weather forecast for a city",
+        execute: async () => {
+          return { temperature: 72, type: "sunny" };
+        },
+        name: "get-forecast",
+        outputSchema: z.object({
+          temperature: z.number(),
+          type: z.string(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("returns structuredContent when the outputSchema result has a top-level `content` key", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            city: "San Francisco",
+          },
+          name: "get-forecast",
+        }),
+      ).toEqual({
+        content: [
+          {
+            text: JSON.stringify({ content: "clear skies", version: 3 }),
+            type: "text",
+          },
+        ],
+        structuredContent: {
+          content: "clear skies",
+          version: 3,
+        },
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get a weather forecast for a city",
+        execute: async () => {
+          return { content: "clear skies", version: 3 };
+        },
+        name: "get-forecast",
+        outputSchema: z.object({
+          content: z.string(),
+          version: z.number(),
+        }),
+        parameters: z.object({
+          city: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("returns structuredContent when the outputSchema result has an array-valued `content` key", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            id: "doc-1",
+          },
+          name: "get-document",
+        }),
+      ).toEqual({
+        content: [
+          {
+            text: JSON.stringify({
+              content: ["para one", "para two"],
+              title: "Doc",
+            }),
+            type: "text",
+          },
+        ],
+        structuredContent: {
+          content: ["para one", "para two"],
+          title: "Doc",
+        },
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get a document by id",
+        execute: async () => {
+          return { content: ["para one", "para two"], title: "Doc" };
+        },
+        name: "get-document",
+        outputSchema: z.object({
+          content: z.array(z.string()),
+          title: z.string(),
+        }),
+        parameters: z.object({
+          id: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("passes through result _meta from tool execute", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
