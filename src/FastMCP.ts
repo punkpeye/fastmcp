@@ -563,10 +563,31 @@ const CompletionZodSchema = z.object({
    */
   total: z.optional(z.number().int()),
   /**
-   * An array of completion values. Must not exceed 100 items.
+   * An array of completion values. The MCP spec caps this at 100 items; values
+   * beyond the cap are trimmed by `capCompletionValues` (which sets `hasMore`)
+   * rather than rejected, so the schema itself does not enforce the limit.
    */
-  values: z.array(z.string()).max(100),
+  values: z.array(z.string()),
 }) satisfies z.ZodType<Completion>;
+
+/**
+ * The MCP completion result must not exceed 100 values. Rather than failing when
+ * a user-supplied completer returns more, trim to the cap and flag `hasMore` so
+ * the client knows the list was truncated.
+ */
+const COMPLETION_VALUES_LIMIT = 100;
+
+const capCompletionValues = (completion: Completion): Completion => {
+  if (completion.values.length <= COMPLETION_VALUES_LIMIT) {
+    return completion;
+  }
+
+  return {
+    ...completion,
+    hasMore: true,
+    values: completion.values.slice(0, COMPLETION_VALUES_LIMIT),
+  };
+};
 
 type ArgumentValueCompleter<T extends FastMCPSessionAuth = FastMCPSessionAuth> =
   (value: string, auth?: T) => Promise<Completion>;
@@ -2008,11 +2029,13 @@ export class FastMCPSession<
           });
         }
 
-        const completion = CompletionZodSchema.parse(
-          await prompt.complete(
-            request.params.argument.name,
-            request.params.argument.value,
-            this.#auth,
+        const completion = capCompletionValues(
+          CompletionZodSchema.parse(
+            await prompt.complete(
+              request.params.argument.name,
+              request.params.argument.value,
+              this.#auth,
+            ),
           ),
         );
 
@@ -2049,11 +2072,13 @@ export class FastMCPSession<
           );
         }
 
-        const completion = CompletionZodSchema.parse(
-          await resource.complete(
-            request.params.argument.name,
-            request.params.argument.value,
-            this.#auth,
+        const completion = capCompletionValues(
+          CompletionZodSchema.parse(
+            await resource.complete(
+              request.params.argument.name,
+              request.params.argument.value,
+              this.#auth,
+            ),
           ),
         );
 

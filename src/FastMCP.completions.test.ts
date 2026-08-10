@@ -122,6 +122,46 @@ describe("FastMCP Completions", () => {
     });
   });
 
+  it("trims completions to 100 values and flags hasMore instead of failing", async () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    server.addPrompt({
+      arguments: [
+        {
+          description: "First argument",
+          name: "arg1",
+        },
+      ],
+      complete: async () => ({
+        values: Array.from({ length: 150 }, (_, index) => `value-${index}`),
+      }),
+      load: async () => ({
+        messages: [],
+      }),
+      name: "test-prompt",
+    });
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        const result = await client.complete({
+          argument: {
+            name: "arg1",
+            value: "value",
+          },
+          ref: {
+            name: "test-prompt",
+            type: "ref/prompt",
+          },
+        });
+
+        expect(result.completion.values).toHaveLength(100);
+        expect(result.completion.values[0]).toBe("value-0");
+        expect(result.completion.values[99]).toBe("value-99");
+        expect(result.completion.hasMore).toBe(true);
+      },
+      server,
+    });
+  });
+
   it("supports resource completions", async () => {
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
     server.addResourceTemplate({
