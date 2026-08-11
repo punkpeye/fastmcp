@@ -5655,6 +5655,57 @@ test("returns structuredContent when the outputSchema result has an array-valued
   });
 });
 
+test("returns structuredContent when the outputSchema result `type` collides with a content block kind", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {
+            id: "block-1",
+          },
+          name: "get-block",
+        }),
+      ).toEqual({
+        content: [
+          {
+            text: JSON.stringify({ size: 3, type: "text" }),
+            type: "text",
+          },
+        ],
+        structuredContent: {
+          size: 3,
+          type: "text",
+        },
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addTool({
+        description: "Get a layout block by id",
+        execute: async () => {
+          return { size: 3, type: "text" as const };
+        },
+        name: "get-block",
+        outputSchema: z.object({
+          size: z.number(),
+          // The payload's own `type` is one of the MCP content block kinds, so
+          // the outputSchema has to win over the `type` shorthand.
+          type: z.enum(["text", "image"]),
+        }),
+        parameters: z.object({
+          id: z.string(),
+        }),
+      });
+
+      return server;
+    },
+  });
+});
+
 test("passes through result _meta from tool execute", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
