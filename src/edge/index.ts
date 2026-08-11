@@ -511,8 +511,41 @@ export class EdgeFastMCP {
       );
     }
 
+    let args: unknown = toolArgs ?? {};
+
+    if (tool.parameters) {
+      let parsed: StandardSchemaV1.Result<unknown>;
+
+      try {
+        parsed = await tool.parameters["~standard"].validate(toolArgs);
+      } catch (error) {
+        return this.#rpcError(
+          id,
+          ErrorCode.InternalError,
+          `Tool '${toolName}' parameter validation failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      if (parsed.issues) {
+        const friendlyErrors = parsed.issues
+          .map((issue) => {
+            const path = issue.path?.join(".") || "root";
+            return `${path}: ${issue.message}`;
+          })
+          .join(", ");
+
+        return this.#rpcError(
+          id,
+          ErrorCode.InvalidParams,
+          `Tool '${toolName}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`,
+        );
+      }
+
+      args = parsed.value;
+    }
+
     try {
-      const result = await tool.execute(toolArgs ?? {});
+      const result = await tool.execute(args);
 
       // Normalize result to content array
       const content =
