@@ -157,6 +157,51 @@ describe("EdgeFastMCP", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("should return a JSON-RPC error when tool validation throws", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+    const execute = vi.fn(async () => "unexpected");
+
+    server.addTool({
+      description: "Throw during validation",
+      execute,
+      name: "explode",
+      parameters: z.object({ value: z.string() }).transform(() => {
+        throw new Error("validator exploded");
+      }),
+    });
+
+    const response = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify({
+          id: 11,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: {
+            arguments: { value: "boom" },
+            name: "explode",
+          },
+        }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body: JsonResponse = await response.json();
+    expect(body).toMatchObject({
+      error: { code: -32603 },
+      id: 11,
+      jsonrpc: "2.0",
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("should pass transformed tool arguments to execute", async () => {
     const server = new EdgeFastMCP({
       name: "TestServer",

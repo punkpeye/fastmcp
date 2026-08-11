@@ -514,7 +514,17 @@ export class EdgeFastMCP {
     let args: unknown = toolArgs ?? {};
 
     if (tool.parameters) {
-      const parsed = await tool.parameters["~standard"].validate(toolArgs);
+      let parsed: StandardSchemaV1.Result<unknown>;
+
+      try {
+        parsed = await tool.parameters["~standard"].validate(toolArgs);
+      } catch (error) {
+        return this.#rpcError(
+          id,
+          ErrorCode.InternalError,
+          `Tool '${toolName}' parameter validation failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
 
       if (parsed.issues) {
         const friendlyErrors = parsed.issues
