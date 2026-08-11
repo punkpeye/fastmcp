@@ -10,7 +10,6 @@ import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   isInitializeRequest,
   isJSONRPCError,
-  isJSONRPCNotification,
   isJSONRPCRequest,
   isJSONRPCResponse,
   JSONRPCMessage,
@@ -67,6 +66,16 @@ export interface WebStreamableHTTPServerTransportOptions {
   sessionIdGenerator: (() => string) | undefined;
 }
 
+/**
+ * Collects the responses to every request that arrived on a single POST, so
+ * that JSON mode can answer once all of them are in.
+ */
+interface PendingJsonResponse {
+  expectedIds: RequestId[];
+  resolve: (responses: JSONRPCMessage[]) => void;
+  responses: Map<RequestId, JSONRPCMessage>;
+}
+
 const MAXIMUM_MESSAGE_SIZE = 4 * 1024 * 1024; // 4MB
 
 /**
@@ -81,9 +90,9 @@ export class WebStreamableHTTPServerTransport implements Transport {
   private _enableJsonResponse = false;
   private _encoder = new TextEncoder();
   private _eventStore?: EventStore;
+  private _jsonResponseCollectors = new Map<StreamId, PendingJsonResponse>();
   private _onsessionclosed?: (sessionId: string) => Promise<void> | void;
   private _onsessioninitialized?: (sessionId: string) => Promise<void> | void;
-  private _pendingResponses: JSONRPCMessage[] = [];
   private _requestToStreamMapping = new Map<RequestId, StreamId>();
 
   private _standaloneSseStreamId = "_GET_stream";
@@ -114,6 +123,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
     this._streamMapping.clear();
+    this.releasePendingRequests();
     this._started = false;
     this.onclose?.();
   }
@@ -145,12 +155,9 @@ export class WebStreamableHTTPServerTransport implements Transport {
     message: JSONRPCMessage,
     options?: { relatedRequestId?: RequestId },
   ): Promise<void> {
-    // Store for pending responses (used in JSON response mode)
-    this._pendingResponses.push(message);
-
-    // Send to SSE streams
     let requestId = options?.relatedRequestId;
-    if (isJSONRPCResponse(message) || isJSONRPCError(message)) {
+    const isResponse = isJSONRPCResponse(message) || isJSONRPCError(message);
+    if (isResponse) {
       // Responses are routed by the id of the request they answer
       requestId = message.id;
     }
@@ -161,6 +168,17 @@ export class WebStreamableHTTPServerTransport implements Transport {
         : this._requestToStreamMapping.get(requestId);
 
     if (streamId) {
+      // JSON mode has no stream to write to: collect the responses instead and
+      // let handlePostRequest answer once every request on this POST is done.
+      const collector = this._jsonResponseCollectors.get(streamId);
+      if (collector) {
+        if (isResponse && requestId !== undefined) {
+          collector.responses.set(requestId, message);
+          this.settleJsonResponse(streamId, collector);
+        }
+        return;
+      }
+
       const writer = this._streamMapping.get(streamId);
       if (writer) {
         try {
@@ -175,10 +193,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
           }
 
           // Close the POST stream once all of its requests are answered
-          if (
-            requestId !== undefined &&
-            (isJSONRPCResponse(message) || isJSONRPCError(message))
-          ) {
+          if (requestId !== undefined && isResponse) {
             this._requestToStreamMapping.delete(requestId);
             const streamInUse = Array.from(
               this._requestToStreamMapping.values(),
@@ -268,6 +283,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
     this._streamMapping.clear();
+    this.releasePendingRequests();
 
     await this._onsessionclosed?.(this.sessionId ?? "");
     this.sessionId = undefined;
@@ -447,36 +463,47 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
 
-    const isOnlyNotificationsOrResponses = messages.every(
-      (msg) => isJSONRPCNotification(msg) || isJSONRPCResponse(msg),
-    );
+    const requestIds = messages
+      .filter((msg) => isJSONRPCRequest(msg))
+      .map((msg) => msg.id);
     const useJsonResponse =
       this._enableJsonResponse &&
       Boolean(acceptHeader?.includes("application/json"));
 
-    // Open the SSE response stream before dispatching: the SDK produces
+    // Register the response sink before dispatching: the SDK produces
     // responses asynchronously and send() routes them back by request id.
+    let jsonResponses: Promise<JSONRPCMessage[]> | undefined;
     let sseReadable: ReadableStream<Uint8Array> | undefined;
-    if (!isOnlyNotificationsOrResponses && !useJsonResponse) {
-      const { readable, writable } = new TransformStream<Uint8Array>();
-      const streamId = `post_${Date.now()}`;
-      this._streamMapping.set(streamId, writable.getWriter());
-      for (const message of messages) {
-        if (isJSONRPCRequest(message)) {
-          this._requestToStreamMapping.set(message.id, streamId);
-        }
+    if (requestIds.length > 0) {
+      // Must be unique: a wall-clock id collides between two POSTs issued in
+      // the same millisecond, which would cross-deliver their responses.
+      const streamId = crypto.randomUUID();
+      for (const id of requestIds) {
+        this._requestToStreamMapping.set(id, streamId);
       }
-      sseReadable = readable;
+
+      if (useJsonResponse) {
+        jsonResponses = new Promise((resolve) => {
+          this._jsonResponseCollectors.set(streamId, {
+            expectedIds: requestIds,
+            resolve,
+            responses: new Map(),
+          });
+        });
+      } else {
+        const { readable, writable } = new TransformStream<Uint8Array>();
+        this._streamMapping.set(streamId, writable.getWriter());
+        sseReadable = readable;
+      }
     }
 
     // Process messages through the transport
-    this._pendingResponses = [];
     for (const message of messages) {
       this.onmessage?.(message, { authInfo: undefined });
     }
 
-    // If all messages are notifications/responses, return 202
-    if (isOnlyNotificationsOrResponses) {
+    // Nothing to answer: the batch was only notifications and/or responses
+    if (requestIds.length === 0) {
       return new Response(null, {
         headers: this.getResponseHeaders(),
         status: 202,
@@ -484,14 +511,14 @@ export class WebStreamableHTTPServerTransport implements Transport {
     }
 
     // Return JSON response if enabled and client accepts it
-    if (useJsonResponse) {
-      // Wait a tick for responses to be collected
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    if (jsonResponses) {
+      // Wait for the handlers to actually answer, however long they take
+      const responses = await jsonResponses;
 
       const responseBody =
-        this._pendingResponses.length === 1
-          ? JSON.stringify(this._pendingResponses[0])
-          : JSON.stringify(this._pendingResponses);
+        responses.length === 1
+          ? JSON.stringify(responses[0])
+          : JSON.stringify(responses);
 
       return new Response(responseBody, {
         headers: {
@@ -557,6 +584,47 @@ export class WebStreamableHTTPServerTransport implements Transport {
    */
   private handleUnsupportedRequest(): Response {
     return this.createErrorResponse(405, -32000, "Method not allowed");
+  }
+
+  /**
+   * Drop the routing state left over once every stream is gone, answering any
+   * POST still waiting on a JSON response with whatever arrived rather than
+   * leaving the request hanging.
+   */
+  private releasePendingRequests(): void {
+    for (const collector of this._jsonResponseCollectors.values()) {
+      collector.resolve(
+        collector.expectedIds
+          .map((id) => collector.responses.get(id))
+          .filter((response) => response !== undefined),
+      );
+    }
+    this._jsonResponseCollectors.clear();
+    this._requestToStreamMapping.clear();
+  }
+
+  /**
+   * Answer a JSON-mode POST once every request it carried has a response
+   */
+  private settleJsonResponse(
+    streamId: StreamId,
+    collector: PendingJsonResponse,
+  ): void {
+    const responses: JSONRPCMessage[] = [];
+    for (const id of collector.expectedIds) {
+      const response = collector.responses.get(id);
+      if (!response) {
+        // Still waiting on at least one of this POST's requests
+        return;
+      }
+      responses.push(response);
+    }
+
+    this._jsonResponseCollectors.delete(streamId);
+    for (const id of collector.expectedIds) {
+      this._requestToStreamMapping.delete(id);
+    }
+    collector.resolve(responses);
   }
 
   /**
