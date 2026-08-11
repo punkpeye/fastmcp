@@ -14,11 +14,12 @@ type TransportInternals = {
   _streamMapping: Map<string, WritableStreamDefaultWriter<Uint8Array>>;
 };
 
-const createGetRequest = () =>
+const createGetRequest = (lastEventId?: string) =>
   new Request("http://localhost/mcp", {
     headers: {
       Accept: "text/event-stream",
       "mcp-session-id": "test-session",
+      ...(lastEventId ? { "last-event-id": lastEventId } : {}),
     },
   });
 
@@ -165,6 +166,27 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(whileActive.status).toBe(409);
 
     await first.body?.cancel("client disconnected");
+
+    const afterCancel = await transport.handleRequest(createGetRequest());
+    expect(afterCancel.status).toBe(200);
+    await afterCancel.body?.cancel();
+  });
+
+  it("should release a resumed SSE stream when the client cancels", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      eventStore: {
+        replayEventsAfter: async () => "_GET_stream",
+        storeEvent: async () => "evt-1",
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const resumed = await transport.handleRequest(createGetRequest("evt-0"));
+    expect(resumed.status).toBe(200);
+    await resumed.body?.cancel("client disconnected");
 
     const afterCancel = await transport.handleRequest(createGetRequest());
     expect(afterCancel.status).toBe(200);

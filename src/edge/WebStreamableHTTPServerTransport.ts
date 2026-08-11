@@ -341,13 +341,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     // Create SSE stream
     const { readable, writable } = new TransformStream<Uint8Array>();
     const writer = writable.getWriter();
-    this._streamMapping.set(this._standaloneSseStreamId, writer);
-    const removeStreamIfCurrent = () => {
-      if (this._streamMapping.get(this._standaloneSseStreamId) === writer) {
-        this._streamMapping.delete(this._standaloneSseStreamId);
-      }
-    };
-    void writer.closed.then(removeStreamIfCurrent, removeStreamIfCurrent);
+    this.trackStream(this._standaloneSseStreamId, writer);
 
     return new Response(readable, {
       headers: {
@@ -568,7 +562,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
           await this.writeSSEEventWithId(writer, eventId, message);
         },
       });
-      this._streamMapping.set(streamId, writer);
+      this.trackStream(streamId, writer);
     } catch (error) {
       await writer.close();
       return this.createErrorResponse(500, -32000, `Replay failed: ${error}`);
@@ -631,6 +625,19 @@ export class WebStreamableHTTPServerTransport implements Transport {
       this._requestToStreamMapping.delete(id);
     }
     collector.resolve(responses);
+  }
+
+  private trackStream(
+    streamId: StreamId,
+    writer: WritableStreamDefaultWriter<Uint8Array>,
+  ): void {
+    this._streamMapping.set(streamId, writer);
+    const removeStreamIfCurrent = () => {
+      if (this._streamMapping.get(streamId) === writer) {
+        this._streamMapping.delete(streamId);
+      }
+    };
+    void writer.closed.then(removeStreamIfCurrent, removeStreamIfCurrent);
   }
 
   /**
