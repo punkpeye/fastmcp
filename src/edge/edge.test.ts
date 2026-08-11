@@ -423,6 +423,61 @@ describe("EdgeFastMCP", () => {
     expect(body.result).toEqual({});
   });
 
+  it("should preserve the array envelope for a one-request JSON-RPC batch", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    const response = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify([
+          {
+            id: 12,
+            jsonrpc: "2.0",
+            method: "ping",
+          },
+        ]),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body: JsonResponse = await response.json();
+    expect(body).toEqual([{ id: 12, jsonrpc: "2.0", result: {} }]);
+  });
+
+  it("should reject an empty JSON-RPC batch with one Invalid Request object", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    const response = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify([]),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body: JsonResponse = await response.json();
+    expect(body).toMatchObject({
+      error: { code: -32600 },
+      id: null,
+      jsonrpc: "2.0",
+    });
+    expect(Array.isArray(body)).toBe(false);
+  });
+
   it("should return error for invalid JSON", async () => {
     const server = new EdgeFastMCP({
       name: "TestServer",
