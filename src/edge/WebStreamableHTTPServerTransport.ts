@@ -342,6 +342,12 @@ export class WebStreamableHTTPServerTransport implements Transport {
     const { readable, writable } = new TransformStream<Uint8Array>();
     const writer = writable.getWriter();
     this._streamMapping.set(this._standaloneSseStreamId, writer);
+    const removeStreamIfCurrent = () => {
+      if (this._streamMapping.get(this._standaloneSseStreamId) === writer) {
+        this._streamMapping.delete(this._standaloneSseStreamId);
+      }
+    };
+    void writer.closed.then(removeStreamIfCurrent, removeStreamIfCurrent);
 
     return new Response(readable, {
       headers: {
