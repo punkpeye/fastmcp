@@ -11,8 +11,12 @@ import { WebStreamableHTTPServerTransport } from "./WebStreamableHTTPServerTrans
 type JsonResponse = any;
 
 type TransportInternals = {
+  _requestToStreamMapping: Map<number | string, string>;
   _streamMapping: Map<string, WritableStreamDefaultWriter<Uint8Array>>;
 };
+
+/** Let a settled `writer.closed` run its cleanup before asserting on it. */
+const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const createGetRequest = (lastEventId?: string) =>
   new Request("http://localhost/mcp", {
@@ -214,6 +218,39 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(streamMapping.get("_GET_stream")).toBe(replacementWriter);
     streamMapping.delete("_GET_stream");
     await replacementWriter.abort();
+  });
+
+  it("should release a POST SSE stream when the client cancels", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(50).connect(transport);
+    // Read the initialize stream to completion so only the tool call below is
+    // left in the mappings.
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const internals = transport as unknown as TransportInternals;
+    const response = await transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "one"),
+        "text/event-stream",
+        "test-session",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(internals._streamMapping.size).toBe(1);
+    expect(internals._requestToStreamMapping.size).toBe(1);
+
+    await response.body?.cancel("client disconnected");
+    await flushMicrotasks();
+
+    expect(internals._streamMapping.size).toBe(0);
+    expect(internals._requestToStreamMapping.size).toBe(0);
   });
 
   it("should wait for a slow handler in JSON response mode", async () => {
