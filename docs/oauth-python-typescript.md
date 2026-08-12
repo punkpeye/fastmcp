@@ -107,7 +107,7 @@ fastmcp/src/auth/
 Dependencies:
 - crypto (Node.js built-in)
 - fs/promises (Node.js built-in)
-- undici (HTTP, already in dependencies)
+- fetch (Node.js built-in)
 ```
 
 **Key Difference:** TypeScript uses mostly built-in Node.js modules, while Python relies on external battle-tested libraries.
