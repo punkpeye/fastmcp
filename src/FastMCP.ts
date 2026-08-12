@@ -15,6 +15,7 @@ import {
   ErrorCode,
   GetPromptRequestSchema,
   GetPromptResult,
+  Icon,
   ListPromptsRequestSchema,
   ListPromptsResult,
   ListResourcesRequestSchema,
@@ -814,6 +815,12 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
      */
     status?: number;
   };
+  /**
+   * Optional icons for this server.
+   * Advertised to clients via MCP `initialize` (`serverInfo.icons`) so UIs can
+   * show a logo next to the server name.
+   */
+  icons?: Icon[];
   instructions?: string;
   /**
    * Custom logger instance. If not provided, defaults to console.
@@ -1112,6 +1119,11 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
     logLevel?: LoggingLevel;
   };
   /**
+   * Optional human-readable title for display in client UIs.
+   * Advertised via MCP `initialize` (`serverInfo.title`).
+   */
+  title?: string;
+  /**
    * General utilities
    */
   utils?: {
@@ -1120,6 +1132,11 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
     ) => string;
   };
   version: `${number}.${number}.${number}`;
+  /**
+   * Optional URL of the website for this server.
+   * Advertised via MCP `initialize` (`serverInfo.websiteUrl`).
+   */
+  websiteUrl?: string;
 };
 
 type Tool<
@@ -1383,6 +1400,7 @@ export class FastMCPSession<
 
   constructor({
     auth,
+    icons,
     instructions,
     logger,
     name,
@@ -1395,12 +1413,15 @@ export class FastMCPSession<
     sessionId,
     stateless = false,
     streamKeepalive,
+    title,
     tools,
     transportType,
     utils,
     version,
+    websiteUrl,
   }: {
     auth?: T;
+    icons?: Icon[];
     instructions?: string;
     logger: Logger;
     name: string;
@@ -1413,10 +1434,12 @@ export class FastMCPSession<
     sessionId?: string;
     stateless?: boolean;
     streamKeepalive?: ServerOptions<T>["streamKeepalive"];
+    title?: string;
     tools: Tool<T>[];
     transportType?: "httpStream" | "stdio";
     utils?: ServerOptions<T>["utils"];
     version: string;
+    websiteUrl?: string;
   }) {
     super();
 
@@ -1451,7 +1474,13 @@ export class FastMCPSession<
     this.#capabilities.completions = {};
 
     this.#server = new Server(
-      { name: name, version: version },
+      {
+        ...(icons !== undefined ? { icons } : {}),
+        name,
+        ...(title !== undefined ? { title } : {}),
+        version,
+        ...(websiteUrl !== undefined ? { websiteUrl } : {}),
+      },
       { capabilities: this.#capabilities, instructions: instructions },
     );
 
@@ -3264,6 +3293,7 @@ export class FastMCP<
 
       const session = new FastMCPSession<T>({
         auth,
+        icons: this.#options.icons,
         instructions: this.#options.instructions,
         logger: this.#logger,
         name: this.#options.name,
@@ -3274,10 +3304,12 @@ export class FastMCP<
         resourcesTemplates: this.#resourcesTemplates,
         roots: this.#options.roots,
         streamKeepalive: this.#options.streamKeepalive,
+        title: this.#options.title,
         tools: this.#tools,
         transportType: "stdio",
         utils: this.#options.utils,
         version: this.#options.version,
+        websiteUrl: this.#options.websiteUrl,
       });
 
       await session.connect(transport);
@@ -3527,6 +3559,7 @@ export class FastMCP<
       : this.#tools;
     return new FastMCPSession<T>({
       auth,
+      icons: this.#options.icons,
       instructions: this.#options.instructions,
       logger: this.#logger,
       name: this.#options.name,
@@ -3539,10 +3572,12 @@ export class FastMCP<
       sessionId,
       stateless,
       streamKeepalive: this.#options.streamKeepalive,
+      title: this.#options.title,
       tools: allowedTools,
       transportType: "httpStream",
       utils: this.#options.utils,
       version: this.#options.version,
+      websiteUrl: this.#options.websiteUrl,
     });
   }
 
@@ -4392,6 +4427,7 @@ export type {
   FastMCPEvents,
   FastMCPSessionAuth,
   FastMCPSessionEvents,
+  Icon,
   ImageContent,
   InputPrompt,
   InputPromptArgument,

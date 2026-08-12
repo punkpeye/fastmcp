@@ -98,6 +98,37 @@ const runWithTestServer = async ({
   return port;
 };
 
+test("exposes server icons and implementation metadata on initialize", async () => {
+  const icons = [
+    {
+      mimeType: "image/png",
+      sizes: ["48x48"],
+      src: "https://example.com/icon.png",
+    },
+  ];
+
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(client.getServerVersion()).toEqual({
+        icons,
+        name: "Icon Server",
+        title: "Icon Server Title",
+        version: "1.0.0",
+        websiteUrl: "https://example.com",
+      });
+    },
+    server: async () => {
+      return new FastMCP({
+        icons,
+        name: "Icon Server",
+        title: "Icon Server Title",
+        version: "1.0.0",
+        websiteUrl: "https://example.com",
+      });
+    },
+  });
+});
+
 test("adds tools", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
