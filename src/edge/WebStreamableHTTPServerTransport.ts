@@ -405,10 +405,21 @@ export class WebStreamableHTTPServerTransport implements Transport {
       return this.createErrorResponse(400, -32700, "Parse error: Invalid JSON");
     }
 
-    // Handle batch or single message
+    // Handle batch or single message. The original shape decides the response
+    // envelope: a batch always answers with an array, even when only one
+    // response survives.
+    const isBatch = Array.isArray(rawMessage);
     const arrayMessage: unknown[] = Array.isArray(rawMessage)
       ? rawMessage
       : [rawMessage];
+
+    if (isBatch && arrayMessage.length === 0) {
+      return this.createErrorResponse(
+        200,
+        -32600,
+        "Invalid Request: Batch must contain at least one message",
+      );
+    }
 
     // Validate messages
     const messages: JSONRPCMessage[] = [];
@@ -515,10 +526,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
       // Wait for the handlers to actually answer, however long they take
       const responses = await jsonResponses;
 
-      const responseBody =
-        responses.length === 1
-          ? JSON.stringify(responses[0])
-          : JSON.stringify(responses);
+      const responseBody = JSON.stringify(isBatch ? responses : responses[0]);
 
       return new Response(responseBody, {
         headers: {
