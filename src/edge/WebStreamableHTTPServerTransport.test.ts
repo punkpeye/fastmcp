@@ -10,6 +10,23 @@ import { WebStreamableHTTPServerTransport } from "./WebStreamableHTTPServerTrans
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type JsonResponse = any;
 
+type TransportInternals = {
+  _requestToStreamMapping: Map<number | string, string>;
+  _streamMapping: Map<string, WritableStreamDefaultWriter<Uint8Array>>;
+};
+
+/** Let a settled `writer.closed` run its cleanup before asserting on it. */
+const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+const createGetRequest = (lastEventId?: string) =>
+  new Request("http://localhost/mcp", {
+    headers: {
+      Accept: "text/event-stream",
+      "mcp-session-id": "test-session",
+      ...(lastEventId ? { "last-event-id": lastEventId } : {}),
+    },
+  });
+
 const createPostRequest = (body: unknown, accept: string, sessionId?: string) =>
   new Request("http://localhost/mcp", {
     body: JSON.stringify(body),
@@ -136,6 +153,104 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(body.jsonrpc).toBe("2.0");
     expect(body.id).toBe(1);
     expect(body.result.serverInfo.name).toBe("TestServer");
+  });
+
+  it("should release the standalone SSE stream when the client cancels", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const first = await transport.handleRequest(createGetRequest());
+    expect(first.status).toBe(200);
+
+    const whileActive = await transport.handleRequest(createGetRequest());
+    expect(whileActive.status).toBe(409);
+
+    await first.body?.cancel("client disconnected");
+
+    const afterCancel = await transport.handleRequest(createGetRequest());
+    expect(afterCancel.status).toBe(200);
+    await afterCancel.body?.cancel();
+  });
+
+  it("should release a resumed SSE stream when the client cancels", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      eventStore: {
+        replayEventsAfter: async () => "_GET_stream",
+        storeEvent: async () => "evt-1",
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const resumed = await transport.handleRequest(createGetRequest("evt-0"));
+    expect(resumed.status).toBe(200);
+    await resumed.body?.cancel("client disconnected");
+
+    const afterCancel = await transport.handleRequest(createGetRequest());
+    expect(afterCancel.status).toBe(200);
+    await afterCancel.body?.cancel();
+  });
+
+  it("should not remove a replacement stream when an old writer closes", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const first = await transport.handleRequest(createGetRequest());
+    const streamMapping = (transport as unknown as TransportInternals)
+      ._streamMapping;
+    const replacementStream = new TransformStream<Uint8Array>();
+    const replacementWriter = replacementStream.writable.getWriter();
+    streamMapping.set("_GET_stream", replacementWriter);
+
+    await first.body?.cancel("old client disconnected");
+    await Promise.resolve();
+
+    expect(streamMapping.get("_GET_stream")).toBe(replacementWriter);
+    streamMapping.delete("_GET_stream");
+    await replacementWriter.abort();
+  });
+
+  it("should release a POST SSE stream when the client cancels", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(50).connect(transport);
+    // Read the initialize stream to completion so only the tool call below is
+    // left in the mappings.
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const internals = transport as unknown as TransportInternals;
+    const response = await transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "one"),
+        "text/event-stream",
+        "test-session",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(internals._streamMapping.size).toBe(1);
+    expect(internals._requestToStreamMapping.size).toBe(1);
+
+    await response.body?.cancel("client disconnected");
+    await flushMicrotasks();
+
+    expect(internals._streamMapping.size).toBe(0);
+    expect(internals._requestToStreamMapping.size).toBe(0);
   });
 
   it("should wait for a slow handler in JSON response mode", async () => {

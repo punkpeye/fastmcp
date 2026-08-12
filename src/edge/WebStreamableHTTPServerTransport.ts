@@ -341,7 +341,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     // Create SSE stream
     const { readable, writable } = new TransformStream<Uint8Array>();
     const writer = writable.getWriter();
-    this._streamMapping.set(this._standaloneSseStreamId, writer);
+    this.trackStream(this._standaloneSseStreamId, writer);
 
     return new Response(readable, {
       headers: {
@@ -503,7 +503,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
         });
       } else {
         const { readable, writable } = new TransformStream<Uint8Array>();
-        this._streamMapping.set(streamId, writable.getWriter());
+        this.trackStream(streamId, writable.getWriter());
         sseReadable = readable;
       }
     }
@@ -570,7 +570,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
           await this.writeSSEEventWithId(writer, eventId, message);
         },
       });
-      this._streamMapping.set(streamId, writer);
+      this.trackStream(streamId, writer);
     } catch (error) {
       await writer.close();
       return this.createErrorResponse(500, -32000, `Replay failed: ${error}`);
@@ -633,6 +633,29 @@ export class WebStreamableHTTPServerTransport implements Transport {
       this._requestToStreamMapping.delete(id);
     }
     collector.resolve(responses);
+  }
+
+  private trackStream(
+    streamId: StreamId,
+    writer: WritableStreamDefaultWriter<Uint8Array>,
+  ): void {
+    this._streamMapping.set(streamId, writer);
+    const removeStreamIfCurrent = () => {
+      if (this._streamMapping.get(streamId) !== writer) {
+        return;
+      }
+      this._streamMapping.delete(streamId);
+      // Drop the routing entries that pointed at this stream, so a response
+      // arriving after the client gave up is not looked up against a writer
+      // that no longer exists. No-op for the standalone GET stream, which is
+      // never a request target.
+      for (const [requestId, mappedStreamId] of this._requestToStreamMapping) {
+        if (mappedStreamId === streamId) {
+          this._requestToStreamMapping.delete(requestId);
+        }
+      }
+    };
+    void writer.closed.then(removeStreamIfCurrent, removeStreamIfCurrent);
   }
 
   /**
