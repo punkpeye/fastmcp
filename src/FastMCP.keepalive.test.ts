@@ -3,7 +3,6 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "timers/promises";
-import { fetch } from "undici";
 import { describe, expect, it } from "vitest";
 
 import { FastMCP } from "./FastMCP.js";

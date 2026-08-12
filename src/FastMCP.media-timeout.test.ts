@@ -2,7 +2,7 @@
  * Regression tests for unbounded media fetches in imageContent/audioContent:
  * both helpers fetched an arbitrary tool-author URL with no timeout, so a
  * server that never answers stalled the tool call indefinitely (the only
- * ceiling was undici's 300s default).
+ * ceiling was the platform's own default).
  *
  * These tests verify that both fetches now carry an AbortSignal bounded by
  * MEDIA_FETCH_TIMEOUT_MS (30s) and that a timeout surfaces as a clear
@@ -13,18 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { audioContent, imageContent } from "./FastMCP.js";
 
-const { mediaFetchMock } = vi.hoisted(() => ({
-  mediaFetchMock: vi.fn(),
-}));
-
-// FastMCP.ts binds `fetch` from the undici module at import time, so spying
-// on global.fetch cannot intercept it; mock the undici module instead and
-// keep every other export intact.
-vi.mock("undici", async (importOriginal) => {
-  const original = await importOriginal<typeof import("undici")>();
-
-  return { ...original, fetch: mediaFetchMock };
-});
+// FastMCP.ts calls the global fetch, so spying on it here intercepts both
+// media helpers. Installed per-test in beforeEach because the afterEach
+// restore puts the real implementation back.
+const mediaFetchMock = vi.fn();
 
 const realAbortTimeout = AbortSignal.timeout;
 
@@ -59,6 +51,9 @@ const mockHungServer = () => {
 describe("imageContent/audioContent fetch timeout", () => {
   beforeEach(() => {
     mediaFetchMock.mockReset();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      mediaFetchMock as unknown as typeof globalThis.fetch,
+    );
     // MEDIA_FETCH_TIMEOUT_MS is 30s of wall-clock time; compress every
     // AbortSignal.timeout() to 10ms so the hung-server tests stay fast.
     // The mapped error still reports the real constant.
