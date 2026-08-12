@@ -415,7 +415,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
 
     if (isBatch && arrayMessage.length === 0) {
       return this.createErrorResponse(
-        200,
+        400,
         -32600,
         "Invalid Request: Batch must contain at least one message",
       );

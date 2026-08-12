@@ -263,7 +263,7 @@ export class EdgeFastMCP {
 
     if (isBatch && messages.length === 0) {
       return this.#errorResponse(
-        200,
+        400,
         ErrorCode.InvalidRequest,
         "Invalid Request: Batch must contain at least one message",
       );

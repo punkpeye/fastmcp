@@ -468,7 +468,9 @@ describe("EdgeFastMCP", () => {
       }),
     );
 
-    expect(response.status).toBe(200);
+    // MCP requires an HTTP error status for input the server cannot accept;
+    // JSON-RPC only dictates the body shape (a single -32600 object, id null).
+    expect(response.status).toBe(400);
     const body: JsonResponse = await response.json();
     expect(body).toMatchObject({
       error: { code: -32600 },
