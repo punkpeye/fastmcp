@@ -2429,7 +2429,7 @@ const server = new FastMCP({
 });
 ```
 
-Optional `title` and `description` are also passed through to MCP `initialize` (`serverInfo`).
+An optional `title` is also passed through to MCP `initialize` (`serverInfo`), for clients that prefer a display name over the server `name`.
 
 ### Sessions
 

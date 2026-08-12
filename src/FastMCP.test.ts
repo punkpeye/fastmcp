@@ -109,9 +109,6 @@ test("exposes server icons and implementation metadata on initialize", async () 
 
   await runWithTestServer({
     run: async ({ client }) => {
-      // description is accepted on ServerOptions for API completeness; the
-      // installed MCP SDK Implementation schema may strip fields it does not
-      // yet model (e.g. description) when surfacing serverInfo.
       expect(client.getServerVersion()).toEqual({
         icons,
         name: "Icon Server",
@@ -122,7 +119,6 @@ test("exposes server icons and implementation metadata on initialize", async () 
     },
     server: async () => {
       return new FastMCP({
-        description: "A test server with icons",
         icons,
         name: "Icon Server",
         title: "Icon Server Title",

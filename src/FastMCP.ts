@@ -781,11 +781,6 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
   auth?: AuthProvider<T extends OAuthSession ? T : OAuthSession>;
   authenticate?: Authenticate<T>;
   /**
-   * Optional human-readable description of what this server does.
-   * Advertised to clients via MCP `initialize` (`serverInfo.description`).
-   */
-  description?: string;
-  /**
    * Configuration for the health-check endpoint that can be exposed when the
    * server is running using the HTTP Stream transport. When enabled, the
    * server will respond to an HTTP GET request with the configured path (by
@@ -1405,7 +1400,6 @@ export class FastMCPSession<
 
   constructor({
     auth,
-    description,
     icons,
     instructions,
     logger,
@@ -1427,7 +1421,6 @@ export class FastMCPSession<
     websiteUrl,
   }: {
     auth?: T;
-    description?: string;
     icons?: Icon[];
     instructions?: string;
     logger: Logger;
@@ -1482,7 +1475,6 @@ export class FastMCPSession<
 
     this.#server = new Server(
       {
-        ...(description !== undefined ? { description } : {}),
         ...(icons !== undefined ? { icons } : {}),
         name,
         ...(title !== undefined ? { title } : {}),
@@ -3301,7 +3293,6 @@ export class FastMCP<
 
       const session = new FastMCPSession<T>({
         auth,
-        description: this.#options.description,
         icons: this.#options.icons,
         instructions: this.#options.instructions,
         logger: this.#logger,
@@ -3568,7 +3559,6 @@ export class FastMCP<
       : this.#tools;
     return new FastMCPSession<T>({
       auth,
-      description: this.#options.description,
       icons: this.#options.icons,
       instructions: this.#options.instructions,
       logger: this.#logger,
