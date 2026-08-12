@@ -1,5 +1,6 @@
 dist
 node_modules
 !.prettierignore
+.envrc
 .idea
 CLAUDE.local.md
