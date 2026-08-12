@@ -2410,6 +2410,27 @@ const server = new FastMCP({
 });
 ```
 
+### Server icons and metadata
+
+You can advertise icons and related metadata for your server. Clients that support icons can show them in their UI:
+
+```ts
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  websiteUrl: "https://example.com",
+  icons: [
+    {
+      src: "https://example.com/icon.png",
+      mimeType: "image/png",
+      sizes: ["48x48"],
+    },
+  ],
+});
+```
+
+Optional `title` and `description` are also passed through to MCP `initialize` (`serverInfo`).
+
 ### Sessions
 
 The `session` object is an instance of `FastMCPSession` and it describes active client sessions.
