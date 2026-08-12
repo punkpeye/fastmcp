@@ -182,6 +182,53 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(body[1].result.content[0].text).toBe("done:two");
   });
 
+  it("should preserve the array envelope for a one-request batch", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(0).connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const response = await transport.handleRequest(
+      createPostRequest(
+        [createToolCall(2, "one")],
+        "application/json",
+        "test-session",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const body: JsonResponse = await response.json();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body).toHaveLength(1);
+    expect(body[0].result.content[0].text).toBe("done:one");
+  });
+
+  it("should reject an empty JSON-RPC batch with one Invalid Request object", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const response = await transport.handleRequest(
+      createPostRequest([], "application/json", "test-session"),
+    );
+
+    // MCP requires an HTTP error status for input the server cannot accept;
+    // JSON-RPC only dictates the body shape (a single -32600 object, id null).
+    expect(response.status).toBe(400);
+    const body: JsonResponse = await response.json();
+    expect(Array.isArray(body)).toBe(false);
+    expect(body).toMatchObject({
+      error: { code: -32600 },
+      id: null,
+      jsonrpc: "2.0",
+    });
+  });
+
   it("should not cross-deliver responses between concurrent POSTs", async () => {
     // Pinning the clock collides any wall-clock derived stream id, which would
     // route both responses onto whichever POST registered last.

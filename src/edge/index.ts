@@ -258,7 +258,17 @@ export class EdgeFastMCP {
     }
 
     // Handle single or batch requests
+    const isBatch = Array.isArray(body);
     const messages = Array.isArray(body) ? body : [body];
+
+    if (isBatch && messages.length === 0) {
+      return this.#errorResponse(
+        400,
+        ErrorCode.InvalidRequest,
+        "Invalid Request: Batch must contain at least one message",
+      );
+    }
+
     const responses: JSONRPCMessage[] = [];
 
     for (const message of messages) {
@@ -273,10 +283,7 @@ export class EdgeFastMCP {
       return new Response(null, { status: 202 });
     }
 
-    const responseBody =
-      responses.length === 1
-        ? JSON.stringify(responses[0])
-        : JSON.stringify(responses);
+    const responseBody = JSON.stringify(isBatch ? responses : responses[0]);
 
     return new Response(responseBody, {
       headers: {
