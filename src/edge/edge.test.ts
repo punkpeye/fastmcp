@@ -1,5 +1,5 @@
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { EdgeFastMCP } from "./index.js";
@@ -114,6 +114,137 @@ describe("EdgeFastMCP", () => {
     expect(body.result.content).toEqual([
       { text: "Hello, World!", type: "text" },
     ]);
+  });
+
+  it("should reject invalid tool arguments before execute", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+    const execute = vi.fn(
+      async ({ count }: { count: number }) => `Count: ${count}`,
+    );
+
+    server.addTool({
+      description: "Count something",
+      execute,
+      name: "count",
+      parameters: z.object({ count: z.number() }),
+    });
+
+    const response = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify({
+          id: 9,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: {
+            arguments: { count: "not-a-number" },
+            name: "count",
+          },
+        }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body: JsonResponse = await response.json();
+    expect.soft(body.error?.code).toBe(-32602);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("should return a JSON-RPC error when tool validation throws", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+    const execute = vi.fn(async () => "unexpected");
+
+    server.addTool({
+      description: "Throw during validation",
+      execute,
+      name: "explode",
+      parameters: z.object({ value: z.string() }).transform(() => {
+        throw new Error("validator exploded");
+      }),
+    });
+
+    const response = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify({
+          id: 11,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: {
+            arguments: { value: "boom" },
+            name: "explode",
+          },
+        }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body: JsonResponse = await response.json();
+    expect(body).toMatchObject({
+      error: { code: -32603 },
+      id: 11,
+      jsonrpc: "2.0",
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("should pass transformed tool arguments to execute", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+    const execute = vi.fn(
+      async ({ normalized }: { normalized: string }) => normalized,
+    );
+
+    server.addTool({
+      description: "Normalize a value",
+      execute,
+      name: "normalize",
+      parameters: z
+        .object({ value: z.string() })
+        .transform(({ value }) => ({ normalized: value.trim().toUpperCase() })),
+    });
+
+    const response = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify({
+          id: 10,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: {
+            arguments: { value: "  transformed  " },
+            name: "normalize",
+          },
+        }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body: JsonResponse = await response.json();
+    expect(body.result.content).toEqual([
+      { text: "TRANSFORMED", type: "text" },
+    ]);
+    expect(execute).toHaveBeenCalledWith({ normalized: "TRANSFORMED" });
   });
 
   it("should list resources", async () => {
