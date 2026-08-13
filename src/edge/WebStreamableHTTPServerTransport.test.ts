@@ -253,6 +253,51 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(internals._requestToStreamMapping.size).toBe(0);
   });
 
+  it("stores a response produced after the client disconnected, for later replay", async () => {
+    const stored: { eventId: string; message: JsonResponse; streamId: string }[] =
+      [];
+    const transport = new WebStreamableHTTPServerTransport({
+      eventStore: {
+        replayEventsAfter: async () => "unused",
+        storeEvent: async (streamId, message) => {
+          const eventId = `evt-${stored.length + 1}`;
+          stored.push({ eventId, message, streamId });
+          return eventId;
+        },
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(50).connect(transport);
+    // Consume initialize so only the tool call is left in the mappings.
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const before = stored.length;
+    const response = await transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "one"),
+        "text/event-stream",
+        "test-session",
+      ),
+    );
+    expect(response.status).toBe(200);
+
+    // The client gives up before the 50 ms tool answers.
+    await response.body?.cancel("client disconnected");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // The event store is the durable side of resumability: a reconnect with
+    // Last-Event-Id replays from it. If the response never reaches storeEvent,
+    // it is lost for good even though the socket is what actually failed.
+    const toolResponse = stored
+      .slice(before)
+      .find((event) => event.message.id === 2 && "result" in event.message);
+    expect(toolResponse).toBeDefined();
+  });
+
   it("should wait for a slow handler in JSON response mode", async () => {
     const transport = new WebStreamableHTTPServerTransport({
       enableJsonResponse: true,
