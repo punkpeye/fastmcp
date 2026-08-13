@@ -8,6 +8,7 @@
 
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
+  CancelledNotificationSchema,
   isInitializeRequest,
   isJSONRPCError,
   isJSONRPCRequest,
@@ -515,6 +516,16 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
 
+    // A cancelled request is never answered — the SDK suppresses the response
+    // of a request whose abort signal fired — so send() never runs for its id
+    // and nothing else would ever drop its routing entry. Release it here.
+    for (const message of messages) {
+      const cancelled = CancelledNotificationSchema.safeParse(message);
+      if (cancelled.success) {
+        await this.releaseCancelledRequest(cancelled.data.params.requestId);
+      }
+    }
+
     // Process messages through the transport
     for (const message of messages) {
       this.onmessage?.(message, { authInfo: undefined });
@@ -599,6 +610,44 @@ export class WebStreamableHTTPServerTransport implements Transport {
    */
   private handleUnsupportedRequest(): Response {
     return this.createErrorResponse(405, -32000, "Method not allowed");
+  }
+
+  /**
+   * Settle the routing state of a request the client cancelled, which will
+   * therefore never produce a response: the same drain `send()` performs once
+   * a response has been written, minus the response. Idempotent, so it is a
+   * no-op if the response won the race against the cancellation.
+   *
+   * JSON-mode POSTs are left alone: `_jsonResponseCollectors` owns their
+   * settlement.
+   */
+  private async releaseCancelledRequest(requestId: RequestId): Promise<void> {
+    const streamId = this._requestToStreamMapping.get(requestId);
+    if (streamId === undefined || this._jsonResponseCollectors.has(streamId)) {
+      return;
+    }
+
+    this._requestToStreamMapping.delete(requestId);
+    const streamInUse = Array.from(
+      this._requestToStreamMapping.values(),
+    ).includes(streamId);
+    if (streamInUse) {
+      return;
+    }
+
+    // Nothing will ever be written to this stream again; close it rather than
+    // leaving the client reading a stream that can only hang.
+    const writer = this._streamMapping.get(streamId);
+    this._streamMapping.delete(streamId);
+    if (writer) {
+      try {
+        await writer.close();
+      } catch (error) {
+        this.onerror?.(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    }
   }
 
   /**

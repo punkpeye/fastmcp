@@ -301,6 +301,95 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(toolResponse).toBeDefined();
   });
 
+  it("releases the routing entry of a request the client cancelled", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      eventStore: {
+        replayEventsAfter: async () => "unused",
+        storeEvent: async () => "evt-1",
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(50).connect(transport);
+    // Consume initialize so only the tool call is left in the mappings.
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const internals = transport as unknown as TransportInternals;
+    const response = await transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "one"),
+        "text/event-stream",
+        "test-session",
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(internals._requestToStreamMapping.size).toBe(1);
+
+    // Cancel, then drop the stream — what a client does on a user abort. The
+    // SDK suppresses the response of a cancelled request, so send() never runs
+    // for this id and nothing else would ever drop its routing entry.
+    const cancelled = await transport.handleRequest(
+      createPostRequest(
+        {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { reason: "user aborted", requestId: 2 },
+        },
+        "application/json, text/event-stream",
+        "test-session",
+      ),
+    );
+    expect(cancelled.status).toBe(202);
+    await response.body?.cancel("client disconnected");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(internals._requestToStreamMapping.size).toBe(0);
+    expect(internals._streamMapping.size).toBe(0);
+  });
+
+  it("closes a POST stream whose only request was cancelled", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(50).connect(transport);
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const response = await transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "one"),
+        "text/event-stream",
+        "test-session",
+      ),
+    );
+    expect(response.status).toBe(200);
+
+    // The client cancels but keeps reading. No response will ever be written
+    // to this stream, so it must end rather than hang until the client
+    // gives up.
+    await transport.handleRequest(
+      createPostRequest(
+        {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { reason: "user aborted", requestId: 2 },
+        },
+        "application/json, text/event-stream",
+        "test-session",
+      ),
+    );
+
+    const body = await readSSEBody(response);
+    expect(body).not.toBeNull();
+    expect(body).toBe("");
+  });
+
   it("should wait for a slow handler in JSON response mode", async () => {
     const transport = new WebStreamableHTTPServerTransport({
       enableJsonResponse: true,
