@@ -254,8 +254,11 @@ describe("WebStreamableHTTPServerTransport", () => {
   });
 
   it("stores a response produced after the client disconnected, for later replay", async () => {
-    const stored: { eventId: string; message: JsonResponse; streamId: string }[] =
-      [];
+    const stored: {
+      eventId: string;
+      message: JsonResponse;
+      streamId: string;
+    }[] = [];
     const transport = new WebStreamableHTTPServerTransport({
       eventStore: {
         replayEventsAfter: async () => "unused",
