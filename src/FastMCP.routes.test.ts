@@ -3,7 +3,6 @@ import type { Context } from "hono";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getRandomPort } from "get-port-please";
-import { fetch } from "undici";
 import { expect, test } from "vitest";
 import { z } from "zod";
 

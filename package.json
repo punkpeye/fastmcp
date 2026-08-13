@@ -47,7 +47,6 @@
     "hono": "^4.11.5",
     "mcp-proxy": "^6.4.6",
     "strict-event-emitter-types": "^2.0.0",
-    "undici": "^7.16.0",
     "uri-templates": "^0.2.0",
     "xsschema": "^0.4.3",
     "yargs": "^18.0.0",
