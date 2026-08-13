@@ -180,16 +180,21 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
 
       const writer = this._streamMapping.get(streamId);
-      if (writer) {
+      // With an event store the message must be persisted even if the client
+      // has already disconnected, so a reconnect with Last-Event-Id can replay
+      // it. The live write to the SSE stream is best-effort on top of that.
+      if (writer || this._eventStore) {
         try {
+          let eventId: string | undefined;
           if (this._eventStore) {
-            const eventId = await this._eventStore.storeEvent(
-              streamId,
-              message,
-            );
-            await this.writeSSEEventWithId(writer, eventId, message);
-          } else {
-            await this.writeSSEEvent(writer, message);
+            eventId = await this._eventStore.storeEvent(streamId, message);
+          }
+          if (writer) {
+            if (eventId === undefined) {
+              await this.writeSSEEvent(writer, message);
+            } else {
+              await this.writeSSEEventWithId(writer, eventId, message);
+            }
           }
 
           // Close the POST stream once all of its requests are answered
@@ -200,7 +205,9 @@ export class WebStreamableHTTPServerTransport implements Transport {
             ).includes(streamId);
             if (!streamInUse) {
               this._streamMapping.delete(streamId);
-              await writer.close();
+              if (writer) {
+                await writer.close();
+              }
             }
           }
         } catch (error) {
@@ -645,10 +652,16 @@ export class WebStreamableHTTPServerTransport implements Transport {
         return;
       }
       this._streamMapping.delete(streamId);
-      // Drop the routing entries that pointed at this stream, so a response
-      // arriving after the client gave up is not looked up against a writer
-      // that no longer exists. No-op for the standalone GET stream, which is
-      // never a request target.
+      // With an event store, a response can still arrive after the client gave
+      // up, and it must be persisted for replay. Keep the routing entry so
+      // send() can resolve the stream id and store under it; send() drops the
+      // entry once the response has been stored.
+      if (this._eventStore) {
+        return;
+      }
+      // No event store: nothing will be persisted for this stream, so drop the
+      // routing entries now rather than leaking them. No-op for the standalone
+      // GET stream, which is never a request target.
       for (const [requestId, mappedStreamId] of this._requestToStreamMapping) {
         if (mappedStreamId === streamId) {
           this._requestToStreamMapping.delete(requestId);
