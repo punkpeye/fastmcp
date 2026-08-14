@@ -2197,6 +2197,43 @@ test("lists resource templates", async () => {
   });
 });
 
+test("lists an empty set of resource templates when the server only has resources", async () => {
+  // Regression test: a server with a resource and no resource template
+  // advertises the `resources` capability but used to register the
+  // `resources/templates/list` handler only when a template existed, so the
+  // method it had just advertised answered -32601 Method not found. The
+  // reference SDK registers list/templates/read together and returns an empty
+  // array. @wong2/mcp-cli - the client `fastmcp dev` spawns - calls
+  // listResourceTemplates() whenever the capability is present, so this took
+  // `npx fastmcp dev` down on any resources-only server.
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(client.getServerCapabilities()?.resources).toBeDefined();
+
+      expect(await client.listResourceTemplates()).toEqual({
+        resourceTemplates: [],
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResource({
+        load: async () => {
+          return { text: "Example log content" };
+        },
+        mimeType: "text/plain",
+        name: "Application Logs",
+        uri: "file:///logs/app.log",
+      });
+
+      return server;
+    },
+  });
+});
+
 test(
   "HTTP Stream: custom endpoint works with /another-mcp",
   { timeout: 20000 },
