@@ -301,6 +301,58 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(toolResponse).toBeDefined();
   });
 
+  it("stores a notification produced after the client dropped the GET stream", async () => {
+    // The POST-response arm above rides `_requestToStreamMapping`; this one rides
+    // the standalone GET stream, whose id is a constant (`_GET_stream`) with no
+    // routing entry. A refactor that gates persistence on "was this actually
+    // requested" (e.g. `requestId !== undefined`) keeps every other test green
+    // and silently drops server-initiated notifications after a GET disconnect —
+    // which is the #322 regression on the path where Last-Event-Id replay of
+    // server pushes matters most. This pins that arm on its own.
+    const stored: {
+      eventId: string;
+      message: JsonResponse;
+      streamId: string;
+    }[] = [];
+    const transport = new WebStreamableHTTPServerTransport({
+      eventStore: {
+        replayEventsAfter: async () => "unused",
+        storeEvent: async (streamId, message) => {
+          const eventId = `evt-${stored.length + 1}`;
+          stored.push({ eventId, message, streamId });
+          return eventId;
+        },
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(10).connect(transport);
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const get = await transport.handleRequest(createGetRequest());
+    expect(get.status).toBe(200);
+    // The client opens the standalone stream and then drops it.
+    await get.body?.cancel("client disconnected");
+    await flushMicrotasks();
+
+    // `send()` is awaited, so the store call has happened by the time it returns:
+    // no sleep needed here, unlike the wall-clock POST-response arm.
+    const before = stored.length;
+    await transport.send({
+      jsonrpc: "2.0",
+      method: "notifications/message",
+      params: { data: "after the disconnect", level: "info" },
+    });
+
+    const notification = stored
+      .slice(before)
+      .find((event) => event.message.method === "notifications/message");
+    expect(notification).toBeDefined();
+  });
+
   it("releases the routing entry of a request the client cancelled", async () => {
     const transport = new WebStreamableHTTPServerTransport({
       eventStore: {
