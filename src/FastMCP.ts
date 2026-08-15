@@ -297,6 +297,7 @@ type Context<T extends FastMCPSessionAuth> = {
    * counters, or maintain user-specific data across multiple requests.
    */
   sessionId?: string;
+  signal: AbortSignal;
   /**
    * Streams incremental content while the tool is still executing, by emitting
    * a `notifications/tool/streamContent` notification.
@@ -331,7 +332,7 @@ type Literal = boolean | null | number | string | undefined;
  */
 type LoadContext<T extends FastMCPSessionAuth> = Omit<
   Context<T>,
-  "reportProgress" | "streamContent"
+  "reportProgress" | "signal" | "streamContent"
 >;
 
 type Progress = {
@@ -2580,6 +2581,23 @@ export class FastMCPSession<
             });
           }
 
+          const abortController = new AbortController();
+          const onClientAbort = () => {
+            abortController.abort(
+              extra?.signal?.reason || new Error("Client disconnected"),
+            );
+          };
+
+          if (extra?.signal) {
+            if (extra.signal.aborted) {
+              onClientAbort();
+            } else {
+              extra.signal.addEventListener("abort", onClientAbort, {
+                once: true,
+              });
+            }
+          }
+
           const executeToolPromise = Promise.resolve(
             tool.execute(args, {
               client: {
@@ -2597,9 +2615,14 @@ export class FastMCPSession<
                   : undefined,
               session: this.#auth,
               sessionId: this.sessionId,
+              signal: abortController.signal,
               streamContent,
             }),
-          );
+          ).finally(() => {
+            if (extra?.signal) {
+              extra.signal.removeEventListener("abort", onClientAbort);
+            }
+          });
 
           // Started only once execute has returned a promise, so a tool that
           // throws synchronously cannot leave a timer behind.
@@ -2615,6 +2638,9 @@ export class FastMCPSession<
                   executeToolPromise,
                   new Promise<never>((_, reject) => {
                     const timeoutId = setTimeout(() => {
+                      abortController.abort(
+                        new Error("Tool execution timed out"),
+                      );
                       reject(
                         new UserError(
                           `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
