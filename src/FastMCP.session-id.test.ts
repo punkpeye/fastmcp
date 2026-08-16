@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -324,6 +325,54 @@ describe("FastMCP Session ID Support", () => {
         await client.close();
       } finally {
         await server.stop();
+      }
+    });
+
+    it("should expose a sessionId the transport assigns after connect resolves", async () => {
+      const server = new FastMCP<TestAuth>({
+        name: "test-server",
+        version: "1.0.0",
+      });
+
+      let capturedSessionId: string | undefined;
+
+      server.addTool({
+        description: "Test tool that captures the session ID",
+        execute: async (_args, context) => {
+          capturedSessionId = context.sessionId;
+          return "ok";
+        },
+        name: "capture-session",
+        parameters: z.object({}),
+      });
+
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+
+      const client = new Client(
+        { name: "test-client", version: "1.0.0" },
+        { capabilities: {} },
+      );
+
+      const [session] = await Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+
+      // StreamableHTTPServerTransport assigns its sessionId while handling
+      // `initialize`, which happens after connect() resolves — so a session ID
+      // that only appears at this point still has to reach tool handlers.
+      (serverTransport as { sessionId?: string }).sessionId =
+        "1b4e28ba-2fa1-11d2-883f-0016d3cca427";
+
+      try {
+        expect(session.sessionId).toBe("1b4e28ba-2fa1-11d2-883f-0016d3cca427");
+
+        await client.callTool({ arguments: {}, name: "capture-session" });
+
+        expect(capturedSessionId).toBe("1b4e28ba-2fa1-11d2-883f-0016d3cca427");
+      } finally {
+        await client.close();
       }
     });
   });
