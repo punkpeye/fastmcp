@@ -353,6 +353,146 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(notification).toBeDefined();
   });
 
+  it("does not store standalone-stream events before any client opens one", async () => {
+    // The counterpart to the test above. `_GET_stream` is a constant, so it
+    // resolves even when no GET stream has ever existed, and persisting there
+    // writes events nothing can ever read: replay is keyed off Last-Event-Id,
+    // and a client that never held the stream was never handed an id to resume
+    // from. The GET stream is optional in the spec, so a client that only ever
+    // POSTs would otherwise grow the store for the life of the session.
+    const stored: {
+      message: JsonResponse;
+      streamId: string;
+    }[] = [];
+    const transport = new WebStreamableHTTPServerTransport({
+      eventStore: {
+        replayEventsAfter: async () => "unused",
+        storeEvent: async (streamId, message) => {
+          stored.push({ message, streamId });
+          return `evt-${stored.length}`;
+        },
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    // Guards against the assertion below passing because the store was never
+    // wired up at all: the initialize response is persisted on its POST stream.
+    expect(stored.length).toBeGreaterThan(0);
+
+    // No GET stream is ever opened.
+    await transport.send({
+      jsonrpc: "2.0",
+      method: "notifications/message",
+      params: { data: "nobody is listening", level: "info" },
+    });
+
+    expect(stored.filter((event) => event.streamId === "_GET_stream")).toEqual(
+      [],
+    );
+  });
+
+  it("re-arms the standalone guard for the next session on the same instance", async () => {
+    // A DELETE ends the session but leaves the instance usable, so it can serve
+    // a fresh initialize. A latch that outlived the session would treat session
+    // two as though it had already opened a GET stream, reopening the hole the
+    // test above closes.
+    const stored: { streamId: string }[] = [];
+    const transport = new WebStreamableHTTPServerTransport({
+      eventStore: {
+        replayEventsAfter: async () => "unused",
+        storeEvent: async (streamId) => {
+          stored.push({ streamId });
+          return `evt-${stored.length}`;
+        },
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    // Session one opens the standalone stream, then drops it.
+    const get = await transport.handleRequest(createGetRequest());
+    await get.body?.cancel("client disconnected");
+    await flushMicrotasks();
+
+    const deleted = await transport.handleRequest(
+      new Request("http://localhost/mcp", {
+        headers: { "mcp-session-id": "test-session" },
+        method: "DELETE",
+      }),
+    );
+    expect(deleted.status).toBe(204);
+
+    // Session two, on the same instance, never opens a GET stream.
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const before = stored.length;
+    await transport.send({
+      jsonrpc: "2.0",
+      method: "notifications/message",
+      params: { data: "session two, nobody listening", level: "info" },
+    });
+
+    expect(stored.slice(before)).toEqual([]);
+  });
+
+  it("stores a standalone event sent while a replay is still resolving", async () => {
+    // `replayEventsAfter` only reveals which stream it replayed once it
+    // settles, so during the await the stream is neither in `_streamMapping`
+    // nor latched. Dropping the event there would lose it outright: it is not
+    // written live either, because the writer is not yet reachable.
+    const stored: { streamId: string }[] = [];
+    let releaseReplay: (() => void) | undefined;
+    const replayGate = new Promise<void>((resolve) => {
+      releaseReplay = resolve;
+    });
+
+    const transport = new WebStreamableHTTPServerTransport({
+      eventStore: {
+        replayEventsAfter: async () => {
+          await replayGate;
+          return "_GET_stream";
+        },
+        storeEvent: async (streamId) => {
+          stored.push({ streamId });
+          return `evt-${stored.length}`;
+        },
+      },
+      // Stateless: handleGetRequest skips the session check, so a resume can
+      // land on an instance that never served the original GET.
+      sessionIdGenerator: undefined,
+    });
+    await createServer().connect(transport);
+
+    const resuming = transport.handleRequest(createGetRequest("evt-0"));
+    await flushMicrotasks();
+
+    const before = stored.length;
+    await transport.send({
+      jsonrpc: "2.0",
+      method: "notifications/message",
+      params: { data: "sent mid-replay", level: "info" },
+    });
+    expect(stored.slice(before)).toHaveLength(1);
+
+    releaseReplay?.();
+    await (await resuming).body?.cancel("done");
+  });
+
   it("releases the routing entry of a request the client cancelled", async () => {
     const transport = new WebStreamableHTTPServerTransport({
       eventStore: {

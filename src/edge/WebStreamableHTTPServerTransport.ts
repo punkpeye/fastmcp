@@ -94,9 +94,25 @@ export class WebStreamableHTTPServerTransport implements Transport {
   private _jsonResponseCollectors = new Map<StreamId, PendingJsonResponse>();
   private _onsessionclosed?: (sessionId: string) => Promise<void> | void;
   private _onsessioninitialized?: (sessionId: string) => Promise<void> | void;
+  /**
+   * Replays whose stream id is still being resolved. `replayEventsAfter` only
+   * reveals which stream it was replaying once it settles, so a standalone
+   * send during that window has nothing to test against; persist rather than
+   * drop, since over-storing for the length of a replay beats losing an event.
+   */
+  private _replaysInFlight = 0;
+
   private _requestToStreamMapping = new Map<RequestId, StreamId>();
 
   private _standaloneSseStreamId = "_GET_stream";
+  /**
+   * Whether a client has held the standalone GET stream during this session.
+   * Latched rather than read from `_streamMapping`, so persistence survives
+   * the disconnect window the store exists to cover while still telling a
+   * dropped stream apart from one that was never opened. Reset with the rest
+   * of the per-session state, since the next session starts with no stream.
+   */
+  private _standaloneStreamOpened = false;
   private _started = false;
   private _streamMapping = new Map<
     StreamId,
@@ -124,6 +140,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
     this._streamMapping.clear();
+    this._standaloneStreamOpened = false;
     this.releasePendingRequests();
     this._started = false;
     this.onclose?.();
@@ -184,11 +201,15 @@ export class WebStreamableHTTPServerTransport implements Transport {
       // With an event store the message must be persisted even if the client
       // has already disconnected, so a reconnect with Last-Event-Id can replay
       // it. The live write to the SSE stream is best-effort on top of that.
-      if (writer || this._eventStore) {
+      const store = this.shouldPersist(streamId, writer)
+        ? this._eventStore
+        : undefined;
+
+      if (writer || store) {
         try {
           let eventId: string | undefined;
-          if (this._eventStore) {
-            eventId = await this._eventStore.storeEvent(streamId, message);
+          if (store) {
+            eventId = await store.storeEvent(streamId, message);
           }
           if (writer) {
             if (eventId === undefined) {
@@ -291,6 +312,9 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
     this._streamMapping.clear();
+    // Per-session, like the session id below: this instance stays usable, and
+    // the next session starts having opened no standalone stream of its own.
+    this._standaloneStreamOpened = false;
     this.releasePendingRequests();
 
     await this._onsessionclosed?.(this.sessionId ?? "");
@@ -582,6 +606,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     const { readable, writable } = new TransformStream<Uint8Array>();
     const writer = writable.getWriter();
 
+    this._replaysInFlight += 1;
     try {
       const streamId = await this._eventStore.replayEventsAfter(lastEventId, {
         send: async (eventId, message) => {
@@ -592,6 +617,8 @@ export class WebStreamableHTTPServerTransport implements Transport {
     } catch (error) {
       await writer.close();
       return this.createErrorResponse(500, -32000, `Replay failed: ${error}`);
+    } finally {
+      this._replaysInFlight -= 1;
     }
 
     return new Response(readable, {
@@ -691,10 +718,47 @@ export class WebStreamableHTTPServerTransport implements Transport {
     collector.resolve(responses);
   }
 
+  /**
+   * Whether an event addressed to `streamId` should go to the event store.
+   *
+   * Everything but the standalone stream is persisted whenever a store is
+   * configured: those ids exist only because their stream did. The standalone
+   * id is a constant, so it resolves whether or not a client ever opened that
+   * stream, and storing before the first GET writes events nothing can reach —
+   * replay is keyed off Last-Event-Id, and a client that never held the stream
+   * was never handed an id to resume from.
+   */
+  private shouldPersist(
+    streamId: StreamId,
+    writer: undefined | WritableStreamDefaultWriter<Uint8Array>,
+  ): boolean {
+    if (this._eventStore === undefined) {
+      return false;
+    }
+
+    if (streamId !== this._standaloneSseStreamId) {
+      return true;
+    }
+
+    return (
+      this._standaloneStreamOpened ||
+      // A live writer means the stream is open now, which is stronger evidence
+      // than the latch. Belt and braces: it keeps a writer reaching this point
+      // without `trackStream` from producing an SSE event with no `id:`.
+      writer !== undefined ||
+      this._replaysInFlight > 0
+    );
+  }
+
   private trackStream(
     streamId: StreamId,
     writer: WritableStreamDefaultWriter<Uint8Array>,
   ): void {
+    // Latched here rather than at each call site so a new way of opening the
+    // standalone stream cannot forget to record it.
+    if (streamId === this._standaloneSseStreamId) {
+      this._standaloneStreamOpened = true;
+    }
     this._streamMapping.set(streamId, writer);
     const removeStreamIfCurrent = () => {
       if (this._streamMapping.get(streamId) !== writer) {
