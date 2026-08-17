@@ -1546,16 +1546,18 @@ export class FastMCPSession<
         this.addResource(resource);
       }
 
+      for (const resourceTemplate of resourcesTemplates) {
+        this.addResourceTemplate(resourceTemplate);
+      }
+
       this.setupResourceHandlers();
       this.setupResourceSubscriptionHandlers();
-
-      if (resourcesTemplates.length) {
-        for (const resourceTemplate of resourcesTemplates) {
-          this.addResourceTemplate(resourceTemplate);
-        }
-
-        this.setupResourceTemplateHandlers();
-      }
+      // `resources/templates/list` belongs to the `resources` capability that
+      // was just advertised, so the handler has to answer even when there is
+      // nothing to list - the reference SDK returns an empty array. Gating it
+      // on having templates made a resources-only server reply -32601 Method
+      // not found to any client that lists templates.
+      this.setupResourceTemplateHandlers();
     }
 
     if (prompts.length) {
