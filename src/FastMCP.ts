@@ -298,6 +298,19 @@ type Context<T extends FastMCPSessionAuth> = {
    */
   sessionId?: string;
   /**
+   * Aborted once the tool's result can no longer reach anyone: the client
+   * cancelled the call, the session went away, or `timeoutMs` elapsed.
+   *
+   * Nothing is killed on your behalf — FastMCP stops waiting, but the promise
+   * `execute` returned keeps running until it settles. Forward this signal to
+   * whatever does the real work (`fetch`, a database driver, a subprocess) so
+   * the work stops with the call instead of outliving it.
+   *
+   * It is never aborted after a call completes normally, so it is safe to
+   * attach cleanup to it.
+   */
+  signal: AbortSignal;
+  /**
    * Streams incremental content while the tool is still executing, by emitting
    * a `notifications/tool/streamContent` notification.
    *
@@ -327,11 +340,13 @@ type Literal = boolean | null | number | string | undefined;
  *
  * This is a subset of the tool execution {@link Context}. `reportProgress`
  * and `streamContent` are tied to a tool call's progress token / streaming
- * notification and are not available outside of `tool.execute`.
+ * notification and are not available outside of `tool.execute`. `signal` is
+ * omitted too: its timeout leg comes from `tool.timeoutMs`, which `load` has
+ * no equivalent of.
  */
 type LoadContext<T extends FastMCPSessionAuth> = Omit<
   Context<T>,
-  "reportProgress" | "streamContent"
+  "reportProgress" | "signal" | "streamContent"
 >;
 
 type Progress = {
@@ -1371,6 +1386,16 @@ export class FastMCPSession<
     this.#sessionId = value;
   }
 
+  /**
+   * Aborted once the session ends, and folded into the `signal` every tool
+   * call receives. The MCP SDK only aborts a request's own signal for an
+   * explicit `notifications/cancelled`, and neither `Protocol` nor
+   * `StreamableHTTPServerTransport` touches it when the transport simply goes
+   * away — so without this a tool keeps running after the client that asked
+   * for it has hung up.
+   */
+  #abortController = new AbortController();
+
   #auth: T | undefined;
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
@@ -1544,6 +1569,8 @@ export class FastMCPSession<
     if (this.#pingInterval) {
       clearInterval(this.#pingInterval);
     }
+
+    this.#abortSession();
 
     try {
       await this.#server.close();
@@ -1783,6 +1810,17 @@ export class FastMCPSession<
         reject(event.error);
       });
     });
+  }
+
+  /**
+   * Cancels the `signal` held by every tool still executing on this session.
+   * Idempotent, so the close path and the transport's own close handler can
+   * both call it.
+   */
+  #abortSession() {
+    if (!this.#abortController.signal.aborted) {
+      this.#abortController.abort(new SessionError("Session closed"));
+    }
   }
 
   /**
@@ -2136,6 +2174,12 @@ export class FastMCPSession<
   private setupErrorHandling() {
     this.#server.onerror = (error) => {
       this.#logger.error("[FastMCP error]", error);
+    };
+
+    // Covers the client that hangs up rather than closing politely: `close()`
+    // never runs in that case, but the transport still reports the loss.
+    this.#server.onclose = () => {
+      this.#abortSession();
     };
   }
 
@@ -2580,6 +2624,24 @@ export class FastMCPSession<
             });
           }
 
+          // Aborted when this call times out. Kept separate from the sources
+          // below so the timer that drives it can still be cleared the moment
+          // the tool settles — a fired-and-forgotten timeout would abort the
+          // signal after a successful call and run the tool's cleanup for it.
+          const timeoutAbort = new AbortController();
+
+          // Composed rather than forwarded by hand: `AbortSignal.any()` needs
+          // no listener bookkeeping, so nothing leaks when `execute` throws
+          // synchronously, and Node holds the composite through a WeakRef, so
+          // a per-call signal cannot pin the session-scoped one.
+          const signal = AbortSignal.any([
+            timeoutAbort.signal,
+            this.#abortController.signal,
+            // Only ever aborted for an explicit `notifications/cancelled`; the
+            // session signal above is what covers a client that simply left.
+            ...(extra.signal ? [extra.signal] : []),
+          ]);
+
           const executeToolPromise = Promise.resolve(
             tool.execute(args, {
               client: {
@@ -2597,6 +2659,7 @@ export class FastMCPSession<
                   : undefined,
               session: this.#auth,
               sessionId: this.sessionId,
+              signal,
               streamContent,
             }),
           );
@@ -2615,11 +2678,15 @@ export class FastMCPSession<
                   executeToolPromise,
                   new Promise<never>((_, reject) => {
                     const timeoutId = setTimeout(() => {
-                      reject(
-                        new UserError(
-                          `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
-                        ),
+                      const timedOut = new UserError(
+                        `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
                       );
+
+                      // Abort before rejecting: the tool learns it lost the
+                      // race while its own frame is still the reason, rather
+                      // than after the error has already gone back out.
+                      timeoutAbort.abort(timedOut);
+                      reject(timedOut);
                     }, tool.timeoutMs);
 
                     // If promise resolves first
