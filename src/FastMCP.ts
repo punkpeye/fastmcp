@@ -1341,8 +1341,26 @@ export class FastMCPSession<
     return this.#server;
   }
 
+  /**
+   * The HTTP session ID, or `undefined` for transports that do not have one.
+   *
+   * Resolved from the transport on every read rather than captured when the
+   * session connects: `StreamableHTTPServerTransport` assigns its `sessionId`
+   * while it handles `initialize`, which happens after `connect()` resolves.
+   * A value read at connect time is therefore still `undefined`.
+   */
   public get sessionId(): string | undefined {
-    return this.#sessionId;
+    if (this.#sessionId !== undefined) {
+      return this.#sessionId;
+    }
+
+    const transport = this.#server.transport as
+      | ({ sessionId?: string } & Transport)
+      | undefined;
+
+    return typeof transport?.sessionId === "string"
+      ? transport.sessionId
+      : undefined;
   }
 
   public set sessionId(value: string | undefined) {
@@ -1539,16 +1557,6 @@ export class FastMCPSession<
 
     try {
       await this.#server.connect(transport);
-
-      // Extract session ID from transport if available (HTTP transports only)
-      if ("sessionId" in transport) {
-        const transportWithSessionId = transport as {
-          sessionId?: string;
-        } & Transport;
-        if (typeof transportWithSessionId.sessionId === "string") {
-          this.#sessionId = transportWithSessionId.sessionId;
-        }
-      }
 
       // Skipped in stateless mode: a session there serves one request, and the
       // initialize that carried the client's capabilities was handled by a
@@ -1796,7 +1804,7 @@ export class FastMCPSession<
       requestId:
         typeof meta?.requestId === "string" ? meta.requestId : undefined,
       session: this.#auth,
-      sessionId: this.#sessionId,
+      sessionId: this.sessionId,
     };
   }
 
@@ -2584,7 +2592,7 @@ export class FastMCPSession<
                   ? request.params._meta.requestId
                   : undefined,
               session: this.#auth,
-              sessionId: this.#sessionId,
+              sessionId: this.sessionId,
               streamContent,
             }),
           );
