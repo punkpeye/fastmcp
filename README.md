@@ -949,6 +949,50 @@ Limits worth knowing:
 - On `stdio` there is no proxy to keep alive, so enabling it there only adds
   notification traffic.
 
+#### Cancelling Long Tool Calls (`context.signal`)
+
+Every `execute` receives an `AbortSignal` that fires once its result can no
+longer reach anyone. Forward it to whatever does the real work so the work stops
+with the call instead of outliving it:
+
+```ts
+server.addTool({
+  name: "fetch_report",
+  parameters: z.object({ url: z.string() }),
+  timeoutMs: 30000,
+  execute: async (args, { signal }) => {
+    const response = await fetch(args.url, { signal });
+    return await response.text();
+  },
+});
+```
+
+It aborts on any of three events:
+
+- **The client cancelled the call** — it sent `notifications/cancelled`, which is
+  what the MCP SDK emits when a caller aborts its own request.
+- **The session ended** — the transport closed, or the session was closed
+  explicitly. No cancellation notification is involved here.
+- **`timeoutMs` elapsed** — `signal.reason` is the same `UserError` the caller
+  receives, so a tool can tell a timeout apart from a cancellation.
+
+The signal is never aborted after a call completes normally, so attaching
+cleanup to it is safe.
+
+Limits worth knowing:
+
+- **Nothing is killed for you.** FastMCP stops waiting for the tool, but the
+  promise `execute` returned keeps running until it settles. A tool that ignores
+  the signal still runs to completion — it just does so with nowhere to report.
+- **An HTTP client that vanishes mid-request is not detected.** The MCP SDK only
+  aborts a request's own signal for an explicit `notifications/cancelled`, and
+  `StreamableHTTPServerTransport` does not treat an abandoned response stream as
+  a session close. A caller that hangs up without terminating its session
+  (`DELETE`) leaves the tool running until it finishes or times out. Set
+  `timeoutMs` on anything expensive rather than relying on disconnect detection.
+- **`load` does not get one.** Resources, resource templates, and prompts
+  receive a smaller context without `signal`.
+
 ### Health-check Endpoint
 
 When you run FastMCP with the `httpStream` transport you can optionally expose a
