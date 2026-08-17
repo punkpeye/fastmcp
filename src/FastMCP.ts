@@ -1344,23 +1344,27 @@ export class FastMCPSession<
   /**
    * The HTTP session ID, or `undefined` for transports that do not have one.
    *
-   * Resolved from the transport on every read rather than captured when the
-   * session connects: `StreamableHTTPServerTransport` assigns its `sessionId`
-   * while it handles `initialize`, which happens after `connect()` resolves.
-   * A value read at connect time is therefore still `undefined`.
+   * Resolved from the transport rather than captured when the session
+   * connects: `StreamableHTTPServerTransport` assigns its `sessionId` while it
+   * handles `initialize`, which happens after `connect()` resolves. A value
+   * read at connect time is therefore still `undefined`.
+   *
+   * The first ID seen is latched, so the session keeps reporting it once the
+   * transport detaches — `Protocol` drops its transport reference on close,
+   * which would otherwise make the ID vanish mid-teardown. Latching is safe
+   * because {@link connect} refuses a second transport, so a session never
+   * sees two IDs.
    */
   public get sessionId(): string | undefined {
-    if (this.#sessionId !== undefined) {
-      return this.#sessionId;
+    if (this.#sessionId === undefined) {
+      const transportSessionId = this.#server.transport?.sessionId;
+
+      if (typeof transportSessionId === "string") {
+        this.#sessionId = transportSessionId;
+      }
     }
 
-    const transport = this.#server.transport as
-      | ({ sessionId?: string } & Transport)
-      | undefined;
-
-    return typeof transport?.sessionId === "string"
-      ? transport.sessionId
-      : undefined;
+    return this.#sessionId;
   }
 
   public set sessionId(value: string | undefined) {

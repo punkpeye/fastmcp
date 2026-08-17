@@ -375,6 +375,40 @@ describe("FastMCP Session ID Support", () => {
         await client.close();
       }
     });
+
+    it("should keep reporting the sessionId after the session closes", async () => {
+      const server = new FastMCP<TestAuth>({
+        name: "test-server",
+        version: "1.0.0",
+      });
+
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+
+      const client = new Client(
+        { name: "test-client", version: "1.0.0" },
+        { capabilities: {} },
+      );
+
+      const [session] = await Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+
+      (serverTransport as { sessionId?: string }).sessionId =
+        "1b4e28ba-2fa1-11d2-883f-0016d3cca427";
+
+      expect(session.sessionId).toBe("1b4e28ba-2fa1-11d2-883f-0016d3cca427");
+
+      await client.close();
+      await session.close();
+
+      // `Protocol` drops its transport reference on close, so resolving the ID
+      // from the transport on every read would lose it exactly when teardown
+      // handlers (e.g. the `disconnect` event) want to report which session went
+      // away.
+      expect(session.sessionId).toBe("1b4e28ba-2fa1-11d2-883f-0016d3cca427");
+    });
   });
 
   describe("stdio transport", () => {
