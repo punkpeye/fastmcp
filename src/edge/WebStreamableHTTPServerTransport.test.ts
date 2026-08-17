@@ -253,6 +253,195 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(internals._requestToStreamMapping.size).toBe(0);
   });
 
+  it("stores a response produced after the client disconnected, for later replay", async () => {
+    const stored: {
+      eventId: string;
+      message: JsonResponse;
+      streamId: string;
+    }[] = [];
+    const transport = new WebStreamableHTTPServerTransport({
+      eventStore: {
+        replayEventsAfter: async () => "unused",
+        storeEvent: async (streamId, message) => {
+          const eventId = `evt-${stored.length + 1}`;
+          stored.push({ eventId, message, streamId });
+          return eventId;
+        },
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(50).connect(transport);
+    // Consume initialize so only the tool call is left in the mappings.
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const before = stored.length;
+    const response = await transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "one"),
+        "text/event-stream",
+        "test-session",
+      ),
+    );
+    expect(response.status).toBe(200);
+
+    // The client gives up before the 50 ms tool answers.
+    await response.body?.cancel("client disconnected");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // The event store is the durable side of resumability: a reconnect with
+    // Last-Event-Id replays from it. If the response never reaches storeEvent,
+    // it is lost for good even though the socket is what actually failed.
+    const toolResponse = stored
+      .slice(before)
+      .find((event) => event.message.id === 2 && "result" in event.message);
+    expect(toolResponse).toBeDefined();
+  });
+
+  it("stores a notification produced after the client dropped the GET stream", async () => {
+    // The POST-response arm above rides `_requestToStreamMapping`; this one rides
+    // the standalone GET stream, whose id is a constant (`_GET_stream`) with no
+    // routing entry. A refactor that gates persistence on "was this actually
+    // requested" (e.g. `requestId !== undefined`) keeps every other test green
+    // and silently drops server-initiated notifications after a GET disconnect —
+    // which is the #322 regression on the path where Last-Event-Id replay of
+    // server pushes matters most. This pins that arm on its own.
+    const stored: {
+      eventId: string;
+      message: JsonResponse;
+      streamId: string;
+    }[] = [];
+    const transport = new WebStreamableHTTPServerTransport({
+      eventStore: {
+        replayEventsAfter: async () => "unused",
+        storeEvent: async (streamId, message) => {
+          const eventId = `evt-${stored.length + 1}`;
+          stored.push({ eventId, message, streamId });
+          return eventId;
+        },
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(10).connect(transport);
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const get = await transport.handleRequest(createGetRequest());
+    expect(get.status).toBe(200);
+    // The client opens the standalone stream and then drops it.
+    await get.body?.cancel("client disconnected");
+    await flushMicrotasks();
+
+    // `send()` is awaited, so the store call has happened by the time it returns:
+    // no sleep needed here, unlike the wall-clock POST-response arm.
+    const before = stored.length;
+    await transport.send({
+      jsonrpc: "2.0",
+      method: "notifications/message",
+      params: { data: "after the disconnect", level: "info" },
+    });
+
+    const notification = stored
+      .slice(before)
+      .find((event) => event.message.method === "notifications/message");
+    expect(notification).toBeDefined();
+  });
+
+  it("releases the routing entry of a request the client cancelled", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      eventStore: {
+        replayEventsAfter: async () => "unused",
+        storeEvent: async () => "evt-1",
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(50).connect(transport);
+    // Consume initialize so only the tool call is left in the mappings.
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const internals = transport as unknown as TransportInternals;
+    const response = await transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "one"),
+        "text/event-stream",
+        "test-session",
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(internals._requestToStreamMapping.size).toBe(1);
+
+    // Cancel, then drop the stream — what a client does on a user abort. The
+    // SDK suppresses the response of a cancelled request, so send() never runs
+    // for this id and nothing else would ever drop its routing entry.
+    const cancelled = await transport.handleRequest(
+      createPostRequest(
+        {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { reason: "user aborted", requestId: 2 },
+        },
+        "application/json, text/event-stream",
+        "test-session",
+      ),
+    );
+    expect(cancelled.status).toBe(202);
+    await response.body?.cancel("client disconnected");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(internals._requestToStreamMapping.size).toBe(0);
+    expect(internals._streamMapping.size).toBe(0);
+  });
+
+  it("closes a POST stream whose only request was cancelled", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(50).connect(transport);
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const response = await transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "one"),
+        "text/event-stream",
+        "test-session",
+      ),
+    );
+    expect(response.status).toBe(200);
+
+    // The client cancels but keeps reading. No response will ever be written
+    // to this stream, so it must end rather than hang until the client
+    // gives up.
+    await transport.handleRequest(
+      createPostRequest(
+        {
+          jsonrpc: "2.0",
+          method: "notifications/cancelled",
+          params: { reason: "user aborted", requestId: 2 },
+        },
+        "application/json, text/event-stream",
+        "test-session",
+      ),
+    );
+
+    const body = await readSSEBody(response);
+    expect(body).not.toBeNull();
+    expect(body).toBe("");
+  });
+
   it("should wait for a slow handler in JSON response mode", async () => {
     const transport = new WebStreamableHTTPServerTransport({
       enableJsonResponse: true,

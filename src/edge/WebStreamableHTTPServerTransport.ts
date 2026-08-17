@@ -8,6 +8,7 @@
 
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
+  CancelledNotificationSchema,
   isInitializeRequest,
   isJSONRPCError,
   isJSONRPCRequest,
@@ -180,16 +181,21 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
 
       const writer = this._streamMapping.get(streamId);
-      if (writer) {
+      // With an event store the message must be persisted even if the client
+      // has already disconnected, so a reconnect with Last-Event-Id can replay
+      // it. The live write to the SSE stream is best-effort on top of that.
+      if (writer || this._eventStore) {
         try {
+          let eventId: string | undefined;
           if (this._eventStore) {
-            const eventId = await this._eventStore.storeEvent(
-              streamId,
-              message,
-            );
-            await this.writeSSEEventWithId(writer, eventId, message);
-          } else {
-            await this.writeSSEEvent(writer, message);
+            eventId = await this._eventStore.storeEvent(streamId, message);
+          }
+          if (writer) {
+            if (eventId === undefined) {
+              await this.writeSSEEvent(writer, message);
+            } else {
+              await this.writeSSEEventWithId(writer, eventId, message);
+            }
           }
 
           // Close the POST stream once all of its requests are answered
@@ -200,7 +206,9 @@ export class WebStreamableHTTPServerTransport implements Transport {
             ).includes(streamId);
             if (!streamInUse) {
               this._streamMapping.delete(streamId);
-              await writer.close();
+              if (writer) {
+                await writer.close();
+              }
             }
           }
         } catch (error) {
@@ -508,6 +516,16 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
 
+    // A cancelled request is never answered — the SDK suppresses the response
+    // of a request whose abort signal fired — so send() never runs for its id
+    // and nothing else would ever drop its routing entry. Release it here.
+    for (const message of messages) {
+      const cancelled = CancelledNotificationSchema.safeParse(message);
+      if (cancelled.success) {
+        await this.releaseCancelledRequest(cancelled.data.params.requestId);
+      }
+    }
+
     // Process messages through the transport
     for (const message of messages) {
       this.onmessage?.(message, { authInfo: undefined });
@@ -595,6 +613,44 @@ export class WebStreamableHTTPServerTransport implements Transport {
   }
 
   /**
+   * Settle the routing state of a request the client cancelled, which will
+   * therefore never produce a response: the same drain `send()` performs once
+   * a response has been written, minus the response. Idempotent, so it is a
+   * no-op if the response won the race against the cancellation.
+   *
+   * JSON-mode POSTs are left alone: `_jsonResponseCollectors` owns their
+   * settlement.
+   */
+  private async releaseCancelledRequest(requestId: RequestId): Promise<void> {
+    const streamId = this._requestToStreamMapping.get(requestId);
+    if (streamId === undefined || this._jsonResponseCollectors.has(streamId)) {
+      return;
+    }
+
+    this._requestToStreamMapping.delete(requestId);
+    const streamInUse = Array.from(
+      this._requestToStreamMapping.values(),
+    ).includes(streamId);
+    if (streamInUse) {
+      return;
+    }
+
+    // Nothing will ever be written to this stream again; close it rather than
+    // leaving the client reading a stream that can only hang.
+    const writer = this._streamMapping.get(streamId);
+    this._streamMapping.delete(streamId);
+    if (writer) {
+      try {
+        await writer.close();
+      } catch (error) {
+        this.onerror?.(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    }
+  }
+
+  /**
    * Drop the routing state left over once every stream is gone, answering any
    * POST still waiting on a JSON response with whatever arrived rather than
    * leaving the request hanging.
@@ -645,10 +701,16 @@ export class WebStreamableHTTPServerTransport implements Transport {
         return;
       }
       this._streamMapping.delete(streamId);
-      // Drop the routing entries that pointed at this stream, so a response
-      // arriving after the client gave up is not looked up against a writer
-      // that no longer exists. No-op for the standalone GET stream, which is
-      // never a request target.
+      // With an event store, a response can still arrive after the client gave
+      // up, and it must be persisted for replay. Keep the routing entry so
+      // send() can resolve the stream id and store under it; send() drops the
+      // entry once the response has been stored.
+      if (this._eventStore) {
+        return;
+      }
+      // No event store: nothing will be persisted for this stream, so drop the
+      // routing entries now rather than leaking them. No-op for the standalone
+      // GET stream, which is never a request target.
       for (const [requestId, mappedStreamId] of this._requestToStreamMapping) {
         if (mappedStreamId === streamId) {
           this._requestToStreamMapping.delete(requestId);
