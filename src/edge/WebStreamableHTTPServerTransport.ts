@@ -9,6 +9,7 @@
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   CancelledNotificationSchema,
+  ErrorCode,
   isInitializeRequest,
   isJSONRPCError,
   isJSONRPCRequest,
@@ -579,6 +580,16 @@ export class WebStreamableHTTPServerTransport implements Transport {
       // Wait for the handlers to actually answer, however long they take
       const responses = await jsonResponses;
 
+      // Every request this POST carried was cancelled, so there is nothing to
+      // put in the body — and an empty body is not a JSON-RPC message. Answer
+      // the way a POST that carried no requests at all does.
+      if (responses.length === 0) {
+        return new Response(null, {
+          headers: this.getResponseHeaders(),
+          status: 202,
+        });
+      }
+
       const responseBody = JSON.stringify(isBatch ? responses : responses[0]);
 
       return new Response(responseBody, {
@@ -655,13 +666,24 @@ export class WebStreamableHTTPServerTransport implements Transport {
    * therefore never produce a response: the same drain `send()` performs once
    * a response has been written, minus the response. Idempotent, so it is a
    * no-op if the response won the race against the cancellation.
-   *
-   * JSON-mode POSTs are left alone: `_jsonResponseCollectors` owns their
-   * settlement.
    */
   private async releaseCancelledRequest(requestId: RequestId): Promise<void> {
     const streamId = this._requestToStreamMapping.get(requestId);
-    if (streamId === undefined || this._jsonResponseCollectors.has(streamId)) {
+    if (streamId === undefined) {
+      return;
+    }
+
+    // A JSON-mode POST has no stream to close: it is parked on its collector,
+    // which would keep waiting for a response that is never coming. Stop
+    // expecting that one and answer with whatever the POST's other requests
+    // produce.
+    const collector = this._jsonResponseCollectors.get(streamId);
+    if (collector) {
+      collector.expectedIds = collector.expectedIds.filter(
+        (id) => id !== requestId,
+      );
+      this._requestToStreamMapping.delete(requestId);
+      this.settleJsonResponse(streamId, collector);
       return;
     }
 
@@ -696,9 +718,23 @@ export class WebStreamableHTTPServerTransport implements Transport {
   private releasePendingRequests(): void {
     for (const collector of this._jsonResponseCollectors.values()) {
       collector.resolve(
-        collector.expectedIds
-          .map((id) => collector.responses.get(id))
-          .filter((response) => response !== undefined),
+        collector.expectedIds.map(
+          (id) =>
+            collector.responses.get(id) ??
+            // Nobody can answer this one now. Dropping it silently would leave
+            // the POST with an empty body for a single request and an empty
+            // array for a batch, neither of which a client can read as a
+            // result.
+            ({
+              error: {
+                code: ErrorCode.ConnectionClosed,
+                message:
+                  "Connection closed: the session ended before this request was answered",
+              },
+              id,
+              jsonrpc: "2.0",
+            } satisfies JSONRPCMessage),
+        ),
       );
     }
     this._jsonResponseCollectors.clear();
