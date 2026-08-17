@@ -218,24 +218,35 @@ export class WebStreamableHTTPServerTransport implements Transport {
               await this.writeSSEEventWithId(writer, eventId, message);
             }
           }
-
-          // Close the POST stream once all of its requests are answered
-          if (requestId !== undefined && isResponse) {
-            this._requestToStreamMapping.delete(requestId);
-            const streamInUse = Array.from(
-              this._requestToStreamMapping.values(),
-            ).includes(streamId);
-            if (!streamInUse) {
-              this._streamMapping.delete(streamId);
-              if (writer) {
-                await writer.close();
-              }
-            }
-          }
         } catch (error) {
           this.onerror?.(
             error instanceof Error ? error : new Error(String(error)),
           );
+        }
+
+        // Close the POST stream once all of its requests are answered. Drained
+        // whether or not the store and the socket cooperated: with an event
+        // store configured `trackStream` deliberately leaves routing entries
+        // alone on disconnect, so this is the only thing that reclaims them,
+        // and giving up on a failed write strands the entry until the session
+        // ends.
+        if (requestId !== undefined && isResponse) {
+          this._requestToStreamMapping.delete(requestId);
+          const streamInUse = Array.from(
+            this._requestToStreamMapping.values(),
+          ).includes(streamId);
+          if (!streamInUse) {
+            this._streamMapping.delete(streamId);
+            if (writer) {
+              try {
+                await writer.close();
+              } catch (error) {
+                this.onerror?.(
+                  error instanceof Error ? error : new Error(String(error)),
+                );
+              }
+            }
+          }
         }
       }
     }

@@ -582,6 +582,47 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(body).toBe("");
   });
 
+  it("releases the routing entry even when the event store rejects", async () => {
+    // A store that throws must not strand the routing entry: with an event
+    // store configured `trackStream` deliberately leaves those entries alone
+    // on disconnect, so `send()` is the only thing that ever reclaims them.
+    const transport = new WebStreamableHTTPServerTransport({
+      eventStore: {
+        replayEventsAfter: async () => "unused",
+        storeEvent: async () => {
+          throw new Error("store is down");
+        },
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createSlowToolServer(50).connect(transport);
+    await readSSEBody(
+      await transport.handleRequest(
+        createInitializeRequest("application/json, text/event-stream"),
+      ),
+    );
+
+    const internals = transport as unknown as TransportInternals;
+    const response = await transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "one"),
+        "text/event-stream",
+        "test-session",
+      ),
+    );
+    expect(response.status).toBe(200);
+    // Only the tool call is outstanding: the initialize response drained on its
+    // way through the same rejecting store, rather than leaving its id behind.
+    expect(internals._requestToStreamMapping.size).toBe(1);
+
+    await response.body?.cancel("client disconnected");
+    // Long enough for the 50 ms tool to answer into the failing store.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(internals._requestToStreamMapping.size).toBe(0);
+    expect(internals._streamMapping.size).toBe(0);
+  });
+
   it("should wait for a slow handler in JSON response mode", async () => {
     const transport = new WebStreamableHTTPServerTransport({
       enableJsonResponse: true,
