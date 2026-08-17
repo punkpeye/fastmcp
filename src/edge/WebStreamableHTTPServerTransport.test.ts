@@ -11,6 +11,7 @@ import { WebStreamableHTTPServerTransport } from "./WebStreamableHTTPServerTrans
 type JsonResponse = any;
 
 type TransportInternals = {
+  _jsonResponseCollectors: Map<string, unknown>;
   _requestToStreamMapping: Map<number | string, string>;
   _streamMapping: Map<string, WritableStreamDefaultWriter<Uint8Array>>;
 };
@@ -25,6 +26,12 @@ const createGetRequest = (lastEventId?: string) =>
       "mcp-session-id": "test-session",
       ...(lastEventId ? { "last-event-id": lastEventId } : {}),
     },
+  });
+
+const createDeleteRequest = () =>
+  new Request("http://localhost/mcp", {
+    headers: { "mcp-session-id": "test-session" },
+    method: "DELETE",
   });
 
 const createPostRequest = (body: unknown, accept: string, sessionId?: string) =>
@@ -71,6 +78,32 @@ const createSlowToolServer = (delayMs: number) => {
   });
   return server;
 };
+
+/**
+ * Server whose only tool never answers on its own: the request stays open until
+ * something aborts it, which is what a client cancellation or a terminated
+ * session does.
+ */
+const createHangingToolServer = () => {
+  const server = new Server(
+    { name: "TestServer", version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+  server.setRequestHandler(CallToolRequestSchema, (_request, extra) => {
+    return new Promise<never>((_resolve, reject) => {
+      extra.signal.addEventListener("abort", () =>
+        reject(extra.signal.reason ?? new Error("aborted")),
+      );
+    });
+  });
+  return server;
+};
+
+const createCancelledNotification = (requestId: number) => ({
+  jsonrpc: "2.0",
+  method: "notifications/cancelled",
+  params: { reason: "client gave up", requestId },
+});
 
 const createToolCall = (id: number, name: string) => ({
   id,
@@ -687,6 +720,158 @@ describe("WebStreamableHTTPServerTransport", () => {
     const body: JsonResponse = await response.json();
     expect(Array.isArray(body)).toBe(true);
     expect(body).toHaveLength(1);
+    expect(body[0].result.content[0].text).toBe("done:one");
+  });
+
+  it("should answer a JSON-mode POST with an error when the session ends first", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    await createHangingToolServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const pending = transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "never"),
+        "application/json",
+        "test-session",
+      ),
+    );
+    await flushMicrotasks();
+
+    const deleted = await transport.handleRequest(createDeleteRequest());
+    expect(deleted.status).toBe(204);
+
+    // The tool call can no longer be answered, but the POST still owes the
+    // client a JSON-RPC message: an empty body under a 200 with a JSON content
+    // type is unparseable, and `response.json()` throws on it.
+    const response = await pending;
+    expect(response.status).toBe(200);
+    const body: JsonResponse = await response.json();
+    expect(body.id).toBe(2);
+    expect(body.error.code).toBe(-32000);
+  });
+
+  it("should keep the array envelope when a batch loses its session", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    await createHangingToolServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const pending = transport.handleRequest(
+      createPostRequest(
+        [createToolCall(2, "never")],
+        "application/json",
+        "test-session",
+      ),
+    );
+    await flushMicrotasks();
+    await transport.handleRequest(createDeleteRequest());
+
+    // JSON-RPC forbids answering a batch with an empty array, which is what
+    // dropping the unanswered response leaves behind.
+    const body: JsonResponse = await (await pending).json();
+    expect(Array.isArray(body)).toBe(true);
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe(2);
+    expect(body[0].error.code).toBe(-32000);
+  });
+
+  it("should release a JSON-mode POST whose request the client cancels", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    await createHangingToolServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const internals = transport as unknown as TransportInternals;
+    const pending = transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "never"),
+        "application/json",
+        "test-session",
+      ),
+    );
+    await flushMicrotasks();
+    expect(internals._jsonResponseCollectors.size).toBe(1);
+
+    const cancelled = await transport.handleRequest(
+      createPostRequest(
+        createCancelledNotification(2),
+        "application/json",
+        "test-session",
+      ),
+    );
+    expect(cancelled.status).toBe(202);
+
+    // A cancelled request is never answered, so this POST carries nothing back
+    // — but it must still end, and leave no routing state behind. Without the
+    // release it waits on a response that is never coming.
+    const response = await Promise.race([
+      pending,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
+    ]);
+    expect(response).not.toBeNull();
+    expect(response?.status).toBe(202);
+    expect(await response?.text()).toBe("");
+    expect(internals._jsonResponseCollectors.size).toBe(0);
+    expect(internals._requestToStreamMapping.size).toBe(0);
+  });
+
+  it("should answer the rest of a batch when one of its requests is cancelled", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    const server = new Server(
+      { name: "TestServer", version: "1.0.0" },
+      { capabilities: { tools: {} } },
+    );
+    server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
+      if (request.params.name === "never") {
+        return new Promise<never>((_resolve, reject) => {
+          extra.signal.addEventListener("abort", () =>
+            reject(extra.signal.reason ?? new Error("aborted")),
+          );
+        });
+      }
+      return Promise.resolve({
+        content: [{ text: `done:${request.params.name}`, type: "text" }],
+      });
+    });
+    await server.connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const pending = transport.handleRequest(
+      createPostRequest(
+        [createToolCall(2, "never"), createToolCall(3, "one")],
+        "application/json",
+        "test-session",
+      ),
+    );
+    await flushMicrotasks();
+
+    await transport.handleRequest(
+      createPostRequest(
+        createCancelledNotification(2),
+        "application/json",
+        "test-session",
+      ),
+    );
+
+    // Dropping the cancelled id must not take the batch's other answer with it.
+    const response = await Promise.race([
+      pending,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000)),
+    ]);
+    expect(response?.status).toBe(200);
+    const body: JsonResponse = await response?.json();
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe(3);
     expect(body[0].result.content[0].text).toBe("done:one");
   });
 
