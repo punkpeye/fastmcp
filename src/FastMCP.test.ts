@@ -30,6 +30,89 @@ import {
   UserError,
 } from "./FastMCP.js";
 
+test("imageContent times out URL fetches and preserves the default timeout", async () => {
+  const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    throw new DOMException("The operation was aborted", "TimeoutError");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  try {
+    await expect(
+      imageContent({ url: "https://example.test/image" }),
+    ).rejects.toThrow(
+      "Failed to fetch image from URL (https://example.test/image): timed out after 30000ms",
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.test/image",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("audioContent honors a custom URL timeout", async () => {
+  const fetchMock = vi.fn(
+    (_url: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () =>
+          reject(init.signal?.reason),
+        );
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  try {
+    await expect(
+      audioContent({ url: "https://example.test/audio", timeoutMs: 5 }),
+    ).rejects.toThrow(
+      "Failed to fetch audio from URL (https://example.test/audio): timed out after 5ms",
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}, 1_000);
+
+test("imageContent and audioContent preserve HTTP error details", async () => {
+  const imageCancel = vi.fn(async () => undefined);
+  const audioCancel = vi.fn(async () => undefined);
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce({
+        body: { cancel: imageCancel },
+        ok: false,
+        status: 503,
+        statusText: "Unavailable",
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        body: { cancel: audioCancel },
+        ok: false,
+        status: 503,
+        statusText: "Unavailable",
+      } as unknown as Response),
+  );
+
+  try {
+    await expect(
+      imageContent({ url: "https://example.test/image" }),
+    ).rejects.toThrow(
+      "Failed to fetch image from URL (https://example.test/image): Server responded with status: 503 - Unavailable",
+    );
+    await expect(
+      audioContent({ url: "https://example.test/audio" }),
+    ).rejects.toThrow(
+      "Failed to fetch audio from URL (https://example.test/audio): Server responded with status: 503 - Unavailable",
+    );
+    expect(imageCancel).toHaveBeenCalledOnce();
+    expect(audioCancel).toHaveBeenCalledOnce();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 const runWithTestServer = async ({
   client: createClient,
   run,

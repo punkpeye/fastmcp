@@ -96,6 +96,18 @@ type MediaContentInput =
   | { path: string }
   | { timeoutMs?: number; url: string };
 
+const cancelResponseBody = async (response: Response): Promise<void> => {
+  if (!response.body) {
+    return;
+  }
+
+  try {
+    await response.body.cancel();
+  } catch {
+    // Preserve the original HTTP error if the body cannot be cancelled.
+  }
+};
+
 export const imageContent = async (
   input: MediaContentInput,
 ): Promise<ImageContent> => {
@@ -111,6 +123,7 @@ export const imageContent = async (
         });
 
         if (!response.ok) {
+          await cancelResponseBody(response);
           throw new Error(
             `Server responded with status: ${response.status} - ${response.statusText}`,
           );
@@ -194,6 +207,7 @@ export const audioContent = async (
         });
 
         if (!response.ok) {
+          await cancelResponseBody(response);
           throw new Error(
             `Server responded with status: ${response.status} - ${response.statusText}`,
           );
