@@ -65,7 +65,7 @@ test("audioContent honors a custom URL timeout", async () => {
 
   try {
     await expect(
-      audioContent({ url: "https://example.test/audio", timeoutMs: 5 }),
+      audioContent({ timeoutMs: 5, url: "https://example.test/audio" }),
     ).rejects.toThrow(
       "Failed to fetch audio from URL (https://example.test/audio): timed out after 5ms",
     );
