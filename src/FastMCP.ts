@@ -56,6 +56,8 @@ import type {
   OAuthSession,
 } from "./auth/providers/AuthProvider.js";
 
+import { cancelResponseBody } from "./cancelResponseBody.js";
+
 export interface Logger {
   debug(...args: unknown[]): void;
 
@@ -95,18 +97,6 @@ type MediaContentInput =
   | { buffer: Buffer }
   | { path: string }
   | { timeoutMs?: number; url: string };
-
-const cancelResponseBody = async (response: Response): Promise<void> => {
-  if (!response.body) {
-    return;
-  }
-
-  try {
-    await response.body.cancel();
-  } catch {
-    // Preserve the original HTTP error if the body cannot be cancelled.
-  }
-};
 
 export const imageContent = async (
   input: MediaContentInput,

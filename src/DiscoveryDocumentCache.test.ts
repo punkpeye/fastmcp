@@ -378,3 +378,25 @@ test("passes an AbortSignal to the discovery fetch", async () => {
 
   fetchSpy.mockRestore();
 });
+
+test("cancels the unread body of a failed discovery fetch", async () => {
+  const cache = new DiscoveryDocumentCache();
+  const testUrl = "https://auth.example.com/.well-known/openid-configuration";
+  // Throwing on a non-2xx response without reading the body strands the
+  // socket behind it until GC, so the body has to be cancelled first.
+  const cancel = vi.fn(async () => undefined);
+  const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
+    body: { cancel },
+    ok: false,
+    status: 503,
+    statusText: "Service Unavailable",
+  } as unknown as Response);
+
+  await expect(cache.get(testUrl)).rejects.toThrow(
+    `Failed to fetch discovery document from ${testUrl}: 503 Service Unavailable`,
+  );
+
+  expect(cancel).toHaveBeenCalledOnce();
+
+  fetchSpy.mockRestore();
+});
