@@ -1,3 +1,5 @@
+import { cancelResponseBody } from "./cancelResponseBody.js";
+
 export class DiscoveryDocumentCache {
   public get size(): number {
     return this.#cache.size;
@@ -120,6 +122,7 @@ export class DiscoveryDocumentCache {
     }
 
     if (!res.ok) {
+      await cancelResponseBody(res);
       throw new Error(
         `Failed to fetch discovery document from ${url}: ${res.status} ${res.statusText}`,
       );

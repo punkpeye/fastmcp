@@ -56,6 +56,8 @@ import type {
   OAuthSession,
 } from "./auth/providers/AuthProvider.js";
 
+import { cancelResponseBody } from "./cancelResponseBody.js";
+
 export interface Logger {
   debug(...args: unknown[]): void;
 
@@ -111,6 +113,7 @@ export const imageContent = async (
         });
 
         if (!response.ok) {
+          await cancelResponseBody(response);
           throw new Error(
             `Server responded with status: ${response.status} - ${response.statusText}`,
           );
@@ -194,6 +197,7 @@ export const audioContent = async (
         });
 
         if (!response.ok) {
+          await cancelResponseBody(response);
           throw new Error(
             `Server responded with status: ${response.status} - ${response.statusText}`,
           );
