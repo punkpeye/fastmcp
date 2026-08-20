@@ -625,6 +625,25 @@ export class WebStreamableHTTPServerTransport implements Transport {
       );
     }
 
+    // `getStreamIdForEventId` is optional: an event store that does not
+    // implement it cannot be asked which stream a reconnect would land on
+    // ahead of time, so this degrades to the old (racy) behavior for it, same
+    // as the official SDK's Node transport does for the equivalent check.
+    if (this._eventStore.getStreamIdForEventId) {
+      const existingStreamId =
+        await this._eventStore.getStreamIdForEventId(lastEventId);
+      if (
+        existingStreamId !== undefined &&
+        this._streamMapping.has(existingStreamId)
+      ) {
+        return this.createErrorResponse(
+          409,
+          -32000,
+          "Conflict: stream already exists for this replay",
+        );
+      }
+    }
+
     const { readable, writable } = new TransformStream<Uint8Array>();
     const writer = writable.getWriter();
 
