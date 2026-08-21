@@ -264,6 +264,37 @@ describe("WebStreamableHTTPServerTransport", () => {
     await first.body?.cancel("test cleanup");
   });
 
+  it("should reject a colliding replay from a store without getStreamIdForEventId", async () => {
+    // `getStreamIdForEventId` is optional and most stores do not implement it,
+    // so a guard that only runs when it exists would leave the majority of
+    // stores overwriting live writers exactly as before. The id
+    // `replayEventsAfter` returns is the one the writer is registered under,
+    // and checking that one needs no cooperation from the store at all.
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      eventStore: {
+        replayEventsAfter: async () => "resumed-stream",
+        storeEvent: async () => "evt-1",
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const internals = transport as unknown as TransportInternals;
+
+    const first = await transport.handleRequest(createGetRequest("evt-0"));
+    expect(first.status).toBe(200);
+    const firstWriter = internals._streamMapping.get("resumed-stream");
+    expect(firstWriter).toBeDefined();
+
+    const second = await transport.handleRequest(createGetRequest("evt-0"));
+    expect(second.status).toBe(409);
+    expect(internals._streamMapping.get("resumed-stream")).toBe(firstWriter);
+
+    await first.body?.cancel("test cleanup");
+  });
+
   it("should not remove a replacement stream when an old writer closes", async () => {
     const transport = new WebStreamableHTTPServerTransport({
       enableJsonResponse: true,

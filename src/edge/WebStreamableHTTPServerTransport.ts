@@ -625,10 +625,12 @@ export class WebStreamableHTTPServerTransport implements Transport {
       );
     }
 
-    // `getStreamIdForEventId` is optional: an event store that does not
-    // implement it cannot be asked which stream a reconnect would land on
-    // ahead of time, so this degrades to the old (racy) behavior for it, same
-    // as the official SDK's Node transport does for the equivalent check.
+    // `getStreamIdForEventId` is optional, so this only asks stores that can
+    // answer which stream the reconnect would land on before any work is done.
+    // Unlike the SDK's Node transport, an event id the store does not
+    // recognise is not rejected outright here: that store may still resolve it
+    // in `replayEventsAfter`, and answering 400 for it would turn reconnects
+    // that work today into errors.
     if (this._eventStore.getStreamIdForEventId) {
       const existingStreamId =
         await this._eventStore.getStreamIdForEventId(lastEventId);
@@ -639,7 +641,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
         return this.createErrorResponse(
           409,
           -32000,
-          "Conflict: stream already exists for this replay",
+          "Conflict: SSE stream already exists for this replay",
         );
       }
     }
@@ -654,6 +656,23 @@ export class WebStreamableHTTPServerTransport implements Transport {
           await this.writeSSEEventWithId(writer, eventId, message);
         },
       });
+
+      // The check above runs against the id the store predicts, and only for
+      // stores that implement the optional lookup. This one runs against the
+      // id the writer is about to be registered under, with no await between
+      // it and the `set` inside `trackStream` — so it also covers stores
+      // without `getStreamIdForEventId` (the common case), a store whose two
+      // methods disagree, and a second reconnect that raced past the check
+      // above while this one was awaiting its replay.
+      if (this._streamMapping.has(streamId)) {
+        await writer.close();
+        return this.createErrorResponse(
+          409,
+          -32000,
+          "Conflict: SSE stream already exists for this replay",
+        );
+      }
+
       this.trackStream(streamId, writer);
     } catch (error) {
       await writer.close();
