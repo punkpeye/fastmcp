@@ -261,6 +261,22 @@ export class WebStreamableHTTPServerTransport implements Transport {
   }
 
   /**
+   * Close a writer we are giving up on. The stream is already being discarded,
+   * and closing one the client cancelled — or one a failed write already
+   * errored — rejects; on the detached replay path that would surface as an
+   * unhandled rejection rather than anything actionable.
+   */
+  private async closeQuietly(
+    writer: WritableStreamDefaultWriter<Uint8Array>,
+  ): Promise<void> {
+    try {
+      await writer.close();
+    } catch {
+      // Already closed, errored, or cancelled by the client.
+    }
+  }
+
+  /**
    * Create an error response
    */
   private createErrorResponse(
@@ -646,40 +662,61 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
 
+    const eventStore = this._eventStore;
     const { readable, writable } = new TransformStream<Uint8Array>();
     const writer = writable.getWriter();
 
+    // The replay deliberately runs detached. Nothing reads `readable` until
+    // this Response is handed back to the runtime, and a TransformStream's
+    // readable side has a high-water mark of 0, so the very first
+    // `writer.write()` a replay performs parks forever waiting for a reader
+    // that cannot exist yet — awaiting the replay here would hang every
+    // reconnect that actually has events to catch up on. The SDK's Node
+    // transport has the same ordering for the same reason: it flushes the 200
+    // headers before replaying. The cost is that once the headers are out,
+    // nothing below can be reported as a status code.
     this._replaysInFlight += 1;
-    try {
-      const streamId = await this._eventStore.replayEventsAfter(lastEventId, {
-        send: async (eventId, message) => {
-          await this.writeSSEEventWithId(writer, eventId, message);
-        },
-      });
+    void (async () => {
+      try {
+        const streamId = await eventStore.replayEventsAfter(lastEventId, {
+          send: async (eventId, message) => {
+            await this.writeSSEEventWithId(writer, eventId, message);
+          },
+        });
 
-      // The check above runs against the id the store predicts, and only for
-      // stores that implement the optional lookup. This one runs against the
-      // id the writer is about to be registered under, with no await between
-      // it and the `set` inside `trackStream` — so it also covers stores
-      // without `getStreamIdForEventId` (the common case), a store whose two
-      // methods disagree, and a second reconnect that raced past the check
-      // above while this one was awaiting its replay.
-      if (this._streamMapping.has(streamId)) {
-        await writer.close();
-        return this.createErrorResponse(
-          409,
-          -32000,
-          "Conflict: SSE stream already exists for this replay",
+        // The pre-check above runs against the id the store predicts, and only
+        // for stores implementing the optional lookup. This one runs against
+        // the id the writer would actually be registered under, with no await
+        // between it and the `set` inside `trackStream` — so it also covers
+        // stores without `getStreamIdForEventId` (the common case), a store
+        // whose two methods disagree, and a second reconnect that raced past
+        // the pre-check while this one was replaying. Too late for a 409, but
+        // ending this stream still beats orphaning the live one by overwriting
+        // its writer: the client has its replayed events and can reconnect.
+        if (this._streamMapping.has(streamId)) {
+          this.onerror?.(
+            new Error(
+              `Conflict: SSE stream already exists for replayed stream ${streamId}`,
+            ),
+          );
+          await this.closeQuietly(writer);
+          return;
+        }
+
+        this.trackStream(streamId, writer);
+      } catch (error) {
+        this.onerror?.(
+          error instanceof Error ? error : new Error(String(error)),
         );
+        await this.closeQuietly(writer);
+      } finally {
+        this._replaysInFlight -= 1;
       }
-
-      this.trackStream(streamId, writer);
-    } catch (error) {
-      await writer.close();
-      return this.createErrorResponse(500, -32000, `Replay failed: ${error}`);
-    } finally {
-      this._replaysInFlight -= 1;
-    }
+    })().catch(() => {
+      // Only reachable if `onerror` itself threw, so there is nowhere left to
+      // report it. Swallow rather than let a detached task take the process
+      // down as an unhandled rejection.
+    });
 
     return new Response(readable, {
       headers: {

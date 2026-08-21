@@ -142,6 +142,39 @@ const readSSEBody = async (response: Response, timeoutMs = 2000) => {
   ]);
 };
 
+/**
+ * Reads an SSE body that stays open, so `readSSEBody` (which waits for the
+ * stream to end) would only ever time out on it.
+ */
+const readSSEUntil = async (
+  response: Response,
+  matches: (text: string) => boolean,
+  timeoutMs = 2000,
+) => {
+  const stream = response.body;
+  if (!stream) {
+    throw new Error("Expected an SSE stream body");
+  }
+
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const timeout = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), timeoutMs),
+  );
+  let text = "";
+
+  while (!matches(text)) {
+    const chunk = await Promise.race([reader.read(), timeout]);
+    if (chunk === null || chunk.done) {
+      break;
+    }
+    text += decoder.decode(chunk.value, { stream: true });
+  }
+
+  await reader.cancel();
+  return text;
+};
+
 describe("WebStreamableHTTPServerTransport", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -264,12 +297,15 @@ describe("WebStreamableHTTPServerTransport", () => {
     await first.body?.cancel("test cleanup");
   });
 
-  it("should reject a colliding replay from a store without getStreamIdForEventId", async () => {
+  it("should end a colliding replay from a store without getStreamIdForEventId", async () => {
     // `getStreamIdForEventId` is optional and most stores do not implement it,
     // so a guard that only runs when it exists would leave the majority of
     // stores overwriting live writers exactly as before. The id
     // `replayEventsAfter` returns is the one the writer is registered under,
-    // and checking that one needs no cooperation from the store at all.
+    // and checking that one needs no cooperation from the store at all. It
+    // lands too late for a 409 — the replay streams, so the headers are gone
+    // by then — but the live writer keeps its slot and the loser is closed
+    // instead of silently taking it over.
     const transport = new WebStreamableHTTPServerTransport({
       enableJsonResponse: true,
       eventStore: {
@@ -285,14 +321,67 @@ describe("WebStreamableHTTPServerTransport", () => {
 
     const first = await transport.handleRequest(createGetRequest("evt-0"));
     expect(first.status).toBe(200);
+    await flushMicrotasks();
     const firstWriter = internals._streamMapping.get("resumed-stream");
     expect(firstWriter).toBeDefined();
 
     const second = await transport.handleRequest(createGetRequest("evt-0"));
-    expect(second.status).toBe(409);
+    await flushMicrotasks();
     expect(internals._streamMapping.get("resumed-stream")).toBe(firstWriter);
+    // The loser's stream is over, not left hanging open on the client.
+    expect(await readSSEBody(second)).toBe("");
 
     await first.body?.cancel("test cleanup");
+  });
+
+  it("answers a reconnect whose replay actually has events to catch up on", async () => {
+    // Every other store in this file replays nothing, which is the only reason
+    // awaiting the replay before returning the Response ever looked healthy. A
+    // TransformStream's readable side has a high-water mark of 0, so the first
+    // `send()` parks until someone reads the body — and nobody can read it
+    // until the Response is handed back. A reconnect with anything to catch up
+    // on used to hang forever, never answering at all.
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      eventStore: {
+        replayEventsAfter: async (_lastEventId, { send }) => {
+          await send("evt-1", {
+            jsonrpc: "2.0",
+            method: "notifications/message",
+            params: { data: "missed one", level: "info" },
+          });
+          await send("evt-2", {
+            jsonrpc: "2.0",
+            method: "notifications/message",
+            params: { data: "missed two", level: "info" },
+          });
+          return "resumed-stream";
+        },
+        storeEvent: async () => "evt-3",
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const response = await Promise.race([
+      transport.handleRequest(createGetRequest("evt-0")),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("the reconnect was never answered")),
+          1000,
+        ),
+      ),
+    ]);
+    expect(response.status).toBe(200);
+
+    const body = await readSSEUntil(response, (text) =>
+      text.includes("id: evt-2"),
+    );
+    expect(body).toContain("id: evt-1");
+    expect(body).toContain("missed one");
+    expect(body).toContain("id: evt-2");
+    expect(body).toContain("missed two");
   });
 
   it("should not remove a replacement stream when an old writer closes", async () => {
