@@ -115,6 +115,16 @@ export class WebStreamableHTTPServerTransport implements Transport {
    */
   private _standaloneStreamOpened = false;
   private _started = false;
+  /**
+   * Bumped by every teardown. A replay runs detached from the request that
+   * started it, so its session can be gone by the time it settles: the
+   * teardown already cleared `_streamMapping`, and registering the writer
+   * afterwards would resurrect a stream nothing will ever close and re-latch
+   * `_standaloneStreamOpened`, leaving the next session on this instance
+   * writing its standalone events to the previous session's client.
+   */
+  private _streamGeneration = 0;
+
   private _streamMapping = new Map<
     StreamId,
     WritableStreamDefaultWriter<Uint8Array>
@@ -133,16 +143,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
    * Close the transport
    */
   async close(): Promise<void> {
-    for (const writer of this._streamMapping.values()) {
-      try {
-        await writer.close();
-      } catch {
-        // Ignore close errors
-      }
-    }
-    this._streamMapping.clear();
-    this._standaloneStreamOpened = false;
-    this.releasePendingRequests();
+    await this.teardownStreams();
     this._started = false;
     this.onclose?.();
   }
@@ -331,19 +332,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
 
-    // Close all streams
-    for (const writer of this._streamMapping.values()) {
-      try {
-        await writer.close();
-      } catch {
-        // Ignore close errors
-      }
-    }
-    this._streamMapping.clear();
-    // Per-session, like the session id below: this instance stays usable, and
-    // the next session starts having opened no standalone stream of its own.
-    this._standaloneStreamOpened = false;
-    this.releasePendingRequests();
+    await this.teardownStreams();
 
     await this._onsessionclosed?.(this.sessionId ?? "");
     this.sessionId = undefined;
@@ -663,6 +652,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     }
 
     const eventStore = this._eventStore;
+    const generation = this._streamGeneration;
     const { readable, writable } = new TransformStream<Uint8Array>();
     const writer = writable.getWriter();
 
@@ -683,6 +673,15 @@ export class WebStreamableHTTPServerTransport implements Transport {
             await this.writeSSEEventWithId(writer, eventId, message);
           },
         });
+
+        // `close()` or a DELETE may have ended the session while the replay
+        // was running. That teardown could not close this writer — it was not
+        // in `_streamMapping` yet — so end it here rather than registering it
+        // into a session that no longer exists.
+        if (this._streamGeneration !== generation) {
+          await this.closeQuietly(writer);
+          return;
+        }
 
         // The pre-check above runs against the id the store predicts, and only
         // for stores implementing the optional lookup. This one runs against
@@ -870,6 +869,28 @@ export class WebStreamableHTTPServerTransport implements Transport {
       writer !== undefined ||
       this._replaysInFlight > 0
     );
+  }
+
+  /**
+   * Close and forget every stream of the current session and release whatever
+   * was waiting on one. Shared by `close()` and DELETE so that a new teardown
+   * path cannot forget to bump the generation detached replays check before
+   * registering themselves.
+   */
+  private async teardownStreams(): Promise<void> {
+    this._streamGeneration += 1;
+    for (const writer of this._streamMapping.values()) {
+      try {
+        await writer.close();
+      } catch {
+        // Ignore close errors
+      }
+    }
+    this._streamMapping.clear();
+    // Per-session, like the session id: this instance stays usable, and the
+    // next session starts having opened no standalone stream of its own.
+    this._standaloneStreamOpened = false;
+    this.releasePendingRequests();
   }
 
   private trackStream(

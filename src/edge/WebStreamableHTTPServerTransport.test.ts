@@ -13,6 +13,7 @@ type JsonResponse = any;
 type TransportInternals = {
   _jsonResponseCollectors: Map<string, unknown>;
   _requestToStreamMapping: Map<number | string, string>;
+  _standaloneStreamOpened: boolean;
   _streamMapping: Map<string, WritableStreamDefaultWriter<Uint8Array>>;
 };
 
@@ -382,6 +383,48 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(body).toContain("missed one");
     expect(body).toContain("id: evt-2");
     expect(body).toContain("missed two");
+  });
+
+  it("does not register a replay's stream once its session has been deleted", async () => {
+    // The replay is detached from the request that started it, so a DELETE can
+    // land while it is still running. That teardown clears `_streamMapping`
+    // but cannot close this writer, which is not in it yet — registering it
+    // afterwards would leave a stream for a dead session that nothing closes,
+    // and re-latch `_standaloneStreamOpened` so the next session on this
+    // instance writes its standalone events to the previous client.
+    let releaseReplay: (() => void) | undefined;
+    const replayGate = new Promise<void>((resolve) => {
+      releaseReplay = resolve;
+    });
+
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      eventStore: {
+        replayEventsAfter: async () => {
+          await replayGate;
+          return "_GET_stream";
+        },
+        storeEvent: async () => "evt-1",
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+
+    const internals = transport as unknown as TransportInternals;
+    const resuming = await transport.handleRequest(createGetRequest("evt-0"));
+    expect(resuming.status).toBe(200);
+
+    const deleted = await transport.handleRequest(createDeleteRequest());
+    expect(deleted.status).toBe(204);
+
+    releaseReplay?.();
+    await flushMicrotasks();
+
+    expect(internals._streamMapping.size).toBe(0);
+    expect(internals._standaloneStreamOpened).toBe(false);
+    // The reconnect's stream ends with its session instead of hanging open.
+    expect(await readSSEBody(resuming)).toBe("");
   });
 
   it("should not remove a replacement stream when an old writer closes", async () => {
