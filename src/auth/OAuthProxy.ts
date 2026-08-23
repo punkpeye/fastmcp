@@ -1308,7 +1308,11 @@ export class OAuthProxy {
    */
   private matchesPattern(uri: string, pattern: string): boolean {
     const regex = new RegExp(
-      "^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$",
+      "^" +
+        pattern.replace(/[.*+?^${}()|[\]\\]/g, (char) =>
+          char === "*" ? ".*" : char === "?" ? "." : "\\" + char,
+        ) +
+        "$",
     );
     return regex.test(uri);
   }
