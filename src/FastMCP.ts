@@ -3752,12 +3752,21 @@ export class FastMCP<
           if (honoResponse.body) {
             const reader = honoResponse.body.getReader();
             try {
-              while (true) {
+              // A custom route is free to return a stream that never ends on
+              // its own (SSE, a proxied upstream). The client going away is
+              // then the only thing that ends it, so stop pumping once the
+              // response can no longer be written to instead of reading
+              // forever into a socket nobody is listening on.
+              while (!res.writableEnded && !res.destroyed) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 res.write(value);
               }
             } finally {
+              // `releaseLock` detaches this reader but leaves the body itself
+              // unread and its source running; only `cancel` tells the route
+              // to stop producing and release what it holds.
+              await reader.cancel().catch(() => {});
               reader.releaseLock();
             }
           }
