@@ -2874,6 +2874,18 @@ function parseBasicAuthHeader(
  */
 const OAUTH_PROXY_MAX_BODY_SIZE = 1024 * 1024; // 1 MiB
 
+/**
+ * RFC 6749 §5.1 requires `Cache-Control: no-store` and `Pragma: no-cache` on
+ * token endpoint responses, and RFC 7591 §3.2.1 requires the same for a
+ * registration response carrying `client_secret`. Without them an intermediary
+ * proxy or the browser may retain the credential.
+ */
+const OAUTH_CREDENTIAL_RESPONSE_HEADERS = {
+  "Cache-Control": "no-store",
+  "Content-Type": "application/json",
+  Pragma: "no-cache",
+} as const;
+
 function stripBasePath(
   path: string,
   basePath: "" | `/${string}`,
@@ -3967,13 +3979,13 @@ export class FastMCP<
                 );
                 const response = await oauthProxy.registerClient(request);
                 res
-                  .writeHead(201, { "Content-Type": "application/json" })
+                  .writeHead(201, OAUTH_CREDENTIAL_RESPONSE_HEADERS)
                   .end(JSON.stringify(response));
               } catch (error) {
                 const statusCode =
                   (error as { statusCode?: number }).statusCode || 400;
                 res
-                  .writeHead(statusCode, { "Content-Type": "application/json" })
+                  .writeHead(statusCode, OAUTH_CREDENTIAL_RESPONSE_HEADERS)
                   .end(
                     JSON.stringify(
                       (error as { toJSON?: () => unknown }).toJSON?.() || {
@@ -4217,13 +4229,13 @@ export class FastMCP<
                 }
 
                 res
-                  .writeHead(200, { "Content-Type": "application/json" })
+                  .writeHead(200, OAUTH_CREDENTIAL_RESPONSE_HEADERS)
                   .end(JSON.stringify(response));
               } catch (error) {
                 const statusCode =
                   (error as { statusCode?: number }).statusCode || 400;
                 res
-                  .writeHead(statusCode, { "Content-Type": "application/json" })
+                  .writeHead(statusCode, OAUTH_CREDENTIAL_RESPONSE_HEADERS)
                   .end(
                     JSON.stringify(
                       (error as { toJSON?: () => unknown }).toJSON?.() || {
