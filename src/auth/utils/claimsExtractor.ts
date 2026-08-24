@@ -8,7 +8,10 @@ import type { CustomClaimsPassthroughConfig } from "../types.js";
 export class ClaimsExtractor {
   private config: CustomClaimsPassthroughConfig;
 
-  // Claims that MUST NOT be copied from upstream (protect proxy's JWT integrity)
+  // Claims that MUST NOT be copied from upstream (protect proxy's JWT integrity).
+  // "scope" is included because the proxy issues it itself as an authorization
+  // decision (see JWTClaims); a passthrough "scope" would otherwise overwrite the
+  // scope embedded in the signed FastMCP JWT, diverging from the stored mapping.
   private readonly PROTECTED_CLAIMS = new Set([
     "aud",
     "client_id",
@@ -17,6 +20,7 @@ export class ClaimsExtractor {
     "iss",
     "jti",
     "nbf",
+    "scope",
   ]);
 
   constructor(config: boolean | CustomClaimsPassthroughConfig) {
