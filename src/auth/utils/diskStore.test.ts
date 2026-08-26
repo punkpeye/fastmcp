@@ -1,4 +1,5 @@
-import { readdir, rm } from "fs/promises";
+import { mkdtemp, readdir, rm, stat } from "fs/promises";
+import { tmpdir } from "os";
 import { join } from "path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -247,6 +248,35 @@ describe("DiskStore", () => {
       expect(files.filter((file) => file.includes(".claim"))).toHaveLength(0);
 
       store.destroy();
+    });
+  });
+
+  // Node ignores the `mode` option on Windows, so these assertions are
+  // POSIX-only.
+  describe.skipIf(process.platform === "win32")("file permissions", () => {
+    it("should not expose stored credentials to group or other", async () => {
+      const directory = join(
+        await mkdtemp(join(tmpdir(), "fastmcp-diskstore-perms-")),
+        "oauth",
+      );
+      const store = new DiskStore({ directory });
+
+      try {
+        await store.save("token-key", {
+          access_token: "at-secret",
+          proxyCodeVerifier: "pkce-secret",
+          refresh_token: "rt-secret",
+        });
+
+        const directoryStats = await stat(directory);
+        const fileStats = await stat(join(directory, "token-key.json"));
+
+        expect(directoryStats.mode & 0o077).toBe(0);
+        expect(fileStats.mode & 0o077).toBe(0);
+      } finally {
+        store.destroy();
+        await rm(directory, { force: true, recursive: true });
+      }
     });
   });
 });
