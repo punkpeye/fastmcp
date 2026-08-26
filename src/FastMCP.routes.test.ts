@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { getRandomPort } from "get-port-please";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { z } from "zod";
 
 import { FastMCP, FastMCPSession } from "./FastMCP.js";
@@ -978,4 +978,127 @@ test("route options validation", async () => {
       return c.json({ test: 4 });
     });
   }).not.toThrow();
+});
+
+test("custom route stream stops when the client disconnects", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  const app = server.getApp();
+
+  let cancelled = false;
+
+  app.get("/events", () => {
+    const encoder = new TextEncoder();
+
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+      async pull(controller) {
+        // Never ends, like an SSE route. Throttled so the assertion below
+        // observes the pump rather than a busy loop.
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        controller.enqueue(encoder.encode(": ping\n\n"));
+      },
+    });
+
+    return new Response(body, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const abortController = new AbortController();
+
+    const response = await fetch(`http://localhost:${port}/events`, {
+      signal: abortController.signal,
+    });
+
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    await reader.read();
+
+    abortController.abort();
+
+    await vi.waitFor(() => expect(cancelled).toBe(true), { timeout: 3000 });
+  } finally {
+    await server.stop();
+  }
+});
+
+test("custom route stream stops when a quiet client disconnects", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  const app = server.getApp();
+
+  let cancelled = false;
+
+  app.get("/quiet-events", () => {
+    const encoder = new TextEncoder();
+    let sent = false;
+
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+      async pull(controller) {
+        if (!sent) {
+          sent = true;
+          controller.enqueue(encoder.encode(": ping\n\n"));
+          return;
+        }
+        // An SSE route between heartbeats: open, but with nothing to say.
+        // Nothing here can observe the disconnect, so the pump must.
+        await new Promise(() => {});
+      },
+    });
+
+    return new Response(body, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const abortController = new AbortController();
+
+    const response = await fetch(`http://localhost:${port}/quiet-events`, {
+      signal: abortController.signal,
+    });
+
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    await reader.read();
+
+    abortController.abort();
+
+    await vi.waitFor(() => expect(cancelled).toBe(true), { timeout: 3000 });
+  } finally {
+    await server.stop();
+  }
 });

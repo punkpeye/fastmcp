@@ -3763,13 +3763,38 @@ export class FastMCP<
 
           if (honoResponse.body) {
             const reader = honoResponse.body.getReader();
+
+            // A custom route is free to return a stream that never ends on its
+            // own (SSE, a proxied upstream). The client going away is then the
+            // only thing that ends it, and such a stream may well be quiet at
+            // that moment, so waiting on `read()` alone would keep pumping
+            // until a chunk that may never arrive. Race every read against the
+            // response closing instead.
+            let resolveClosed!: () => void;
+            const closed = new Promise<undefined>((resolve) => {
+              resolveClosed = () => resolve(undefined);
+            });
+            res.once("close", resolveClosed);
+            if (res.writableEnded || res.destroyed) {
+              resolveClosed();
+            }
+
             try {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                res.write(value);
+              while (!res.writableEnded && !res.destroyed) {
+                const read = reader.read();
+                // `closed` may win the race, leaving this promise to settle
+                // with nobody observing it.
+                read.catch(() => {});
+                const result = await Promise.race([read, closed]);
+                if (!result || result.done) break;
+                res.write(result.value);
               }
             } finally {
+              res.off("close", resolveClosed);
+              // `releaseLock` detaches this reader but leaves the body itself
+              // unread and its source running; only `cancel` tells the route
+              // to stop producing and release what it holds.
+              await reader.cancel().catch(() => {});
               reader.releaseLock();
             }
           }
