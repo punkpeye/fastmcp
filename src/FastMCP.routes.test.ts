@@ -1038,3 +1038,67 @@ test("custom route stream stops when the client disconnects", async () => {
     await server.stop();
   }
 });
+
+test("custom route stream stops when a quiet client disconnects", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  const app = server.getApp();
+
+  let cancelled = false;
+
+  app.get("/quiet-events", () => {
+    const encoder = new TextEncoder();
+    let sent = false;
+
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+      async pull(controller) {
+        if (!sent) {
+          sent = true;
+          controller.enqueue(encoder.encode(": ping\n\n"));
+          return;
+        }
+        // An SSE route between heartbeats: open, but with nothing to say.
+        // Nothing here can observe the disconnect, so the pump must.
+        await new Promise(() => {});
+      },
+    });
+
+    return new Response(body, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const abortController = new AbortController();
+
+    const response = await fetch(`http://localhost:${port}/quiet-events`, {
+      signal: abortController.signal,
+    });
+
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    await reader.read();
+
+    abortController.abort();
+
+    await vi.waitFor(() => expect(cancelled).toBe(true), { timeout: 3000 });
+  } finally {
+    await server.stop();
+  }
+});
