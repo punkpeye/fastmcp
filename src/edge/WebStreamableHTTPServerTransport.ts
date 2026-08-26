@@ -449,7 +449,22 @@ export class WebStreamableHTTPServerTransport implements Transport {
     // Parse body
     let rawMessage: unknown;
     try {
-      rawMessage = parsedBody ?? (await request.json());
+      if (parsedBody !== undefined && parsedBody !== null) {
+        rawMessage = parsedBody;
+      } else {
+        // A chunked request carries no Content-Length, so the header check
+        // above cannot bound it. Measure the bytes actually read and stop at
+        // the cap rather than buffering the whole body into memory.
+        const text = await this.readBodyWithLimit(request);
+        if (text === null) {
+          return this.createErrorResponse(
+            413,
+            -32000,
+            `Request body too large. Maximum size is ${MAXIMUM_MESSAGE_SIZE} bytes`,
+          );
+        }
+        rawMessage = JSON.parse(text);
+      }
     } catch {
       return this.createErrorResponse(400, -32700, "Parse error: Invalid JSON");
     }
@@ -733,6 +748,45 @@ export class WebStreamableHTTPServerTransport implements Transport {
    */
   private handleUnsupportedRequest(): Response {
     return this.createErrorResponse(405, -32000, "Method not allowed");
+  }
+
+  /**
+   * Read a request body as text, giving up once it exceeds
+   * `MAXIMUM_MESSAGE_SIZE`. Returns `null` when the cap is exceeded so the
+   * caller can answer 413 without ever holding the whole body.
+   */
+  private async readBodyWithLimit(request: Request): Promise<null | string> {
+    if (!request.body) {
+      return "";
+    }
+
+    const reader = request.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        size += value.byteLength;
+        if (size > MAXIMUM_MESSAGE_SIZE) {
+          await reader.cancel();
+          return null;
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const joined = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      joined.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder().decode(joined);
   }
 
   /**
