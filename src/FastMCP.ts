@@ -1410,6 +1410,7 @@ export class FastMCPSession<
   #onToolCall?: ServerOptions<T>["onToolCall"];
   #pingConfig?: ServerOptions<T>["ping"];
 
+  #pingInFlight = false;
   #pingInterval: null | ReturnType<typeof setInterval> = null;
 
   #prompts: Map<string, Prompt<T>> = new Map();
@@ -1650,6 +1651,12 @@ export class FastMCPSession<
 
         if (pingConfig.enabled) {
           this.#pingInterval = setInterval(async () => {
+            if (this.#pingInFlight) {
+              return;
+            }
+
+            this.#pingInFlight = true;
+
             try {
               await this.#server.ping();
             } catch {
@@ -1671,6 +1678,8 @@ export class FastMCPSession<
               } else {
                 this.#logger.info("[FastMCP info] server ping failed");
               }
+            } finally {
+              this.#pingInFlight = false;
             }
           }, pingConfig.intervalMs);
         }

@@ -1952,6 +1952,58 @@ test("session sends pings to the client", async () => {
   });
 });
 
+test("session does not overlap pings when the client is slow", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      let activePings = 0;
+      let maxActivePings = 0;
+      let pingCalls = 0;
+      let releaseFirstPing!: () => void;
+      const firstPingBlocked = new Promise<void>((resolve) => {
+        releaseFirstPing = resolve;
+      });
+
+      client.setRequestHandler(PingRequestSchema, async () => {
+        pingCalls += 1;
+        activePings += 1;
+        maxActivePings = Math.max(maxActivePings, activePings);
+
+        if (pingCalls === 1) {
+          await firstPingBlocked;
+        }
+
+        activePings -= 1;
+
+        return {};
+      });
+
+      await vi.waitFor(() => {
+        expect(pingCalls).toBe(1);
+      });
+      await delay(50);
+      const callsWhileFirstPingWasBlocked = pingCalls;
+
+      releaseFirstPing();
+
+      expect(callsWhileFirstPingWasBlocked).toBe(1);
+      await vi.waitFor(() => {
+        expect(pingCalls).toBeGreaterThanOrEqual(2);
+      });
+      expect(maxActivePings).toBe(1);
+    },
+    server: async () => {
+      return new FastMCP({
+        name: "Test",
+        ping: {
+          enabled: true,
+          intervalMs: 10,
+        },
+        version: "1.0.0",
+      });
+    },
+  });
+});
+
 test("completes prompt arguments", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
