@@ -46,7 +46,7 @@ const createPostRequest = (body: unknown, accept: string, sessionId?: string) =>
     method: "POST",
   });
 
-const createInitializeRequest = (accept: string) =>
+const createInitializeRequest = (accept: string, sessionId?: string) =>
   createPostRequest(
     {
       id: 1,
@@ -59,6 +59,7 @@ const createInitializeRequest = (accept: string) =>
       },
     },
     accept,
+    sessionId,
   );
 
 const createServer = () =>
@@ -220,6 +221,52 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(body.jsonrpc).toBe("2.0");
     expect(body.id).toBe(1);
     expect(body.result.serverInfo.name).toBe("TestServer");
+  });
+
+  it("rejects reinitializing an active session", async () => {
+    const sessionIdGenerator = vi
+      .fn<() => string>()
+      .mockReturnValueOnce("first-session")
+      .mockReturnValueOnce("second-session");
+    const onsessioninitialized = vi.fn();
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      onsessioninitialized,
+      sessionIdGenerator,
+    });
+    await createServer().connect(transport);
+
+    const first = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+    expect(first.status).toBe(200);
+    await first.json();
+    expect(transport.sessionId).toBe("first-session");
+
+    const second = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+    const error: JsonResponse = await second.json();
+
+    expect(second.status).toBe(400);
+    expect(second.headers.get("mcp-session-id")).toBeNull();
+    expect(error.error).toEqual({
+      code: -32600,
+      message: "Invalid Request: Server already initialized",
+    });
+    expect(transport.sessionId).toBe("first-session");
+    expect(sessionIdGenerator).toHaveBeenCalledTimes(1);
+    expect(onsessioninitialized).toHaveBeenCalledTimes(1);
+
+    const withHeader = await transport.handleRequest(
+      createInitializeRequest("application/json", "attacker-session"),
+    );
+
+    expect(withHeader.status).toBe(400);
+    expect(withHeader.headers.get("mcp-session-id")).toBeNull();
+    expect(transport.sessionId).toBe("first-session");
+    expect(sessionIdGenerator).toHaveBeenCalledTimes(1);
+    expect(onsessioninitialized).toHaveBeenCalledTimes(1);
   });
 
   it("should release the standalone SSE stream when the client cancels", async () => {
