@@ -75,6 +75,25 @@ test("reports paths into nested objects and arrays", async () => {
   ]);
 });
 
+test("preserves non-canonical numeric object keys in issue paths", async () => {
+  const numericObjectKeys = ["01", "-1", "1.0", "9007199254740993"];
+  const schema = jsonSchemaAdapter({
+    properties: Object.fromEntries(
+      numericObjectKeys.map((key) => [key, { type: "number" }]),
+    ),
+    required: numericObjectKeys,
+    type: "object",
+  });
+
+  const result = await schema["~standard"].validate(
+    Object.fromEntries(numericObjectKeys.map((key) => [key, "not a number"])),
+  );
+
+  expect(result.issues?.map((issue) => issue.path)).toEqual(
+    numericObjectKeys.map((key) => [key]),
+  );
+});
+
 test("validates nested objects", async () => {
   const schema = jsonSchemaAdapter({
     properties: {
