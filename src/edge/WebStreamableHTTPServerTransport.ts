@@ -132,6 +132,19 @@ export class WebStreamableHTTPServerTransport implements Transport {
   >();
   private sessionIdGenerator: (() => string) | undefined;
 
+  /**
+   * The session id an incoming request may be matched against.
+   *
+   * A session that is tearing down is already gone as far as routing is
+   * concerned, even while `sessionId` still reads as set for the benefit of an
+   * `onclose` handler. Attaching to it during that window opens a stream that
+   * teardown has already stopped accounting for, leaving it with nothing to
+   * write to it and nobody to close it.
+   */
+  private get activeSessionId(): string | undefined {
+    return this._sessionClosing ? undefined : this.sessionId;
+  }
+
   constructor(options: WebStreamableHTTPServerTransportOptions) {
     this.sessionIdGenerator = options.sessionIdGenerator;
     this._enableJsonResponse = options.enableJsonResponse ?? false;
@@ -144,9 +157,19 @@ export class WebStreamableHTTPServerTransport implements Transport {
    * Close the transport
    */
   async close(): Promise<void> {
-    await this.teardownStreams();
+    // The DELETE path invalidates by clearing `sessionId` outright; `close()`
+    // cannot, because it carries no `onsessionclosed` and reading the id in
+    // `onclose` is the only way a handler can tell which session ended. Flag
+    // the teardown instead and clear the id once `onclose` has had it.
+    this._sessionClosing = true;
+    try {
+      await this.teardownStreams();
+    } finally {
+      this._sessionClosing = false;
+    }
     this._started = false;
     this.onclose?.();
+    this.sessionId = undefined;
   }
 
   /**
@@ -279,13 +302,19 @@ export class WebStreamableHTTPServerTransport implements Transport {
   }
 
   /**
-   * Create an error response
+   * Create an error response.
+   *
+   * Never carries `mcp-session-id`. A caller that reaches an error either
+   * already knows the id it sent or has no claim to one, and the paths that
+   * reject an unusable id — `Session not found`, and initialization against a
+   * live or closing session — are exactly the ones someone probing for the
+   * active id would use, so echoing it there hands over the only value that
+   * identifies the session.
    */
   private createErrorResponse(
     status: number,
     code: number,
     message: string,
-    includeSessionId = true,
   ): Response {
     return new Response(
       JSON.stringify({
@@ -294,10 +323,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
         jsonrpc: "2.0",
       }),
       {
-        headers: {
-          ...(includeSessionId ? this.getResponseHeaders() : {}),
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         status,
       },
     );
@@ -329,7 +355,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
         );
       }
 
-      if (this.sessionId !== sessionId) {
+      if (this.activeSessionId !== sessionId) {
         return this.createErrorResponse(404, -32001, "Session not found");
       }
     }
@@ -373,7 +399,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
       );
     }
 
-    if (this.sessionIdGenerator && this.sessionId !== sessionId) {
+    if (this.sessionIdGenerator && this.activeSessionId !== sessionId) {
       return this.createErrorResponse(404, -32001, "Session not found");
     }
 
@@ -516,7 +542,17 @@ export class WebStreamableHTTPServerTransport implements Transport {
         400,
         -32600,
         "Invalid Request: Initialization requests must not include a sessionId",
-        false,
+      );
+    }
+
+    // Ordered before the "already initialized" guard: `close()` leaves
+    // `sessionId` set until `onclose` has read it, so a teardown in progress
+    // satisfies both, and "is closing" is the one that describes it.
+    if (hasInitRequest && this.sessionIdGenerator && this._sessionClosing) {
+      return this.createErrorResponse(
+        400,
+        -32600,
+        "Invalid Request: Session is closing",
       );
     }
 
@@ -529,15 +565,6 @@ export class WebStreamableHTTPServerTransport implements Transport {
         400,
         -32600,
         "Invalid Request: Server already initialized",
-        false,
-      );
-    }
-
-    if (hasInitRequest && this.sessionIdGenerator && this._sessionClosing) {
-      return this.createErrorResponse(
-        400,
-        -32600,
-        "Invalid Request: Session is closing",
       );
     }
 
@@ -562,7 +589,10 @@ export class WebStreamableHTTPServerTransport implements Transport {
       this.sessionId = this.sessionIdGenerator();
       await this._onsessioninitialized?.(this.sessionId);
     } else if (requestSessionId) {
-      if (this.sessionIdGenerator && this.sessionId !== requestSessionId) {
+      if (
+        this.sessionIdGenerator &&
+        this.activeSessionId !== requestSessionId
+      ) {
         return this.createErrorResponse(404, -32001, "Session not found");
       }
     }
@@ -962,18 +992,25 @@ export class WebStreamableHTTPServerTransport implements Transport {
    */
   private async teardownStreams(): Promise<void> {
     this._streamGeneration += 1;
-    for (const writer of this._streamMapping.values()) {
-      try {
-        await writer.close();
-      } catch {
-        // Ignore close errors
-      }
-    }
+    // Snapshot and reset before awaiting anything. `writer.close()` yields, so
+    // a stream registered during that window would otherwise be wiped by a
+    // clear() belonging to the session that preceded it — routed to but never
+    // closed, or closed out from under the client that just opened it,
+    // depending on where in the loop it landed.
+    const writers = [...this._streamMapping.values()];
     this._streamMapping.clear();
     // Per-session, like the session id: this instance stays usable, and the
     // next session starts having opened no standalone stream of its own.
     this._standaloneStreamOpened = false;
     this.releasePendingRequests();
+
+    for (const writer of writers) {
+      try {
+        await writer.close();
+      } catch {
+        // Already closed, errored, or cancelled by the client.
+      }
+    }
   }
 
   private trackStream(
