@@ -284,6 +284,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     status: number,
     code: number,
     message: string,
+    includeSessionId = true,
   ): Response {
     return new Response(
       JSON.stringify({
@@ -293,7 +294,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }),
       {
         headers: {
-          ...this.getResponseHeaders(),
+          ...(includeSessionId ? this.getResponseHeaders() : {}),
           "Content-Type": "application/json",
         },
         status,
@@ -509,6 +510,20 @@ export class WebStreamableHTTPServerTransport implements Transport {
         400,
         -32600,
         "Invalid Request: Initialization requests must not include a sessionId",
+        false,
+      );
+    }
+
+    if (
+      hasInitRequest &&
+      this.sessionIdGenerator &&
+      this.sessionId !== undefined
+    ) {
+      return this.createErrorResponse(
+        400,
+        -32600,
+        "Invalid Request: Server already initialized",
+        false,
       );
     }
 
