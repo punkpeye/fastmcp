@@ -20,18 +20,18 @@ type TransportInternals = {
 /** Let a settled `writer.closed` run its cleanup before asserting on it. */
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-const createGetRequest = (lastEventId?: string) =>
+const createGetRequest = (lastEventId?: string, sessionId = "test-session") =>
   new Request("http://localhost/mcp", {
     headers: {
       Accept: "text/event-stream",
-      "mcp-session-id": "test-session",
+      "mcp-session-id": sessionId,
       ...(lastEventId ? { "last-event-id": lastEventId } : {}),
     },
   });
 
-const createDeleteRequest = () =>
+const createDeleteRequest = (sessionId = "test-session") =>
   new Request("http://localhost/mcp", {
-    headers: { "mcp-session-id": "test-session" },
+    headers: { "mcp-session-id": sessionId },
     method: "DELETE",
   });
 
@@ -267,6 +267,127 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(transport.sessionId).toBe("first-session");
     expect(sessionIdGenerator).toHaveBeenCalledTimes(1);
     expect(onsessioninitialized).toHaveBeenCalledTimes(1);
+  });
+
+  it("never echoes the active session id on a rejected request", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "secret-session",
+    });
+    await createServer().connect(transport);
+    const initialized = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+    await initialized.json();
+    expect(initialized.headers.get("mcp-session-id")).toBe("secret-session");
+
+    // Every path that turns an unusable session id away. Each one is reachable
+    // by a caller holding nothing but a guess, so none of them may answer with
+    // the real id.
+    const rejected = [
+      await transport.handleRequest(
+        createPostRequest(
+          { jsonrpc: "2.0", method: "notifications/initialized" },
+          "application/json",
+          "guessed-session",
+        ),
+      ),
+      await transport.handleRequest(
+        createGetRequest(undefined, "guessed-session"),
+      ),
+      await transport.handleRequest(createDeleteRequest("guessed-session")),
+      await transport.handleRequest(
+        createInitializeRequest("application/json", "guessed-session"),
+      ),
+      await transport.handleRequest(
+        createInitializeRequest("application/json"),
+      ),
+    ];
+
+    for (const response of rejected) {
+      expect(response.ok).toBe(false);
+      expect(response.headers.get("mcp-session-id")).toBeNull();
+    }
+
+    // The rejections left the session itself untouched.
+    expect(transport.sessionId).toBe("secret-session");
+  });
+
+  it("stops resolving its session once closed", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    let sessionIdSeenByOnclose: string | undefined;
+    transport.onclose = () => {
+      sessionIdSeenByOnclose = transport.sessionId;
+    };
+    await createServer().connect(transport);
+    await (
+      await transport.handleRequest(createInitializeRequest("application/json"))
+    ).json();
+
+    await transport.close();
+
+    // `onclose` is the only close notification this path emits, so it has to
+    // still be able to say which session it was for.
+    expect(sessionIdSeenByOnclose).toBe("test-session");
+    expect(transport.sessionId).toBeUndefined();
+
+    const afterClose = await transport.handleRequest(createGetRequest());
+    expect(afterClose.status).toBe(404);
+    const internals = transport as unknown as TransportInternals;
+    expect(internals._streamMapping.size).toBe(0);
+    expect(internals._standaloneStreamOpened).toBe(false);
+  });
+
+  it("refuses to attach a stream while close is tearing down", async () => {
+    let releaseStreamClose: (() => void) | undefined;
+    let markStreamCloseStarted: (() => void) | undefined;
+    const streamCloseStarted = new Promise<void>((resolve) => {
+      markStreamCloseStarted = resolve;
+    });
+    const streamCloseGate = new Promise<void>((resolve) => {
+      releaseStreamClose = resolve;
+    });
+
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    await (
+      await transport.handleRequest(createInitializeRequest("application/json"))
+    ).json();
+
+    const internals = transport as unknown as TransportInternals;
+    internals._streamMapping.set("old-stream", {
+      close: vi.fn(async () => {
+        markStreamCloseStarted?.();
+        await streamCloseGate;
+      }),
+    } as unknown as WritableStreamDefaultWriter<Uint8Array>);
+
+    const closing = transport.close();
+    await streamCloseStarted;
+
+    // `sessionId` still reads as set for `onclose`, so the guard — not the id —
+    // is what has to turn these away.
+    expect(transport.sessionId).toBe("test-session");
+    const duringClose = await transport.handleRequest(createGetRequest());
+    expect(duringClose.status).toBe(404);
+    const initializeDuringClose = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+    expect(initializeDuringClose.status).toBe(400);
+
+    releaseStreamClose?.();
+    await closing;
+
+    // Nothing attached during the window, so teardown left nothing behind.
+    expect(internals._streamMapping.size).toBe(0);
+    expect(internals._standaloneStreamOpened).toBe(false);
+    expect(transport.sessionId).toBeUndefined();
   });
 
   it("should release the standalone SSE stream when the client cancels", async () => {
