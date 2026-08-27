@@ -105,6 +105,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
 
   private _requestToStreamMapping = new Map<RequestId, StreamId>();
 
+  private _sessionClosing = false;
   private _standaloneSseStreamId = "_GET_stream";
   /**
    * Whether a client has held the standalone GET stream during this session.
@@ -332,10 +333,15 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
 
-    await this.teardownStreams();
-
-    await this._onsessionclosed?.(this.sessionId ?? "");
+    this._sessionClosing = true;
+    const closedSessionId = this.sessionId ?? "";
     this.sessionId = undefined;
+    try {
+      await this.teardownStreams();
+      await this._onsessionclosed?.(closedSessionId);
+    } finally {
+      this._sessionClosing = false;
+    }
 
     return new Response(null, {
       headers: this.getResponseHeaders(),
@@ -509,6 +515,14 @@ export class WebStreamableHTTPServerTransport implements Transport {
         400,
         -32600,
         "Invalid Request: Initialization requests must not include a sessionId",
+      );
+    }
+
+    if (hasInitRequest && this.sessionIdGenerator && this._sessionClosing) {
+      return this.createErrorResponse(
+        400,
+        -32600,
+        "Invalid Request: Session is closing",
       );
     }
 

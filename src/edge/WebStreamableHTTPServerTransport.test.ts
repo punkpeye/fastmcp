@@ -680,6 +680,126 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(stored.slice(before)).toEqual([]);
   });
 
+  it.each([
+    [
+      "throws",
+      () => {
+        throw new Error("session close failed");
+      },
+    ],
+    [
+      "rejects",
+      async () => {
+        throw new Error("session close failed");
+      },
+    ],
+  ])(
+    "clears the session when onsessionclosed %s",
+    async (_mode, closeHandler) => {
+      const onSessionClosed = vi.fn(closeHandler);
+      const transport = new WebStreamableHTTPServerTransport({
+        onsessionclosed: onSessionClosed,
+        sessionIdGenerator: () => "test-session",
+      });
+      await createServer().connect(transport);
+      await transport.handleRequest(
+        createInitializeRequest("application/json"),
+      );
+
+      await expect(
+        transport.handleRequest(createDeleteRequest()),
+      ).rejects.toThrow("session close failed");
+      expect(onSessionClosed).toHaveBeenCalledTimes(1);
+      expect(onSessionClosed).toHaveBeenCalledWith("test-session");
+
+      const staleSession = await transport.handleRequest(createGetRequest());
+      expect(staleSession.status).toBe(404);
+
+      const reinitialized = await transport.handleRequest(
+        createInitializeRequest("application/json"),
+      );
+      expect(reinitialized.status).toBe(200);
+
+      // A second DELETE belongs to the newly initialized session, proving the
+      // failed callback did not leave the original session active.
+      await expect(
+        transport.handleRequest(createDeleteRequest()),
+      ).rejects.toThrow("session close failed");
+      expect(onSessionClosed).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("rejects initialization until session teardown finishes", async () => {
+    let releaseStreamClose: (() => void) | undefined;
+    let markStreamCloseStarted: (() => void) | undefined;
+    const streamCloseStarted = new Promise<void>((resolve) => {
+      markStreamCloseStarted = resolve;
+    });
+    const streamCloseGate = new Promise<void>((resolve) => {
+      releaseStreamClose = resolve;
+    });
+    let rejectClose: ((reason: Error) => void) | undefined;
+    let markCloseStarted: (() => void) | undefined;
+    const closeStarted = new Promise<void>((resolve) => {
+      markCloseStarted = resolve;
+    });
+    const closeGate = new Promise<void>((_resolve, reject) => {
+      rejectClose = reject;
+    });
+
+    const onSessionClosed = vi.fn(async () => {
+      markCloseStarted?.();
+      await closeGate;
+    });
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      onsessionclosed: onSessionClosed,
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+    const initialized = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+    expect(initialized.status).toBe(200);
+
+    const internals = transport as unknown as TransportInternals;
+    internals._streamMapping.set("old-stream", {
+      close: vi.fn(async () => {
+        markStreamCloseStarted?.();
+        await streamCloseGate;
+      }),
+    } as unknown as WritableStreamDefaultWriter<Uint8Array>);
+
+    const deleting = transport.handleRequest(createDeleteRequest());
+    await streamCloseStarted;
+
+    const staleSession = await transport.handleRequest(createGetRequest());
+    expect(staleSession.status).toBe(404);
+    const initializeDuringTeardown = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+
+    releaseStreamClose?.();
+    await closeStarted;
+    const initializeDuringCallback = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+
+    rejectClose?.(new Error("session close failed"));
+    await expect(deleting).rejects.toThrow("session close failed");
+    expect(onSessionClosed).toHaveBeenCalledOnce();
+    expect(onSessionClosed).toHaveBeenCalledWith("test-session");
+    expect(initializeDuringTeardown.status).toBe(400);
+    expect(initializeDuringCallback.status).toBe(400);
+    expect(internals._streamMapping.size).toBe(0);
+
+    const reinitialized = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+    expect(reinitialized.status).toBe(200);
+    expect(internals._streamMapping.size).toBe(0);
+  });
+
   it("stores a standalone event sent while a replay is still resolving", async () => {
     // `replayEventsAfter` only reveals which stream it replayed once it
     // settles, so during the await the stream is neither in `_streamMapping`
