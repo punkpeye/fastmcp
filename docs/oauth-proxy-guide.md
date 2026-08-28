@@ -1162,12 +1162,16 @@ const authProxy = new OAuthProxy({
 **Solution:** Ensure you're importing from the correct path:
 
 ```typescript
-// Correct
 import { OAuthProxy } from "fastmcp/auth";
-
-// Also correct
-import { OAuthProxy } from "fastmcp";
 ```
+
+`OAuthProxy` is only available on the `fastmcp/auth` subpath. The package root
+re-exports the auth providers (`OAuthProvider`, `GoogleProvider`,
+`GitHubProvider`, `AzureProvider`) and the `canAccess` helpers
+(`getAuthSession`, `requireAuth`, `requireRole`, `requireScopes`,
+`requireAll`, `requireAny`) for convenience, but not the proxy itself, so
+`import { OAuthProxy } from "fastmcp"` fails with
+`SyntaxError: The requested module 'fastmcp' does not provide an export named 'OAuthProxy'`.
 
 Make sure `fastmcp` is properly installed:
 
