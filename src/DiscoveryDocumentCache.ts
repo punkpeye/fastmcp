@@ -13,11 +13,15 @@ export class DiscoveryDocumentCache {
     }
   > = new Map();
 
+  #generation = 0;
+
   #inFlight: Map<string, Promise<unknown>> = new Map();
 
   #timeoutMs: number;
 
   #ttl: number;
+
+  #urlGenerations: Map<string, number> = new Map();
 
   /**
    * @param options - configuration options
@@ -35,8 +39,13 @@ export class DiscoveryDocumentCache {
   public clear(url?: string): void {
     if (url) {
       this.#cache.delete(url);
+      this.#inFlight.delete(url);
+      this.#urlGenerations.set(url, (this.#urlGenerations.get(url) ?? 0) + 1);
     } else {
       this.#cache.clear();
+      this.#inFlight.clear();
+      this.#urlGenerations.clear();
+      this.#generation++;
     }
   }
 
@@ -66,7 +75,11 @@ export class DiscoveryDocumentCache {
     }
 
     // create a new fetch promise and store it
-    const fetchPromise = this.#fetchAndCache(url);
+    const fetchPromise = this.#fetchAndCache(
+      url,
+      this.#generation,
+      this.#urlGenerations.get(url) ?? 0,
+    );
 
     this.#inFlight.set(url, fetchPromise);
 
@@ -76,7 +89,9 @@ export class DiscoveryDocumentCache {
     } finally {
       // clean up in-flight promise after completion
       // (success or failure)
-      this.#inFlight.delete(url);
+      if (this.#inFlight.get(url) === fetchPromise) {
+        this.#inFlight.delete(url);
+      }
     }
   }
 
@@ -102,7 +117,11 @@ export class DiscoveryDocumentCache {
     return true;
   }
 
-  async #fetchAndCache(url: string): Promise<unknown> {
+  async #fetchAndCache(
+    url: string,
+    generation: number,
+    urlGeneration: number,
+  ): Promise<unknown> {
     // fetch fresh document, bounded by the configured timeout
     let res: Response;
     try {
@@ -132,11 +151,16 @@ export class DiscoveryDocumentCache {
     // calculate expiration time AFTER fetch completes
     const expiresAt = Date.now() + this.#ttl;
 
-    // store in cache with expiration
-    this.#cache.set(url, {
-      data,
-      expiresAt,
-    });
+    // A clear that occurred while the fetch was pending invalidates its result.
+    if (
+      this.#generation === generation &&
+      (this.#urlGenerations.get(url) ?? 0) === urlGeneration
+    ) {
+      this.#cache.set(url, {
+        data,
+        expiresAt,
+      });
+    }
 
     return data;
   }

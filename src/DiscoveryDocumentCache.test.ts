@@ -146,6 +146,98 @@ test("clears all cached documents", async () => {
   fetchSpy.mockRestore();
 });
 
+test("clear(url) prevents an in-flight fetch from repopulating the cache", async () => {
+  const cache = new DiscoveryDocumentCache();
+  const testUrl = "https://auth.example.com/.well-known/openid-configuration";
+  const staleDocument = { issuer: "https://stale.example.com" };
+  const freshDocument = { issuer: "https://fresh.example.com" };
+  let resolveFirstFetch!: (response: Response) => void;
+  let resolveSecondFetch!: (response: Response) => void;
+  const firstFetch = new Promise<Response>((resolve) => {
+    resolveFirstFetch = resolve;
+  });
+  const secondFetch = new Promise<Response>((resolve) => {
+    resolveSecondFetch = resolve;
+  });
+  const fetchSpy = vi
+    .spyOn(global, "fetch")
+    .mockReturnValueOnce(firstFetch)
+    .mockReturnValueOnce(secondFetch);
+
+  const staleRequest = cache.get(testUrl);
+
+  cache.clear(testUrl);
+  const freshRequest = cache.get(testUrl);
+  resolveFirstFetch({
+    json: async () => staleDocument,
+    ok: true,
+  } as Response);
+
+  await expect(staleRequest).resolves.toEqual(staleDocument);
+  const coalescedRequest = cache.get(testUrl);
+
+  expect(fetchSpy).toHaveBeenCalledTimes(2);
+  resolveSecondFetch({
+    json: async () => freshDocument,
+    ok: true,
+  } as Response);
+  await expect(freshRequest).resolves.toEqual(freshDocument);
+  await expect(coalescedRequest).resolves.toEqual(freshDocument);
+  expect(await cache.get(testUrl)).toEqual(freshDocument);
+  expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+  fetchSpy.mockRestore();
+});
+
+test("clear() prevents in-flight fetches from repopulating the cache", async () => {
+  const cache = new DiscoveryDocumentCache();
+  const url1 = "https://auth1.example.com/.well-known/openid-configuration";
+  const url2 = "https://auth2.example.com/.well-known/openid-configuration";
+  const resolvers = new Map<string, Array<(response: Response) => void>>();
+  const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(
+    (input) =>
+      new Promise<Response>((resolve) => {
+        const url = String(input);
+        resolvers.set(url, [...(resolvers.get(url) ?? []), resolve]);
+      }),
+  );
+
+  const staleRequest1 = cache.get(url1);
+  const staleRequest2 = cache.get(url2);
+
+  cache.clear();
+  const freshRequest1 = cache.get(url1);
+  const freshRequest2 = cache.get(url2);
+  resolvers.get(url1)?.[0]?.({
+    json: async () => ({ issuer: "https://auth1.example.com" }),
+    ok: true,
+  } as Response);
+  resolvers.get(url2)?.[0]?.({
+    json: async () => ({ issuer: "https://auth2.example.com" }),
+    ok: true,
+  } as Response);
+  resolvers.get(url1)?.[1]?.({
+    json: async () => ({ issuer: "https://fresh-auth1.example.com" }),
+    ok: true,
+  } as Response);
+  resolvers.get(url2)?.[1]?.({
+    json: async () => ({ issuer: "https://fresh-auth2.example.com" }),
+    ok: true,
+  } as Response);
+
+  await Promise.all([staleRequest1, staleRequest2]);
+  await expect(freshRequest1).resolves.toEqual({
+    issuer: "https://fresh-auth1.example.com",
+  });
+  await expect(freshRequest2).resolves.toEqual({
+    issuer: "https://fresh-auth2.example.com",
+  });
+  expect(fetchSpy).toHaveBeenCalledTimes(4);
+  expect(cache.size).toBe(2);
+
+  fetchSpy.mockRestore();
+});
+
 test("has() returns false for expired entries", async () => {
   const cache = new DiscoveryDocumentCache({ ttl: 100 }); // 100ms TTL
   const testUrl = "https://auth.example.com/.well-known/openid-configuration";
