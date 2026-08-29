@@ -447,5 +447,30 @@ describe("OAuthProxy CWE-601 open-redirect regression", () => {
       ).resolves.toBeDefined();
       loose.destroy();
     });
+
+    it("rejects a redirect URI that smuggles a foreign host via userinfo under the default", async () => {
+      // `http://localhost:80@evil.com/cb` matches the loopback-only default
+      // pattern `http://localhost:*`, but its real host (per `new URL`) is
+      // `evil.com`, so accepting it would 302 the authorization code offsite.
+      const defaultProxy = new OAuthProxy({
+        ...baseConfig,
+        allowedRedirectUriPatterns: undefined,
+      });
+
+      await expect(
+        defaultProxy.registerClient({
+          redirect_uris: ["http://localhost:80@evil.com/cb"],
+        }),
+      ).rejects.toMatchObject({ code: "invalid_redirect_uri" });
+
+      // A genuine loopback URI (no userinfo) is still accepted.
+      await expect(
+        defaultProxy.registerClient({
+          redirect_uris: ["http://localhost:54321/callback"],
+        }),
+      ).resolves.toBeDefined();
+
+      defaultProxy.destroy();
+    });
   });
 });
