@@ -165,7 +165,9 @@ function toIssue(error: AjvErrorObject): StandardSchemaV1.Issue {
     .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"))
     .map((segment): number | string => {
       const index = Number(segment);
-      return Number.isInteger(index) && segment !== "" ? index : segment;
+      return /^(?:0|[1-9]\d*)$/.test(segment) && Number.isSafeInteger(index)
+        ? index
+        : segment;
     });
 
   // AJV reports a missing property against its parent object, with the name in
