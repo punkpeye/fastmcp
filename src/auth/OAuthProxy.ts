@@ -31,6 +31,7 @@ import {
   DEFAULT_TRANSACTION_TTL,
   DEFAULT_UPSTREAM_REQUEST_TIMEOUT_MS,
 } from "./types.js";
+import { resolveCimdClient } from "./utils/cimd.js";
 import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
 import { JWTIssuer } from "./utils/jwtIssuer.js";
@@ -88,6 +89,7 @@ export class OAuthProxy {
       allowPlainPkce: true,
       authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
       consentRequired: true,
+      enableCimd: false,
       enableTokenSwap: true, // Enabled by default for security
       redirectPath: "/oauth/callback",
       transactionTtl: DEFAULT_TRANSACTION_TTL,
@@ -176,8 +178,27 @@ export class OAuthProxy {
     // RFC 6749 §5.2 - reject unknown clients with invalid_client.
     // MCP clients receive a proxy-issued client_id during DCR (not the upstream
     // provider's credentials), so we look up by that proxy client_id.
-    const registeredClient =
-      await this.stateStore.getRegisteredClientByClientId(params.client_id);
+    let registeredClient = await this.stateStore.getRegisteredClientByClientId(
+      params.client_id,
+    );
+
+    // Not a DCR (or previously-resolved CIMD) client — if this deployment
+    // opted in to CIMD and client_id looks like one, resolve and cache it so
+    // it is found the ordinary way on every subsequent request, including
+    // the token exchange for this same flow.
+    if (!registeredClient && this.config.enableCimd) {
+      registeredClient = await resolveCimdClient(
+        params.client_id,
+        params.redirect_uri,
+        (uri) => this.validateRedirectUri(uri),
+      );
+
+      if (registeredClient) {
+        this.stateStore.cacheRegisteredClient(registeredClient);
+        await this.stateStore.saveRegisteredClient(registeredClient);
+      }
+    }
+
     if (!registeredClient) {
       throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
@@ -260,10 +281,29 @@ export class OAuthProxy {
     }
 
     // RFC 6749 §5.2 - reject unknown clients. Only proxy-issued client_ids
-    // (obtained via DCR) are accepted, so stolen codes cannot be exchanged by
-    // arbitrary callers.
-    const registeredClient =
-      await this.stateStore.getRegisteredClientByClientId(request.client_id);
+    // (obtained via DCR) and, when enabled, resolved CIMD clients are
+    // accepted, so stolen codes cannot be exchanged by arbitrary callers.
+    let registeredClient = await this.stateStore.getRegisteredClientByClientId(
+      request.client_id,
+    );
+
+    // Defence in depth: authorize() already resolves and caches a CIMD
+    // client before issuing a code for it, so this normally finds it above.
+    // Falling back here too means a cache eviction between authorize and
+    // token exchange degrades to an extra fetch rather than a hard failure.
+    if (!registeredClient && this.config.enableCimd) {
+      registeredClient = await resolveCimdClient(
+        request.client_id,
+        undefined,
+        (uri) => this.validateRedirectUri(uri),
+      );
+
+      if (registeredClient) {
+        this.stateStore.cacheRegisteredClient(registeredClient);
+        await this.stateStore.saveRegisteredClient(registeredClient);
+      }
+    }
+
     if (!registeredClient) {
       throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
@@ -389,6 +429,7 @@ export class OAuthProxy {
    */
   getAuthorizationServerMetadata(): {
     authorizationEndpoint: string;
+    clientIdMetadataDocumentSupported?: boolean;
     codeChallengeMethodsSupported?: string[];
     dpopSigningAlgValuesSupported?: string[];
     grantTypesSupported?: string[];
@@ -410,6 +451,9 @@ export class OAuthProxy {
   } {
     return {
       authorizationEndpoint: `${this.config.baseUrl}/oauth/authorize`,
+      ...(this.config.enableCimd
+        ? { clientIdMetadataDocumentSupported: true as const }
+        : {}),
       codeChallengeMethodsSupported: this.config.allowPlainPkce
         ? ["S256", "plain"]
         : ["S256"],
