@@ -182,10 +182,8 @@ export class OAuthProxy {
       params.client_id,
     );
 
-    // Not a DCR (or previously-resolved CIMD) client — if this deployment
-    // opted in to CIMD and client_id looks like one, resolve and cache it so
-    // it is found the ordinary way on every subsequent request, including
-    // the token exchange for this same flow.
+    // Unknown client_id: if CIMD is enabled, try resolving and caching it
+    // as one so later lookups (including token exchange) find it normally.
     if (!registeredClient && this.config.enableCimd) {
       registeredClient = await resolveCimdClient(
         params.client_id,
@@ -287,10 +285,8 @@ export class OAuthProxy {
       request.client_id,
     );
 
-    // Defence in depth: authorize() already resolves and caches a CIMD
-    // client before issuing a code for it, so this normally finds it above.
-    // Falling back here too means a cache eviction between authorize and
-    // token exchange degrades to an extra fetch rather than a hard failure.
+    // Defence in depth: authorize() already caches a resolved CIMD client,
+    // so this only matters if it was evicted between authorize and exchange.
     if (!registeredClient && this.config.enableCimd) {
       registeredClient = await resolveCimdClient(
         request.client_id,

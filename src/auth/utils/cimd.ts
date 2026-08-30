@@ -1,50 +1,32 @@
 /**
- * Client ID Metadata Documents (CIMD)
+ * Client ID Metadata Documents (CIMD) — MCP authorization spec SEP-991.
  *
- * Implements the client-identification mechanism introduced to the MCP
- * authorization spec by SEP-991, positioned as the successor to Dynamic
- * Client Registration: instead of calling POST /oauth/register, a client
- * presents an HTTPS URL as its `client_id`, and the authorization server
- * fetches that URL on demand to read the client's metadata. Nothing is
- * written on the server side ahead of time, so there is no registration
- * database to grow, no client to expire, and no unauthenticated /register
- * endpoint to abuse.
+ * A client presents an HTTPS URL as its `client_id`; the authorization
+ * server fetches that URL on demand to read the client's metadata instead
+ * of requiring a prior POST /oauth/register call.
  */
 
 import type { DCRClientMetadata, ProxyDCRClient } from "../types.js";
 
 const CIMD_FETCH_TIMEOUT_MS = 5000;
 
-/** Refuses documents larger than this before attempting to parse them. */
+/** Max response size accepted, enforced while streaming (not after buffering). */
 const CIMD_MAX_RESPONSE_BYTES = 65536;
 
 /**
  * Resolves a CIMD `client_id` into the same shape Dynamic Client
- * Registration produces, so every downstream consumer — authorize, token
- * exchange, storage — can treat a CIMD client and a DCR client identically
- * once this returns.
+ * Registration produces. Callers should look up `client_id` in their
+ * existing client registry first and only call this on a miss.
  *
- * Callers are expected to try `client_id` against their existing client
- * registry first and only reach this function on a miss: a `client_id` a
- * previous CIMD or DCR call already registered is found there and should
- * never reach here again.
- *
- * Never throws. Anything that isn't a valid, fetchable, self-consistent CIMD
- * document resolves to `null`, so callers can fall through to the ordinary
- * "Unknown client_id" error rather than distinguish "not CIMD" from "invalid
- * CIMD" — RFC 6749 §5.2 gives an attacker no more information from one
- * outcome than the other anyway.
+ * Never throws — anything that isn't a valid, fetchable, self-consistent
+ * CIMD document resolves to `null` so callers can fall through to the
+ * ordinary "Unknown client_id" error.
  *
  * @param clientId The `client_id` presented by the client.
  * @param requestedRedirectUri The `redirect_uri` from the current request,
- *   if any. When present, the resolved document's `redirect_uris` must
- *   include it. Token-exchange call sites that don't carry a `redirect_uri`
- *   may omit this and rely on `validateRedirectUri` plus the fact that
- *   `authorize()` already validated the pairing for this transaction.
- * @param validateRedirectUri The proxy's own redirect-URI allow-list check
- *   (`OAuthProxy.validateRedirectUri`) — every URI in the document must pass
- *   it, exactly as DCR's `registerClient` already requires. A CIMD document
- *   cannot claim a redirect URI this deployment wouldn't otherwise accept.
+ *   if any; when present it must appear in the document's `redirect_uris`.
+ * @param validateRedirectUri The proxy's redirect-URI allow-list check —
+ *   every URI in the document must pass it, exactly as DCR requires.
  */
 export async function resolveCimdClient(
   clientId: string,
@@ -83,15 +65,9 @@ export async function resolveCimdClient(
     return null;
   }
 
-  let text: string;
+  const text = await readBoundedText(response);
 
-  try {
-    text = await response.text();
-  } catch {
-    return null;
-  }
-
-  if (text.length > CIMD_MAX_RESPONSE_BYTES) {
+  if (text === null) {
     return null;
   }
 
@@ -109,9 +85,8 @@ export async function resolveCimdClient(
 
   const doc = parsed as Record<string, unknown>;
 
-  // The document must identify itself by the exact URL it was fetched from —
-  // otherwise it says nothing about who actually controls `clientId`, and any
-  // HTTPS host could vouch for any other client_id.
+  // The document must self-identify by the exact URL it was fetched from,
+  // or any HTTPS host could vouch for any other client_id.
   if (doc.client_id !== clientId) {
     return null;
   }
@@ -142,10 +117,7 @@ export async function resolveCimdClient(
   return {
     callbackUrl: redirectUris[0],
     clientId,
-    // CIMD is a public-client mechanism: the URL is the identity, and there
-    // is no secret-issuance step for a downstream check to rely on. The flow
-    // is secured by PKCE instead, exactly as for a DCR client that requested
-    // `token_endpoint_auth_method: "none"`.
+    // CIMD is a public-client mechanism secured by PKCE; there is no secret.
     clientSecret: undefined,
     metadata,
     redirectUris,
@@ -153,36 +125,106 @@ export async function resolveCimdClient(
   };
 }
 
+/** Expands a (possibly `::`-abbreviated) IPv6 address into 8 16-bit groups. */
+function expandIPv6(host: string): null | number[] {
+  const sides = host.split("::");
+
+  if (sides.length > 2) {
+    return null;
+  }
+
+  const head = sides[0] ? sides[0].split(":") : [];
+  const tail = sides.length === 2 && sides[1] ? sides[1].split(":") : [];
+
+  if (sides.length === 1 && head.length !== 8) {
+    return null;
+  }
+
+  const missing = 8 - head.length - tail.length;
+
+  if (missing < 0) {
+    return null;
+  }
+
+  const parts = [...head, ...Array<string>(missing).fill("0"), ...tail];
+
+  if (parts.length !== 8) {
+    return null;
+  }
+
+  const groups = parts.map((g) => Number.parseInt(g || "0", 16));
+  return groups.every((g) => !Number.isNaN(g)) ? groups : null;
+}
+
 /**
- * Rejects hosts that are, by their literal form, loopback or link-local/
- * private-range addresses. This defends against a CIMD `client_id` pointing
- * the proxy's own outbound fetch at internal infrastructure — e.g. a cloud
- * metadata endpoint on 169.254.169.254 — which is CWE-918 Server-Side
- * Request Forgery.
+ * Rejects hosts that are, by literal form, loopback/link-local/private-range
+ * addresses (IPv4 and IPv6, including IPv4-mapped IPv6). Defends against a
+ * CIMD `client_id` pointing the proxy's outbound fetch at internal
+ * infrastructure (CWE-918 SSRF) — e.g. a cloud metadata endpoint.
  *
- * This is a literal-form check only, not DNS-resolution-based, so it does
- * not defend against DNS rebinding (a hostname that resolves to a private
- * address only after this check runs). Treat it as one layer of defence,
- * not a complete SSRF mitigation.
+ * Literal-form only, not DNS-resolution-based: one layer of defence, not a
+ * complete SSRF mitigation (does not defend against DNS rebinding).
  */
 function isPrivateOrLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
 
-  if (
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "::1" ||
-    host === "0.0.0.0"
-  ) {
+  if (host === "localhost" || host === "0.0.0.0") {
     return true;
   }
 
+  if (host.includes(":")) {
+    return isPrivateOrLoopbackIPv6(host);
+  }
+
   return (
-    /^169\.254\./.test(host) || // link-local, includes cloud metadata endpoints
+    host === "127.0.0.1" ||
+    /^169\.254\./.test(host) ||
     /^10\./.test(host) ||
     /^192\.168\./.test(host) ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(host)
   );
+}
+
+function isPrivateOrLoopbackIPv6(host: string): boolean {
+  const groups = expandIPv6(host);
+
+  if (!groups) {
+    return false;
+  }
+
+  if (groups.every((g) => g === 0)) {
+    return true; // :: (unspecified)
+  }
+
+  if (groups.slice(0, 7).every((g) => g === 0) && groups[7] === 1) {
+    return true; // ::1 (loopback)
+  }
+
+  const [first] = groups;
+
+  if ((first & 0xffc0) === 0xfe80) {
+    return true; // fe80::/10 (link-local)
+  }
+
+  if ((first & 0xfe00) === 0xfc00) {
+    return true; // fc00::/7 (unique-local)
+  }
+
+  // IPv4-mapped/-compatible (::ffff:a.b.c.d or ::a.b.c.d): check the
+  // embedded IPv4 address against the same rules.
+  if (
+    groups[0] === 0 &&
+    groups[1] === 0 &&
+    groups[2] === 0 &&
+    groups[3] === 0 &&
+    groups[4] === 0 &&
+    (groups[5] === 0 || groups[5] === 0xffff)
+  ) {
+    const ipv4 = `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}`;
+    return isPrivateOrLoopbackHost(ipv4);
+  }
+
+  return false;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -193,4 +235,49 @@ function isStringArray(value: unknown): value is string[] {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Reads a fetch `Response` body up to `CIMD_MAX_RESPONSE_BYTES`, aborting
+ * the stream (rather than buffering it fully first) once the cap is
+ * exceeded. Returns `null` on any error or if the cap is hit.
+ */
+async function readBoundedText(response: Response): Promise<null | string> {
+  const contentLength = response.headers.get("content-length");
+
+  if (contentLength && Number(contentLength) > CIMD_MAX_RESPONSE_BYTES) {
+    return null;
+  }
+
+  const reader = response.body?.getReader();
+
+  if (!reader) {
+    return null;
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      totalBytes += value.byteLength;
+
+      if (totalBytes > CIMD_MAX_RESPONSE_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  }
+
+  return Buffer.concat(chunks).toString("utf-8");
 }

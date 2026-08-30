@@ -262,30 +262,11 @@ export interface OAuthProxyConfig {
    * Accept Client ID Metadata Documents (CIMD) as an alternative to Dynamic
    * Client Registration (default: false).
    *
-   * When enabled, a `client_id` that is not already a registered client —
-   * via DCR or a prior CIMD resolution — and that is an HTTPS URL is treated
-   * as a CIMD client: the proxy fetches that URL, expects a JSON document
-   * whose own `client_id` field matches the URL it was fetched from, and
-   * reads `redirect_uris` from it. This lets clients that publish a stable
-   * metadata document (e.g. a first-party IDE) identify themselves without
-   * ever calling POST /oauth/register — see the MCP authorization spec's
-   * Client ID Metadata Document mechanism (SEP-991), which newer MCP clients
-   * increasingly prefer, or require, over classic DCR.
-   *
-   * The fetched document's `redirect_uris` are checked against
-   * `allowedRedirectUriPatterns` exactly as DCR's are — a CIMD document
-   * cannot claim a redirect URI this deployment wouldn't otherwise accept.
-   * The proxy also refuses non-HTTPS URLs and literal loopback/private-range
-   * hosts before fetching (defence against CWE-918 SSRF), and caps both the
-   * fetch timeout and response size.
-   *
-   * When enabled, `client_id_metadata_document_supported: true` is added to
-   * `getAuthorizationServerMetadata()` so compliant clients know to try this
-   * before falling back to DCR or manual client registration.
-   *
-   * Off by default: this adds a new, network-reaching code path triggered by
-   * client-supplied input, so existing deployments upgrading this package
-   * are unaffected until they opt in.
+   * When enabled, an unregistered `client_id` that is an HTTPS URL is
+   * resolved by fetching it as a CIMD document (see `resolveCimdClient` in
+   * `utils/cimd.ts` for validation details) and advertised via
+   * `client_id_metadata_document_supported` in the AS metadata. See the MCP
+   * authorization spec's CIMD mechanism (SEP-991).
    */
   enableCimd?: boolean;
   /** Enable token swap pattern (default: true) - issues short-lived JWTs instead of passing through upstream tokens */
