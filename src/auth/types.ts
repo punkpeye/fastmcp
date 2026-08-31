@@ -379,6 +379,13 @@ export interface ProxyDCRClient {
   redirectUris: string[];
   /** Client registration timestamp */
   registeredAt: Date;
+  /**
+   * How this client came to be known, when that changes the rules applied to
+   * it. `"cimd"` marks a public client whose identity is a URL anyone can
+   * name and which holds no secret, so the proxy requires S256 PKCE from it.
+   * Absent for a Dynamic Client Registration.
+   */
+  source?: "cimd";
 }
 
 /**

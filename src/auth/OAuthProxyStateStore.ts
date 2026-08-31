@@ -52,6 +52,7 @@ const proxyDcrClientStorageSchema: z.ZodType<ProxyDCRClient> = z.object({
   metadata: dcrClientMetadataSchema.optional(),
   redirectUris: z.array(z.string()),
   registeredAt: storedDateSchema,
+  source: z.literal("cimd").optional(),
 });
 
 const upstreamTokenSetStorageSchema: z.ZodType<UpstreamTokenSet> = z.object({

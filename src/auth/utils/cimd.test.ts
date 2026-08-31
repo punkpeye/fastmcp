@@ -55,6 +55,9 @@ describe("resolveCimdClient", () => {
     expect(client?.redirectUris).toEqual([REDIRECT_URI]);
     expect(client?.clientSecret).toBeUndefined();
     expect(client?.metadata?.client_name).toBe("Example Client");
+    // Marks it as a public client, which the proxy holds to S256 PKCE.
+    expect(client?.source).toBe("cimd");
+    expect(client?.expiresAt).toBeInstanceOf(Date);
   });
 
   it("only reads recognised metadata fields, ignoring unknown ones", async () => {

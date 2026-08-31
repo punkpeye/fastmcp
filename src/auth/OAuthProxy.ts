@@ -224,6 +224,29 @@ export class OAuthProxy {
       );
     }
 
+    // A CIMD client holds no secret and its identity is a URL anyone can name,
+    // so PKCE is the only thing binding the authorization code to whoever
+    // asked for it. `plain` puts the verifier in the same request as the
+    // challenge, binding nothing, so S256 is the only method accepted here —
+    // regardless of `allowPlainPkce`, which exists for legacy DCR clients that
+    // predate this requirement. Both OAuth 2.1 and the MCP authorization spec
+    // require this of public clients.
+    if (registeredClient.source === "cimd") {
+      if (!params.code_challenge) {
+        throw new OAuthProxyError(
+          "invalid_request",
+          "code_challenge is required for Client ID Metadata Document clients",
+        );
+      }
+
+      if (params.code_challenge_method !== "S256") {
+        throw new OAuthProxyError(
+          "invalid_request",
+          "code_challenge_method must be S256 for Client ID Metadata Document clients",
+        );
+      }
+    }
+
     // Create transaction
     const transaction = await this.createTransaction(params);
 
@@ -307,6 +330,17 @@ export class OAuthProxy {
     // Validate client
     if (clientCode.clientId !== request.client_id) {
       throw new OAuthProxyError("invalid_client", "Client ID mismatch");
+    }
+
+    // Defence in depth: authorize() refuses to issue a code to a CIMD client
+    // without S256 PKCE, so an unbound one here was issued under different
+    // rules — by an older version, or before the client_id resolved to a CIMD
+    // document. Refuse it rather than fall through to the no-PKCE path.
+    if (registeredClient.source === "cimd" && !clientCode.codeChallenge) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "PKCE is required for Client ID Metadata Document clients",
+      );
     }
 
     // Validate PKCE if used
