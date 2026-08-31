@@ -2053,6 +2053,19 @@ export class FastMCPSession<
         }
 
         if (fuseInstances[name]) {
+          // An empty query yields no fuzzy matches, so a client asking for
+          // completions before the user has typed anything would see nothing.
+          // Offer the full enum instead — it is the set of valid values, and
+          // the central cap trims it to the MCP limit if it is large.
+          if (value === "") {
+            const values = enums[name];
+
+            return {
+              total: values.length,
+              values,
+            };
+          }
+
           const result = fuseInstances[name].search(value);
 
           return {

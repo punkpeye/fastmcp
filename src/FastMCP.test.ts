@@ -6037,3 +6037,43 @@ test("exports SessionError and FastMCPError from the package root", () => {
   // so the base class can serve as a catch-all for all fastmcp errors.
   expect(new UserError("u")).toBeInstanceOf(FastMCPError);
 });
+
+test("offers all enum values when the completion value is empty", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const response = await client.complete({
+        argument: {
+          name: "name",
+          value: "",
+        },
+        ref: {
+          name: "countryPoem",
+          type: "ref/prompt",
+        },
+      });
+
+      expect(response.completion.values).toEqual([
+        "Germany",
+        "France",
+        "Italy",
+      ]);
+    },
+    server: async () => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      server.addPrompt({
+        arguments: [
+          {
+            description: "Name of the country",
+            enum: ["Germany", "France", "Italy"],
+            name: "name",
+            required: true,
+          },
+        ],
+        description: "Writes a poem about a country",
+        load: async ({ name }) => `Hello, ${name}!`,
+        name: "countryPoem",
+      });
+      return server;
+    },
+  });
+});
