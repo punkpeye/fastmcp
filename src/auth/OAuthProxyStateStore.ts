@@ -48,6 +48,7 @@ const proxyDcrClientStorageSchema: z.ZodType<ProxyDCRClient> = z.object({
   callbackUrl: z.string(),
   clientId: z.string(),
   clientSecret: z.string().optional(),
+  expiresAt: storedDateSchema.optional(),
   metadata: dcrClientMetadataSchema.optional(),
   redirectUris: z.array(z.string()),
   registeredAt: storedDateSchema,
@@ -124,7 +125,9 @@ interface OAuthProxyStateStoreConfig {
  * Backs OAuth proxy state with the configured TokenStorage so that several
  * proxy instances can serve one flow.
  *
- * Client registrations are immutable once written, so they are cached locally.
+ * Client registrations are immutable once written, so they are cached locally —
+ * except a CIMD resolution, which carries an `expiresAt` and is dropped once it
+ * lapses so the document behind it can be re-read.
  * Transactions and authorization codes are *not* cached: they are single-use
  * and mutated by whichever instance handles the next leg of the flow, so a
  * local copy would go stale and let a consumed code or transaction be redeemed
@@ -203,12 +206,21 @@ export class OAuthProxyStateStore {
     );
   }
 
+  /**
+   * A client carrying `expiresAt` is a cached resolution rather than a
+   * permanent registration (CIMD), so a lapsed copy is dropped and reported as
+   * a miss — the caller re-resolves it from the source of truth.
+   */
   async getRegisteredClientByClientId(
     clientId: string,
   ): Promise<null | ProxyDCRClient> {
     const cached = this.registeredClientsByClientId.get(clientId);
     if (cached) {
-      return cached;
+      if (!cached.expiresAt || !this.isExpired(cached.expiresAt)) {
+        return cached;
+      }
+
+      this.registeredClientsByClientId.delete(clientId);
     }
 
     const stored = await this.tokenStorage.get(
@@ -217,6 +229,11 @@ export class OAuthProxyStateStore {
     const parsed = proxyDcrClientStorageSchema.safeParse(stored);
 
     if (!parsed.success) {
+      return null;
+    }
+
+    if (parsed.data.expiresAt && this.isExpired(parsed.data.expiresAt)) {
+      await this.tokenStorage.delete(`${STORAGE_KEY_PREFIX.client}${clientId}`);
       return null;
     }
 
@@ -248,19 +265,6 @@ export class OAuthProxyStateStore {
     return parsed.data;
   }
 
-  async isTransactionCallbackRegistered(
-    transaction: OAuthTransaction,
-  ): Promise<boolean> {
-    const registeredClient = await this.getRegisteredClientByClientId(
-      transaction.clientId,
-    );
-
-    return (
-      registeredClient?.redirectUris.includes(transaction.clientCallbackUrl) ??
-      false
-    );
-  }
-
   /**
    * Record that an authorization code has been redeemed, so a later attempt
    * gets "already used" rather than looking like an unknown code. Keyed and
@@ -286,6 +290,7 @@ export class OAuthProxyStateStore {
     await this.tokenStorage.save(
       `${STORAGE_KEY_PREFIX.client}${client.clientId}`,
       client,
+      client.expiresAt ? this.getTtlSeconds(client.expiresAt) : undefined,
     );
   }
 

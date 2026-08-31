@@ -258,6 +258,17 @@ export interface OAuthProxyConfig {
    * Default: true (enabled with default settings)
    */
   customClaimsPassthrough?: boolean | CustomClaimsPassthroughConfig;
+  /**
+   * Accept Client ID Metadata Documents (CIMD) as an alternative to Dynamic
+   * Client Registration (default: false).
+   *
+   * When enabled, an unregistered `client_id` that is an HTTPS URL is
+   * resolved by fetching it as a CIMD document (see `resolveCimdClient` in
+   * `utils/cimd.ts` for validation details) and advertised via
+   * `client_id_metadata_document_supported` in the AS metadata. See the MCP
+   * authorization spec's CIMD mechanism (SEP-991).
+   */
+  enableCimd?: boolean;
   /** Enable token swap pattern (default: true) - issues short-lived JWTs instead of passing through upstream tokens */
   enableTokenSwap?: boolean;
   /** Encryption key for token storage (default: auto-generated). Set to false to disable encryption. */
@@ -356,6 +367,12 @@ export interface ProxyDCRClient {
   clientId: string;
   /** Proxy-issued client secret (not the upstream provider's client_secret) */
   clientSecret?: string;
+  /**
+   * When set, this is a cached resolution of a live document (CIMD) rather
+   * than a permanent registration: past this instant the copy is dropped and
+   * the document is fetched again.
+   */
+  expiresAt?: Date;
   /** Client metadata from registration request */
   metadata?: DCRClientMetadata;
   /** All redirect URIs registered by this client */

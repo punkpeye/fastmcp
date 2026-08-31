@@ -31,6 +31,7 @@ import {
   DEFAULT_TRANSACTION_TTL,
   DEFAULT_UPSTREAM_REQUEST_TIMEOUT_MS,
 } from "./types.js";
+import { resolveCimdClient } from "./utils/cimd.js";
 import { ClaimsExtractor } from "./utils/claimsExtractor.js";
 import { ConsentManager } from "./utils/consent.js";
 import { JWTIssuer } from "./utils/jwtIssuer.js";
@@ -75,9 +76,13 @@ export class OAuthProxy {
   private ownedTokenStorage: MemoryTokenStorage | null = null;
   /**
    * Keyed by proxy-issued client_id for authorize/token-exchange lookups and
-   * for the defence-in-depth callback checks. A registration never changes
+   * for the defence-in-depth callback checks. A DCR registration never changes
    * after it is written, so caching it locally cannot go stale; it is also
    * persisted, so another instance can hydrate it.
+   *
+   * A CIMD client is not a registration but a snapshot of a document that can
+   * change under us, so it is cached with an `expiresAt` and re-resolved once
+   * that passes.
    */
   private registeredClientsByClientId: Map<string, ProxyDCRClient> = new Map();
   private stateStore: OAuthProxyStateStore;
@@ -88,6 +93,7 @@ export class OAuthProxy {
       allowPlainPkce: true,
       authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
       consentRequired: true,
+      enableCimd: false,
       enableTokenSwap: true, // Enabled by default for security
       redirectPath: "/oauth/callback",
       transactionTtl: DEFAULT_TRANSACTION_TTL,
@@ -176,8 +182,11 @@ export class OAuthProxy {
     // RFC 6749 §5.2 - reject unknown clients with invalid_client.
     // MCP clients receive a proxy-issued client_id during DCR (not the upstream
     // provider's credentials), so we look up by that proxy client_id.
-    const registeredClient =
-      await this.stateStore.getRegisteredClientByClientId(params.client_id);
+    const registeredClient = await this.resolveClient(
+      params.client_id,
+      params.redirect_uri,
+    );
+
     if (!registeredClient) {
       throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
@@ -260,10 +269,10 @@ export class OAuthProxy {
     }
 
     // RFC 6749 §5.2 - reject unknown clients. Only proxy-issued client_ids
-    // (obtained via DCR) are accepted, so stolen codes cannot be exchanged by
-    // arbitrary callers.
-    const registeredClient =
-      await this.stateStore.getRegisteredClientByClientId(request.client_id);
+    // (obtained via DCR) and, when enabled, resolved CIMD clients are
+    // accepted, so stolen codes cannot be exchanged by arbitrary callers.
+    const registeredClient = await this.resolveClient(request.client_id);
+
     if (!registeredClient) {
       throw new OAuthProxyError("invalid_client", "Unknown client_id");
     }
@@ -389,6 +398,7 @@ export class OAuthProxy {
    */
   getAuthorizationServerMetadata(): {
     authorizationEndpoint: string;
+    clientIdMetadataDocumentSupported?: boolean;
     codeChallengeMethodsSupported?: string[];
     dpopSigningAlgValuesSupported?: string[];
     grantTypesSupported?: string[];
@@ -410,6 +420,9 @@ export class OAuthProxy {
   } {
     return {
       authorizationEndpoint: `${this.config.baseUrl}/oauth/authorize`,
+      ...(this.config.enableCimd
+        ? { clientIdMetadataDocumentSupported: true as const }
+        : {}),
       codeChallengeMethodsSupported: this.config.allowPlainPkce
         ? ["S256", "plain"]
         : ["S256"],
@@ -459,7 +472,7 @@ export class OAuthProxy {
     // Defense-in-depth: the transaction's stored callback URL must still be
     // registered. Guards against any code path that could persist an
     // unvalidated URI, and against registration being revoked mid-flow.
-    if (!(await this.stateStore.isTransactionCallbackRegistered(transaction))) {
+    if (!(await this.isTransactionCallbackRegistered(transaction))) {
       throw new OAuthProxyError(
         "invalid_request",
         "Transaction callback URL is not registered",
@@ -522,9 +535,7 @@ export class OAuthProxy {
       // User denied consent
       await this.stateStore.deleteTransaction(transactionId);
       // Defense-in-depth: never redirect to an unregistered URI.
-      if (
-        !(await this.stateStore.isTransactionCallbackRegistered(transaction))
-      ) {
+      if (!(await this.isTransactionCallbackRegistered(transaction))) {
         throw new OAuthProxyError(
           "invalid_request",
           "Transaction callback URL is not registered",
@@ -1304,6 +1315,28 @@ export class OAuthProxy {
   }
 
   /**
+   * Defence in depth for the callback and consent-denial redirects: the
+   * transaction's stored callback URL must still be registered for its client.
+   *
+   * Resolution goes through {@link resolveClient}, so a CIMD registration whose
+   * cached copy lapsed mid-flow is re-fetched rather than mistaken for one that
+   * was revoked.
+   */
+  private async isTransactionCallbackRegistered(
+    transaction: OAuthTransaction,
+  ): Promise<boolean> {
+    const registeredClient = await this.resolveClient(
+      transaction.clientId,
+      transaction.clientCallbackUrl,
+    );
+
+    return (
+      registeredClient?.redirectUris.includes(transaction.clientCallbackUrl) ??
+      false
+    );
+  }
+
+  /**
    * Match URI against pattern (supports wildcards)
    */
   private matchesPattern(uri: string, pattern: string): boolean {
@@ -1483,6 +1516,41 @@ export class OAuthProxy {
       scope: tokens.scope ? tokens.scope.split(" ") : [],
       tokenType: tokens.token_type || "Bearer",
     };
+  }
+
+  /**
+   * Resolve the client behind a `client_id`: a stored registration if there is
+   * one, otherwise — when CIMD is enabled — the client's metadata document.
+   *
+   * A resolved CIMD client is cached like a DCR registration but carries the
+   * `expiresAt` the resolver stamped on it, so the store drops it once it
+   * lapses and the next call re-fetches the document. Every lookup goes
+   * through here, so a lapse always means "re-resolve", never "unknown
+   * client" mid-flow.
+   */
+  private async resolveClient(
+    clientId: string,
+    requestedRedirectUri?: string,
+  ): Promise<null | ProxyDCRClient> {
+    const registeredClient =
+      await this.stateStore.getRegisteredClientByClientId(clientId);
+
+    if (registeredClient || !this.config.enableCimd) {
+      return registeredClient;
+    }
+
+    const resolved = await resolveCimdClient(
+      clientId,
+      requestedRedirectUri,
+      (uri) => this.validateRedirectUri(uri),
+    );
+
+    if (resolved) {
+      this.stateStore.cacheRegisteredClient(resolved);
+      await this.stateStore.saveRegisteredClient(resolved);
+    }
+
+    return resolved;
   }
 
   /**
