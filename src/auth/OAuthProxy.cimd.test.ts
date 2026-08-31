@@ -45,6 +45,16 @@ function buildAuthParams(
   } as AuthorizationParams;
 }
 
+function clientMetadataFetchCount(
+  fetchMock: ReturnType<typeof mockFetchRouting>,
+): number {
+  return fetchMock.mock.calls.filter(
+    ([input]) =>
+      (typeof input === "string" ? input : input.toString()) ===
+      CLIENT_METADATA_URL,
+  ).length;
+}
+
 function clientMetadataResponse(
   overrides: Record<string, unknown> = {},
 ): Response {
@@ -189,6 +199,58 @@ describe("OAuthProxy CIMD support", () => {
     expect(clientMetadataFetches).toHaveLength(1);
 
     proxy.destroy();
+  });
+
+  it("re-reads the metadata document once the cached resolution lapses", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const proxy = new OAuthProxy({ ...baseConfig, enableCimd: true });
+      const fetchMock = mockFetchRouting(clientMetadataResponse);
+
+      await proxy.authorize(buildAuthParams());
+      expect(clientMetadataFetchCount(fetchMock)).toBe(1);
+
+      // Still inside the cache window: served from the cached resolution.
+      vi.advanceTimersByTime(60_000);
+      await proxy.authorize(buildAuthParams());
+      expect(clientMetadataFetchCount(fetchMock)).toBe(1);
+
+      // Past it: the document is authoritative again, not the snapshot.
+      vi.advanceTimersByTime(15 * 60 * 1000);
+      await proxy.authorize(buildAuthParams());
+      expect(clientMetadataFetchCount(fetchMock)).toBe(2);
+
+      proxy.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops honouring a client whose document dropped the redirect URI, once the resolution lapses", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const proxy = new OAuthProxy({ ...baseConfig, enableCimd: true });
+      let currentRedirectUris = [REDIRECT_URI];
+      mockFetchRouting(() =>
+        clientMetadataResponse({ redirect_uris: currentRedirectUris }),
+      );
+
+      await expect(proxy.authorize(buildAuthParams())).resolves.toBeDefined();
+
+      // The client rotates the URI away — a revocation the proxy must observe.
+      currentRedirectUris = ["http://127.0.0.1:9999/"];
+
+      vi.advanceTimersByTime(16 * 60 * 1000);
+      await expect(proxy.authorize(buildAuthParams())).rejects.toMatchObject({
+        code: "invalid_client",
+      });
+
+      proxy.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects a CIMD document whose redirect_uris fall outside allowedRedirectUriPatterns", async () => {

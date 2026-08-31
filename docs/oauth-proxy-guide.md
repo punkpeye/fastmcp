@@ -267,6 +267,7 @@ interface OAuthProxyConfig {
   consentRequired?: boolean; // default: true
   consentSigningKey?: string; // auto-generated if not provided
   allowedRedirectUriPatterns?: string[];
+  enableCimd?: boolean; // default: false — accept Client ID Metadata Documents
   extraAuthorizationParams?: Record<string, string>; // provider-specific params
   transactionTtl?: number; // seconds, default: 600
   authorizationCodeTtl?: number; // seconds, default: 300
@@ -319,6 +320,40 @@ const authProxy = new OAuthProxy({
   ],
 });
 ```
+
+### Client ID Metadata Documents (CIMD)
+
+Some MCP clients — VS Code among them — identify themselves with an HTTPS URL
+instead of registering through DCR, and do not fall back to `POST
+/oauth/register`. Set `enableCimd: true` to accept them:
+
+```typescript
+const authProxy = new OAuthProxy({
+  // ... other config
+  enableCimd: true,
+});
+```
+
+An unregistered `client_id` that is an HTTPS URL is then fetched as a [Client
+ID Metadata Document](https://modelcontextprotocol.io/specification/draft/basic/authorization)
+(SEP-991) and accepted only if it:
+
+- self-identifies with the exact URL it was fetched from,
+- lists the `redirect_uri` being requested, and
+- lists only redirect URIs that pass `allowedRedirectUriPatterns` — CIMD does
+  not widen the allow-list.
+
+Documents are fetched over HTTPS with no redirects followed, a 5s timeout and a
+64 KB cap, and hosts that are literal loopback or private-range addresses are
+refused (a layer against SSRF, though not a defence against DNS rebinding —
+keep the proxy's egress restricted if that matters to you). A resolved document
+is cached for 15 minutes and then re-read, so a client that rotates its
+redirect URIs is picked up without a restart.
+
+When enabled, `/.well-known/oauth-authorization-server` advertises
+`client_id_metadata_document_supported: true`.
+
+Off by default: leaving it off means only DCR-registered clients are accepted.
 
 ### TTL Configuration
 

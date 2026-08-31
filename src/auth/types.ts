@@ -367,6 +367,12 @@ export interface ProxyDCRClient {
   clientId: string;
   /** Proxy-issued client secret (not the upstream provider's client_secret) */
   clientSecret?: string;
+  /**
+   * When set, this is a cached resolution of a live document (CIMD) rather
+   * than a permanent registration: past this instant the copy is dropped and
+   * the document is fetched again.
+   */
+  expiresAt?: Date;
   /** Client metadata from registration request */
   metadata?: DCRClientMetadata;
   /** All redirect URIs registered by this client */

@@ -10,13 +10,23 @@ import type { DCRClientMetadata, ProxyDCRClient } from "../types.js";
 
 const CIMD_FETCH_TIMEOUT_MS = 5000;
 
+/**
+ * How long a resolved document may be reused before it is fetched again.
+ * A CIMD document is live — the client can rotate its redirect URIs or stop
+ * publishing altogether — so a resolution is a short-lived snapshot, not a
+ * registration.
+ */
+const CIMD_CLIENT_TTL_MS = 15 * 60 * 1000;
+
 /** Max response size accepted, enforced while streaming (not after buffering). */
 const CIMD_MAX_RESPONSE_BYTES = 65536;
 
 /**
  * Resolves a CIMD `client_id` into the same shape Dynamic Client
- * Registration produces. Callers should look up `client_id` in their
- * existing client registry first and only call this on a miss.
+ * Registration produces, stamped with an `expiresAt` so callers re-read the
+ * document instead of trusting the snapshot forever. Callers should look up
+ * `client_id` in their existing client registry first and only call this on
+ * a miss.
  *
  * Never throws — anything that isn't a valid, fetchable, self-consistent
  * CIMD document resolves to `null` so callers can fall through to the
@@ -119,6 +129,7 @@ export async function resolveCimdClient(
     clientId,
     // CIMD is a public-client mechanism secured by PKCE; there is no secret.
     clientSecret: undefined,
+    expiresAt: new Date(Date.now() + CIMD_CLIENT_TTL_MS),
     metadata,
     redirectUris,
     registeredAt: new Date(),
