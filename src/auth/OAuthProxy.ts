@@ -1566,9 +1566,23 @@ export class OAuthProxy {
    * theft. Do not loosen the default beyond loopback addresses.
    */
   private validateRedirectUri(uri: string): boolean {
+    let parsed: URL;
+
     try {
-      new URL(uri); // syntactic check only — throws on malformed input
+      parsed = new URL(uri); // syntactic check — throws on malformed input
     } catch {
+      return false;
+    }
+
+    // Reject any userinfo (`user:pass@`) in the redirect URI. Patterns are
+    // matched against the raw URI string, but the callback is later resolved
+    // with `new URL(...)`, whose authority is the part after the last `@`.
+    // A URI such as `http://localhost:80@evil.com/cb` therefore matches the
+    // loopback-only default pattern `http://localhost:*` yet redirects the
+    // authorization code to `evil.com`. A legitimate redirect URI never
+    // carries credentials, so dropping them here closes that bypass without
+    // affecting the port/path wildcards the patterns rely on.
+    if (parsed.username !== "" || parsed.password !== "") {
       return false;
     }
 
