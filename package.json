@@ -36,9 +36,15 @@
       "import": "./dist/edge/index.js",
       "types": "./dist/edge/index.d.ts",
       "require": "./dist/edge/index.cjs"
+    },
+    "./openapi": {
+      "import": "./dist/openapi/index.js",
+      "types": "./dist/openapi/index.d.ts",
+      "require": "./dist/openapi/index.cjs"
     }
   },
   "dependencies": {
+    "@apidevtools/swagger-parser": "^12.1.0",
     "@modelcontextprotocol/sdk": "^1.24.3",
     "@standard-schema/spec": "^1.0.0",
     "execa": "^9.6.1",
@@ -123,6 +129,7 @@
       "src/bin/fastmcp.ts",
       "src/auth/index.ts",
       "src/edge/index.ts",
+      "src/openapi/index.ts",
       "src/examples/custom-routes.ts"
     ],
     "format": [

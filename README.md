@@ -9,6 +9,7 @@ A TypeScript framework for building [MCP](https://glama.ai/mcp) servers capable 
 ## Features
 
 - Simple Tool, Resource, Prompt definition
+- [OpenAPI to MCP conversion](#openapi)
 - [Authentication](#authentication)
 - [Passing headers through context](#passing-headers-through-context)
 - [Session ID and Request ID tracking](#session-id-and-request-id-tracking)
@@ -1872,6 +1873,23 @@ server.addPrompt({
   ],
 });
 ```
+
+### OpenAPI
+
+`fromOpenAPI()` (from `fastmcp/openapi`) converts an OpenAPI 3.x document into a FastMCP server, one tool per operation — handling external `$ref`s (multi-file specs), relative `servers[0].url` resolution, and parameter-flattening collisions along the way:
+
+```ts
+import { fromOpenAPI } from "fastmcp/openapi";
+
+const server = await fromOpenAPI({
+  spec: "https://petstore3.swagger.io/api/v3/openapi.json",
+  include: (operation) => operation.tags.includes("pet"),
+});
+
+await server.start({ transportType: "stdio" });
+```
+
+See [OpenAPI to MCP](docs/openapi.md) for the full option reference, authentication, and known limitations.
 
 ### Authentication
 
