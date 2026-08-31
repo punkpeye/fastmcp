@@ -343,6 +343,13 @@ ID Metadata Document](https://modelcontextprotocol.io/specification/draft/basic/
 - lists only redirect URIs that pass `allowedRedirectUriPatterns` — CIMD does
   not widen the allow-list.
 
+A CIMD client is a public client: it holds no secret, and its identity is a URL
+anyone can name. PKCE is therefore the only thing binding an authorization code
+to whoever asked for it, so the proxy **requires `code_challenge` with
+`code_challenge_method=S256`** from these clients and rejects the authorization
+request otherwise. This holds regardless of `allowPlainPkce`, which only
+relaxes the rule for DCR clients that predate it.
+
 Documents are fetched over HTTPS with no redirects followed, a 5s timeout and a
 64 KB cap, and hosts that are literal loopback or private-range addresses are
 refused (a layer against SSRF, though not a defence against DNS rebinding —

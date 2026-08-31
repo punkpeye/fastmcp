@@ -133,6 +133,7 @@ export async function resolveCimdClient(
     metadata,
     redirectUris,
     registeredAt: new Date(),
+    source: "cimd",
   };
 }
 

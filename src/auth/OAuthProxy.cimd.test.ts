@@ -13,9 +13,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthorizationParams, UpstreamTokenSet } from "./types.js";
 
 import { OAuthProxy, OAuthProxyError } from "./OAuthProxy.js";
+import { PKCEUtils } from "./utils/pkce.js";
 
 const CLIENT_METADATA_URL = "https://client.example.com/client-metadata.json";
 const REDIRECT_URI = "http://127.0.0.1:33418/";
+
+/**
+ * A CIMD client is a public client, so the proxy requires S256 PKCE from it.
+ * One pair is reused across the suite; nothing here depends on it being fresh.
+ */
+const PKCE = PKCEUtils.generatePair("S256");
 
 const baseConfig = {
   allowedRedirectUriPatterns: ["http://127.0.0.1:*"],
@@ -38,6 +45,8 @@ function buildAuthParams(
 ): AuthorizationParams {
   return {
     client_id: CLIENT_METADATA_URL,
+    code_challenge: PKCE.challenge,
+    code_challenge_method: "S256",
     redirect_uri: REDIRECT_URI,
     response_type: "code",
     state: "test-state",
@@ -161,6 +170,7 @@ describe("OAuthProxy CIMD support", () => {
     const tokenResp = await proxy.exchangeAuthorizationCode({
       client_id: CLIENT_METADATA_URL,
       code,
+      code_verifier: PKCE.verifier,
       grant_type: "authorization_code",
       redirect_uri: REDIRECT_URI,
     });
@@ -187,6 +197,7 @@ describe("OAuthProxy CIMD support", () => {
     await proxy.exchangeAuthorizationCode({
       client_id: CLIENT_METADATA_URL,
       code,
+      code_verifier: PKCE.verifier,
       grant_type: "authorization_code",
       redirect_uri: REDIRECT_URI,
     });
@@ -251,6 +262,88 @@ describe("OAuthProxy CIMD support", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("refuses to issue a code to a CIMD client that sent no code_challenge", async () => {
+    const proxy = new OAuthProxy({ ...baseConfig, enableCimd: true });
+    mockFetchRouting(clientMetadataResponse);
+
+    await expect(
+      proxy.authorize(
+        buildAuthParams({
+          code_challenge: undefined,
+          code_challenge_method: undefined,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    proxy.destroy();
+  });
+
+  it("refuses `plain` PKCE from a CIMD client even where allowPlainPkce permits it", async () => {
+    // allowPlainPkce defaults to true, and this proxy leaves it there: the
+    // stricter rule has to come from the client being CIMD, not from config.
+    const proxy = new OAuthProxy({ ...baseConfig, enableCimd: true });
+    mockFetchRouting(clientMetadataResponse);
+
+    await expect(
+      proxy.authorize(
+        buildAuthParams({
+          code_challenge: "a-verifier-doubling-as-its-own-challenge",
+          code_challenge_method: "plain",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    proxy.destroy();
+  });
+
+  it("still lets a DCR client authorize without PKCE — the requirement is CIMD-only", async () => {
+    const proxy = new OAuthProxy({ ...baseConfig, enableCimd: true });
+    const registration = await proxy.registerClient({
+      redirect_uris: [REDIRECT_URI],
+    });
+
+    await expect(
+      proxy.authorize({
+        client_id: registration.client_id,
+        redirect_uri: REDIRECT_URI,
+        response_type: "code",
+        state: "test-state",
+      } as AuthorizationParams),
+    ).resolves.toBeDefined();
+
+    proxy.destroy();
+  });
+
+  it("rejects a token exchange that presents the wrong verifier", async () => {
+    const proxy = new OAuthProxy({ ...baseConfig, enableCimd: true });
+    mockFetchRouting(clientMetadataResponse);
+
+    const authResp = await proxy.authorize(buildAuthParams());
+    const upstreamUrl = new URL(authResp.headers.get("Location")!);
+    const transactionId = upstreamUrl.searchParams.get("state")!;
+
+    const cbResp = await proxy.handleCallback(
+      new Request(
+        `${baseConfig.baseUrl}${baseConfig.redirectPath}?code=UP_CODE&state=${encodeURIComponent(transactionId)}`,
+      ),
+    );
+    const code = new URL(cbResp.headers.get("Location")!).searchParams.get(
+      "code",
+    )!;
+
+    await expect(
+      proxy.exchangeAuthorizationCode({
+        client_id: CLIENT_METADATA_URL,
+        code,
+        code_verifier: PKCEUtils.generatePair("S256").verifier,
+        grant_type: "authorization_code",
+        redirect_uri: REDIRECT_URI,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_grant" });
+
+    proxy.destroy();
   });
 
   it("rejects a CIMD document whose redirect_uris fall outside allowedRedirectUriPatterns", async () => {
