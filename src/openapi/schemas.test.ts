@@ -239,3 +239,89 @@ test("GET never contributes a request body — fetch rejects a body on GET, so i
   expect(parameterMap).toEqual({});
   expect(wholeBodyKey).toBeUndefined();
 });
+
+test("a body property literally named `nullable` is a field name, not the OpenAPI keyword, and survives", () => {
+  const { flatSchema } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              properties: {
+                column: {
+                  properties: {
+                    name: { type: "string" },
+                    nullable: { type: "boolean" },
+                  },
+                  type: "object",
+                },
+              },
+              type: "object",
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties!.column).toEqual({
+    properties: {
+      name: { type: "string" },
+      nullable: { type: "boolean" },
+    },
+    type: "object",
+  });
+});
+
+test("a component schema named `nullable` survives, while a real `nullable: true` keyword still folds into `type`", () => {
+  const document = {
+    components: {
+      schemas: {
+        Column: {
+          properties: { label: { nullable: true, type: "string" } },
+          type: "object",
+        },
+        nullable: { type: "boolean" },
+      },
+    },
+  } as unknown as BundledOpenApiDocument;
+
+  expect(buildSharedDefs(document)).toEqual({
+    Column: {
+      properties: { label: { type: ["string", "null"] } },
+      type: "object",
+    },
+    nullable: { type: "boolean" },
+  });
+});
+
+test("`example`/`default` payloads are instance data, not schemas, and are passed through verbatim", () => {
+  const { flatSchema } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              properties: {
+                config: {
+                  default: { $ref: "#/components/schemas/X", nullable: 1 },
+                  example: { nullable: "yes" },
+                  type: "object",
+                },
+              },
+              type: "object",
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties!.config).toEqual({
+    default: { $ref: "#/components/schemas/X", nullable: 1 },
+    example: { nullable: "yes" },
+    type: "object",
+  });
+});

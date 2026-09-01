@@ -8,6 +8,24 @@ import type {
   ParameterLocation,
 } from "./types.js";
 
+/**
+ * Keys whose values are name-to-schema maps: their child keys are
+ * author-chosen names rather than JSON Schema keywords.
+ */
+const SCHEMA_MAP_KEYS = new Set([
+  "$defs",
+  "definitions",
+  "dependentSchemas",
+  "patternProperties",
+  "properties",
+]);
+
+/**
+ * Keys whose values are arbitrary instance data rather than schemas. A
+ * sample payload may well contain a "$ref" or "nullable" key of its own.
+ */
+const DATA_KEYS = new Set(["const", "default", "enum", "example", "examples"]);
+
 export interface FlatSchemaResult {
   flatSchema: JsonSchemaObject;
   parameterMap: Record<string, ParameterMapping>;
@@ -24,6 +42,8 @@ export interface ParameterMapping {
   in: "body" | ParameterLocation;
   name: string;
 }
+
+type WalkMode = "data" | "schema" | "schemaMap";
 
 /**
  * Flattens a route's path/query/header/cookie parameters and request body
@@ -116,7 +136,7 @@ export function buildSharedDefs(
     return undefined;
   }
 
-  return rewriteComponentRefs(schemas);
+  return rewriteNode(schemas, "schemaMap") as Record<string, OpenApiSchema>;
 }
 
 /**
@@ -130,31 +150,15 @@ export function buildSharedDefs(
  * since real specs carry both.
  */
 export function rewriteComponentRefs<TValue>(value: TValue): TValue {
-  if (Array.isArray(value)) {
-    return value.map((item) => rewriteComponentRefs(item)) as TValue;
+  return rewriteNode(value, "schema") as TValue;
+}
+
+function childMode(key: string): WalkMode {
+  if (DATA_KEYS.has(key)) {
+    return "data";
   }
 
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>).map(
-      ([key, entryValue]): [string, unknown] => {
-        if (
-          key === "$ref" &&
-          typeof entryValue === "string" &&
-          entryValue.startsWith("#/components/schemas/")
-        ) {
-          return [key, entryValue.replace("#/components/schemas/", "#/$defs/")];
-        }
-
-        return [key, rewriteComponentRefs(entryValue)];
-      },
-    );
-
-    return normalizeNullable(
-      Object.fromEntries(entries) as Record<string, unknown>,
-    ) as TValue;
-  }
-
-  return value;
+  return SCHEMA_MAP_KEYS.has(key) ? "schemaMap" : "schema";
 }
 
 function extractBodyProperties(requestBody: OpenApiRequestBody | undefined): {
@@ -288,4 +292,56 @@ function normalizeNullable(
   }
 
   return rest;
+}
+
+/**
+ * Walks a schema fragment, distinguishing the three kinds of node it can
+ * reach — because only one of them is a schema whose keys are JSON Schema
+ * keywords:
+ *
+ * - `"schema"` — a schema object. `$ref`/`nullable` here are keywords.
+ * - `"schemaMap"` — a name-to-schema map (`properties`, `$defs`, ...). Its
+ *   keys are author-chosen names, so a property literally named `nullable`
+ *   or `$ref` is a field, not a keyword, and must survive untouched.
+ * - `"data"` — arbitrary values (`default`, `enum`, `example`, ...). Not
+ *   schemas at all; passed through verbatim.
+ *
+ * Walking every node as a schema (as this originally did) silently deletes
+ * a property named `nullable` from the generated tool schema, since
+ * `normalizeNullable` cannot tell the keyword from a same-named field.
+ */
+function rewriteNode(value: unknown, mode: WalkMode): unknown {
+  if (mode === "data") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteNode(item, "schema"));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).map(
+    ([key, entryValue]): [string, unknown] => {
+      if (mode === "schemaMap") {
+        return [key, rewriteNode(entryValue, "schema")];
+      }
+
+      if (
+        key === "$ref" &&
+        typeof entryValue === "string" &&
+        entryValue.startsWith("#/components/schemas/")
+      ) {
+        return [key, entryValue.replace("#/components/schemas/", "#/$defs/")];
+      }
+
+      return [key, rewriteNode(entryValue, childMode(key))];
+    },
+  );
+
+  const rewritten = Object.fromEntries(entries) as Record<string, unknown>;
+
+  return mode === "schemaMap" ? rewritten : normalizeNullable(rewritten);
 }
