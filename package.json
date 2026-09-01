@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "main": "dist/FastMCP.js",
   "scripts": {
-    "bench:openapi": "OPENAPI_BENCHMARK=1 vitest run src/openapi/fromOpenAPI.benchmark.test.ts",
-    "bench:openapi:refresh": "node scripts/refresh-openapi-benchmark-specs.mjs",
     "build": "tsup",
     "lint": "prettier --check . && eslint . && tsc --noEmit && jsr publish --dry-run",
     "test": "vitest run",
+    "test:openapi": "OPENAPI_NETWORK=1 vitest run src/openapi/fromOpenAPI.benchmark.test.ts src/openapi/fromOpenAPI.live.test.ts",
+    "test:openapi:refresh": "node scripts/refresh-openapi-benchmark-specs.mjs",
     "format": "prettier --write . && eslint --fix ."
   },
   "bin": {
