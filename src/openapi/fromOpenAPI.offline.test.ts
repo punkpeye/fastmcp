@@ -186,3 +186,66 @@ test("resources: true — a GET with a path parameter becomes a resource templat
     name: "sprocket",
   });
 });
+
+test("a FastAPI-style form body (`$ref` to a component schema) becomes a tool with flattened parameters that posts form-encoded", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response(JSON.stringify({ access_token: "t" })),
+  );
+
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    spec: {
+      components: {
+        schemas: {
+          Body_login: {
+            properties: {
+              password: { type: "string" },
+              username: { type: "string" },
+            },
+            required: ["username", "password"],
+            type: "object",
+          },
+        },
+      },
+      info: { title: "Auth API", version: "1.0.0" },
+      openapi: "3.1.0",
+      paths: {
+        "/token": {
+          post: {
+            operationId: "login",
+            requestBody: {
+              content: {
+                "application/x-www-form-urlencoded": {
+                  schema: { $ref: "#/components/schemas/Body_login" },
+                },
+              },
+              required: true,
+            },
+            responses: { 200: { description: "OK" } },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.com" }],
+    },
+  });
+  const client = await connect(server);
+
+  const { tools } = await client.listTools();
+  expect(tools.map((tool) => tool.name)).toEqual(["login"]);
+  expect(Object.keys(tools[0].inputSchema.properties ?? {}).sort()).toEqual([
+    "password",
+    "username",
+  ]);
+
+  await client.callTool({
+    arguments: { password: "pw", username: "ann" },
+    name: "login",
+  });
+
+  const [url, init] = fetchImpl.mock.calls[0]!;
+  expect(url).toBe("https://api.example.com/token");
+  expect((init!.headers as Headers).get("content-type")).toBe(
+    "application/x-www-form-urlencoded",
+  );
+  expect(new URLSearchParams(init!.body as string).get("username")).toBe("ann");
+});

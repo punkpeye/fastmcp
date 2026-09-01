@@ -453,3 +453,129 @@ test("`example`/`default` payloads are instance data, not schemas, and are passe
     type: "object",
   });
 });
+
+test("a form-urlencoded body declared as a `$ref` to a component object schema is resolved and flattened (FastAPI's `Body_<operation>` shape)", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: {
+        Body_login: {
+          properties: {
+            grant_type: { $ref: "#/components/schemas/GrantType" },
+            password: { type: "string" },
+            username: { type: "string" },
+          },
+          required: ["username", "password"],
+          type: "object",
+        },
+        GrantType: { enum: ["password"], type: "string" },
+      },
+    },
+  };
+
+  const { bodyEncoding, flatSchema, parameterMap, unsupportedBodyContentType } =
+    buildFlatSchema(
+      route({
+        requestBody: {
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: { $ref: "#/components/schemas/Body_login" },
+            },
+          },
+          required: true,
+        },
+      }),
+      buildSharedDefs(document),
+    );
+
+  expect(unsupportedBodyContentType).toBeUndefined();
+  expect(bodyEncoding).toBe("form");
+  expect(Object.keys(flatSchema.properties!).sort()).toEqual([
+    "grant_type",
+    "password",
+    "username",
+  ]);
+  expect([...flatSchema.required!].sort()).toEqual(["password", "username"]);
+  expect(parameterMap.username).toEqual({ in: "body", name: "username" });
+  // A property that itself references a shared schema still travels with
+  // the tool as a filtered $defs entry, exactly as an inline body would —
+  // while the resolved body schema itself is inlined, not carried as a def.
+  expect(flatSchema.properties!.grant_type).toEqual({
+    $ref: "#/$defs/GrantType",
+  });
+  expect(flatSchema.$defs).toEqual({
+    GrantType: { enum: ["password"], type: "string" },
+  });
+});
+
+test("a form-urlencoded `$ref` is followed through an alias chain to the object it ends at", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: {
+        Credentials: { $ref: "#/components/schemas/LoginForm" },
+        LoginForm: {
+          properties: { username: { type: "string" } },
+          type: "object",
+        },
+      },
+    },
+  };
+
+  const { bodyEncoding, flatSchema } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: { $ref: "#/components/schemas/Credentials" },
+          },
+        },
+      },
+    }),
+    buildSharedDefs(document),
+  );
+
+  expect(bodyEncoding).toBe("form");
+  expect(flatSchema.properties).toEqual({ username: { type: "string" } });
+});
+
+test("a form-urlencoded `$ref` that resolves to a non-object schema is still reported unsupported", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: { Ids: { items: { type: "string" }, type: "array" } },
+    },
+  };
+
+  const { bodyEncoding, unsupportedBodyContentType, wholeBodyKey } =
+    buildFlatSchema(
+      route({
+        requestBody: {
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: { $ref: "#/components/schemas/Ids" },
+            },
+          },
+        },
+      }),
+      buildSharedDefs(document),
+    );
+
+  expect(unsupportedBodyContentType).toBe("application/x-www-form-urlencoded");
+  expect(bodyEncoding).toBeUndefined();
+  expect(wholeBodyKey).toBeUndefined();
+});
+
+test("a form-urlencoded `$ref` that can't be resolved is reported unsupported rather than throwing", () => {
+  const { unsupportedBodyContentType } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: { $ref: "#/components/schemas/Missing" },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(unsupportedBodyContentType).toBe("application/x-www-form-urlencoded");
+});

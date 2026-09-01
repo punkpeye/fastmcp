@@ -15,7 +15,11 @@ import { fromOpenAPI } from "./fromOpenAPI.js";
 import { loadSpec } from "./loadSpec.js";
 import { generateNames } from "./naming.js";
 import { extractRoutes } from "./routes.js";
-import { buildFlatSchema, SUPPORTED_BODY_CONTENT_TYPES } from "./schemas.js";
+import {
+  buildFlatSchema,
+  buildSharedDefs,
+  SUPPORTED_BODY_CONTENT_TYPES,
+} from "./schemas.js";
 import { selectRoutes } from "./selection.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,9 +64,16 @@ const SPECS = [
  * with `extractBodyProperties` (schemas.ts) treating a non-object body
  * declared as form-urlencoded as unsupported too — silently over-counting
  * `expectedToolCount` against real specs that hit that case.
+ *
+ * The document's real shared definitions have to be passed along, exactly
+ * as `fromOpenAPI` does: a form body declared as a `$ref` (Box's OAuth
+ * operations) is only flattenable once that reference resolves.
  */
-function isSkipped(route: HttpRoute): boolean {
-  return !!buildFlatSchema(route, undefined).unsupportedBodyContentType;
+function isSkipped(
+  route: HttpRoute,
+  sharedDefs: ReturnType<typeof buildSharedDefs>,
+): boolean {
+  return !!buildFlatSchema(route, sharedDefs).unsupportedBodyContentType;
 }
 
 describe.each(SPECS)("fromOpenAPI benchmark: $name", ({ file }) => {
@@ -73,10 +84,11 @@ describe.each(SPECS)("fromOpenAPI benchmark: $name", ({ file }) => {
       const specPath = path.join(FIXTURES_DIR, file);
 
       const { document } = await loadSpec(specPath);
+      const sharedDefs = buildSharedDefs(document);
       const routes = extractRoutes(document);
       const nonDeprecated = routes.filter((route) => !route.deprecated);
       const expectedToolCount = nonDeprecated.filter(
-        (route) => !isSkipped(route),
+        (route) => !isSkipped(route, sharedDefs),
       ).length;
 
       // Mirrors fromOpenAPI's own internal selection/naming so a tool's name
@@ -93,7 +105,7 @@ describe.each(SPECS)("fromOpenAPI benchmark: $name", ({ file }) => {
       // matching production) logs a console.warn for every non-standard
       // `format` a real spec uses (e.g. Twilio's "phone-number", Stripe's
       // "unix-time"/"decimal"), and fromOpenAPI itself warns once for any
-      // operations it skipped (Box has 10, unsupported content types) —
+      // operations it skipped (Box has 11, unsupported content types) —
       // both expected and muted here rather than spamming the test run.
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -171,8 +183,9 @@ describe.each(SPECS)("fromOpenAPI benchmark: $name", ({ file }) => {
     async () => {
       const specPath = path.join(FIXTURES_DIR, file);
       const { document } = await loadSpec(specPath);
+      const sharedDefs = buildSharedDefs(document);
       const expectedCount = extractRoutes(document).filter(
-        (route) => !route.deprecated && !isSkipped(route),
+        (route) => !route.deprecated && !isSkipped(route, sharedDefs),
       ).length;
 
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

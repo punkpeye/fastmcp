@@ -113,8 +113,8 @@ export async function fromOpenAPI(
   if (skippedOperations.length > 0) {
     console.warn(
       "fromOpenAPI: skipped " +
-        `${skippedOperations.length} operation(s) with a request body content type that isn't supported yet ` +
-        "(only application/json and application/x-www-form-urlencoded are): " +
+        `${skippedOperations.length} operation(s) whose request body can't be turned into tool parameters ` +
+        "(supported: application/json, or application/x-www-form-urlencoded with a flat object schema): " +
         skippedOperations
           .map(
             (op) => `${op.method.toUpperCase()} ${op.path} (${op.contentType})`,

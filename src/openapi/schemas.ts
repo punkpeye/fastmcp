@@ -41,9 +41,12 @@ export interface FlatSchemaResult {
   flatSchema: JsonSchemaObject;
   parameterMap: Record<string, ParameterMapping>;
   /**
-   * Set when `route.requestBody` declares a body, but only in content
-   * type(s) this module doesn't support (e.g. `multipart/form-data`,
-   * `application/json-patch+json`, `application/octet-stream`). The caller
+   * Set when `route.requestBody` declares a body this module can't carry:
+   * either only in content type(s) it doesn't support (e.g.
+   * `multipart/form-data`, `application/json-patch+json`,
+   * `application/octet-stream`), or as `application/x-www-form-urlencoded`
+   * with a schema that isn't a flat object, which form encoding can't
+   * represent. Holds the content type the body was declared in. The caller
    * should not turn this route into a tool with a payload it can never
    * carry — see `fromOpenAPI.ts`.
    */
@@ -99,6 +102,7 @@ export function buildFlatSchema(
     wholeBodyKey,
   } = extractBodyProperties(
     route.method === "get" ? undefined : route.requestBody,
+    sharedDefs,
   );
 
   const properties: Record<string, OpenApiSchema> = {};
@@ -191,6 +195,16 @@ function childMode(key: string): WalkMode {
   return SCHEMA_MAP_KEYS.has(key) ? "schemaMap" : "schema";
 }
 
+function componentSchemaName(ref: string): string | undefined {
+  for (const prefix of ["#/components/schemas/", "#/$defs/"]) {
+    if (ref.startsWith(prefix)) {
+      return ref.slice(prefix.length);
+    }
+  }
+
+  return undefined;
+}
+
 /**
  * Picks the request body's content type and flattens its schema.
  *
@@ -208,13 +222,26 @@ function childMode(key: string): WalkMode {
  * "any JSON body" declaration): the content type itself is fine, there's
  * just nothing to flatten.
  *
- * A non-object body (array, bare `$ref` to a scalar/array, etc.) can't be
+ * A form-urlencoded body is very often declared as a bare `$ref` to a
+ * component schema rather than inline — FastAPI emits
+ * `#/components/schemas/Body_<operation>` for every form endpoint, and
+ * Box's OAuth token/refresh/revoke operations do the same. The document is
+ * bundled, not dereferenced (see `loadSpec.ts`), so that `$ref` is resolved
+ * here against `sharedDefs` before deciding whether the body is a flat
+ * object. Only the form path needs this: a JSON body that isn't a flat
+ * object falls back to a single whole-body property, which a `$ref`
+ * satisfies as-is.
+ *
+ * A non-object body (array, `$ref` to a scalar/array, etc.) can't be
  * form-urlencoded at all — form encoding is inherently flat key/value pairs
  * — so that combination is also reported as unsupported, rather than
  * `encodeFormBody` (requestBuilder.ts) silently sending an empty body for
  * data it has no way to represent.
  */
-function extractBodyProperties(requestBody: OpenApiRequestBody | undefined): {
+function extractBodyProperties(
+  requestBody: OpenApiRequestBody | undefined,
+  sharedDefs: Record<string, OpenApiSchema> | undefined,
+): {
   bodyEncoding?: "form" | "json";
   properties: Map<string, { required: boolean; schema: OpenApiSchema }>;
   unsupportedBodyContentType?: string;
@@ -243,15 +270,20 @@ function extractBodyProperties(requestBody: OpenApiRequestBody | undefined): {
   }
 
   const bodyEncoding: "form" | "json" = hasJson ? "json" : "form";
-  const schema = hasJson
+  const declaredSchema = hasJson
     ? content["application/json"]?.schema
     : content["application/x-www-form-urlencoded"]?.schema;
 
-  if (!schema) {
+  if (!declaredSchema) {
     // The content type is declared and supported; it just has no schema
     // (an unconstrained body) — nothing to flatten, but not unsupported.
     return { bodyEncoding, properties };
   }
+
+  const schema =
+    bodyEncoding === "form"
+      ? resolveComponentRef(declaredSchema, sharedDefs)
+      : declaredSchema;
 
   const schemaProperties = schema.properties as
     | Record<string, OpenApiSchema>
@@ -376,6 +408,36 @@ function normalizeNullable(
   }
 
   return rest;
+}
+
+/**
+ * Follows a bare `$ref` into `components.schemas` — or its rewritten
+ * `#/$defs/` form, which is what `sharedDefs` entries themselves carry —
+ * until it reaches a concrete schema. A dangling or cyclic reference is
+ * returned as-is rather than failing the whole conversion.
+ */
+function resolveComponentRef(
+  schema: OpenApiSchema,
+  sharedDefs: Record<string, OpenApiSchema> | undefined,
+): OpenApiSchema {
+  const seen = new Set<string>();
+  let current = schema;
+  let ref = current.$ref;
+
+  while (typeof ref === "string") {
+    const name = componentSchemaName(ref);
+    const target = name === undefined ? undefined : sharedDefs?.[name];
+
+    if (name === undefined || target === undefined || seen.has(name)) {
+      break;
+    }
+
+    seen.add(name);
+    current = target;
+    ref = current.$ref;
+  }
+
+  return current;
 }
 
 /**
