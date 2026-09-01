@@ -37,3 +37,29 @@ jobs:
         run: pnpm lint
       - name: Run tests
         run: pnpm test
+  openapi-network:
+    runs-on: ubuntu-latest
+    name: OpenAPI (network)
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 9
+      - name: Setup NodeJS
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: "pnpm"
+          cache-dependency-path: "**/pnpm-lock.yaml"
+      - name: Install dependencies
+        run: pnpm install
+      - name: Cache benchmark specs
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: src/openapi/__fixtures__/benchmark-specs
+          key: openapi-specs-${{ hashFiles('src/openapi/__fixtures__/benchmark-specs/sources.json') }}
+      - name: Run OpenAPI benchmark and live tests
+        run: pnpm test:openapi

@@ -6,6 +6,8 @@
     "build": "tsup",
     "lint": "prettier --check . && eslint . && tsc --noEmit && jsr publish --dry-run",
     "test": "vitest run",
+    "test:openapi": "OPENAPI_NETWORK=1 vitest run src/openapi/fromOpenAPI.benchmark.test.ts src/openapi/fromOpenAPI.live.test.ts",
+    "test:openapi:refresh": "node scripts/refresh-openapi-benchmark-specs.mjs",
     "format": "prettier --write . && eslint --fix ."
   },
   "bin": {
@@ -36,9 +38,15 @@
       "import": "./dist/edge/index.js",
       "types": "./dist/edge/index.d.ts",
       "require": "./dist/edge/index.cjs"
+    },
+    "./openapi": {
+      "import": "./dist/openapi/index.js",
+      "types": "./dist/openapi/index.d.ts",
+      "require": "./dist/openapi/index.cjs"
     }
   },
   "dependencies": {
+    "@apidevtools/swagger-parser": "^12.1.0",
     "@modelcontextprotocol/sdk": "^1.24.3",
     "@standard-schema/spec": "^1.0.0",
     "execa": "^9.6.1",
@@ -123,6 +131,7 @@
       "src/bin/fastmcp.ts",
       "src/auth/index.ts",
       "src/edge/index.ts",
+      "src/openapi/index.ts",
       "src/examples/custom-routes.ts"
     ],
     "format": [

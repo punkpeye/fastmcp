@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info:
+  title: Multi-file Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      tags: [pets]
+      parameters:
+        - $ref: "resources/pets.yaml#/components/parameters/PetId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "resources/pets.yaml#/Pet"
+  /pets:
+    post:
+      operationId: createPet
+      tags: [pets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "resources/pets.yaml#/Pet"
+      responses:
+        "201":
+          description: Created

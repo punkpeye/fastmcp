@@ -1,0 +1,6 @@
+# Fetched on demand and hash-pinned via sources.json — see
+# ../ensureBenchmarkSpecs.mjs. Only the small fixtures are committed.
+*
+!.gitignore
+!sources.json
+!petstore.json
