@@ -6,6 +6,8 @@ import { UserError } from "../FastMCP.js";
 export interface ExecuteRequestOptions {
   args: Record<string, unknown>;
   baseUrlOverride?: string;
+  /** How to serialize a request body, if `args` contains any body-mapped values. */
+  bodyEncoding?: "form" | "json";
   fetchImpl: typeof fetch;
   headers?: FromOpenAPIOptions["headers"];
   origin?: string;
@@ -81,13 +83,23 @@ export async function executeRequest(
   let body: string | undefined;
 
   if (Object.keys(bodyProps).length > 0) {
-    if (!headers.has("content-type")) {
-      headers.set("content-type", "application/json");
-    }
+    const payload = options.wholeBodyKey
+      ? bodyProps[options.wholeBodyKey]
+      : bodyProps;
 
-    body = JSON.stringify(
-      options.wholeBodyKey ? bodyProps[options.wholeBodyKey] : bodyProps,
-    );
+    if (options.bodyEncoding === "form") {
+      if (!headers.has("content-type")) {
+        headers.set("content-type", "application/x-www-form-urlencoded");
+      }
+
+      body = encodeFormBody(payload);
+    } else {
+      if (!headers.has("content-type")) {
+        headers.set("content-type", "application/json");
+      }
+
+      body = JSON.stringify(payload);
+    }
   }
 
   const response = await options.fetchImpl(url.toString(), {
@@ -155,6 +167,41 @@ export function resolveBaseUrl(
 
     return new URL(url, origin).toString().replace(/\/$/, "");
   }
+}
+
+/**
+ * Serializes a flattened body payload as `application/x-www-form-urlencoded`.
+ * Array values become repeated keys, matching the existing query-parameter
+ * convention. A nested object/array *value* is JSON-stringified into a
+ * single form value rather than expanded with bracket notation (e.g.
+ * Stripe's own `metadata[key]=value` style) — correct for the flat scalar
+ * properties that make up the overwhelming majority of real form-encoded
+ * APIs (Stripe, Twilio), not a full form-encoding implementation.
+ * `URLSearchParams` handles percent-encoding for free.
+ */
+function encodeFormBody(payload: unknown): string {
+  const params = new URLSearchParams();
+
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    for (const [key, value] of Object.entries(
+      payload as Record<string, unknown>,
+    )) {
+      if (value === undefined) {
+        continue;
+      }
+
+      for (const item of Array.isArray(value) ? value : [value]) {
+        params.append(
+          key,
+          item !== null && typeof item === "object"
+            ? JSON.stringify(item)
+            : String(item),
+        );
+      }
+    }
+  }
+
+  return params.toString();
 }
 
 async function resolveHeaders(

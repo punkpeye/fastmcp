@@ -26,9 +26,28 @@ const SCHEMA_MAP_KEYS = new Set([
  */
 const DATA_KEYS = new Set(["const", "default", "enum", "example", "examples"]);
 
+/**
+ * Request body content types this module knows how to flatten and encode.
+ * `application/json` wins when a route declares both.
+ */
+export const SUPPORTED_BODY_CONTENT_TYPES = [
+  "application/json",
+  "application/x-www-form-urlencoded",
+] as const;
+
 export interface FlatSchemaResult {
+  /** How the request body (if any properties were extracted) must be serialized. */
+  bodyEncoding?: "form" | "json";
   flatSchema: JsonSchemaObject;
   parameterMap: Record<string, ParameterMapping>;
+  /**
+   * Set when `route.requestBody` declares a body, but only in content
+   * type(s) this module doesn't support (e.g. `multipart/form-data`,
+   * `application/json-patch+json`, `application/octet-stream`). The caller
+   * should not turn this route into a tool with a payload it can never
+   * carry — see `fromOpenAPI.ts`.
+   */
+  unsupportedBodyContentType?: string;
   /**
    * Set when the request body's schema is not a flat object (e.g. an array,
    * or a bare non-object `$ref`) — the whole body is exposed as a single
@@ -73,7 +92,12 @@ export function buildFlatSchema(
     byName.set(param.name, list);
   }
 
-  const { properties: bodyProperties, wholeBodyKey } = extractBodyProperties(
+  const {
+    bodyEncoding,
+    properties: bodyProperties,
+    unsupportedBodyContentType,
+    wholeBodyKey,
+  } = extractBodyProperties(
     route.method === "get" ? undefined : route.requestBody,
   );
 
@@ -124,7 +148,13 @@ export function buildFlatSchema(
     flatSchema.$defs = usedDefs;
   }
 
-  return { flatSchema, parameterMap, wholeBodyKey };
+  return {
+    bodyEncoding,
+    flatSchema,
+    parameterMap,
+    unsupportedBodyContentType,
+    wholeBodyKey,
+  };
 }
 
 export function buildSharedDefs(
@@ -161,8 +191,33 @@ function childMode(key: string): WalkMode {
   return SCHEMA_MAP_KEYS.has(key) ? "schemaMap" : "schema";
 }
 
+/**
+ * Picks the request body's content type and flattens its schema.
+ *
+ * `application/json` wins if a route declares both it and
+ * `application/x-www-form-urlencoded` (a fixed preference, not declaration
+ * order — the latter isn't a reliable signal). A route whose body is only
+ * declared under a content type this module doesn't handle at all (e.g.
+ * `multipart/form-data`) reports `unsupportedBodyContentType` instead of
+ * silently returning an empty property map — that emptiness is exactly what
+ * a real Stripe/Twilio operation (both form-urlencoded-only) looked like
+ * before this function read anything but JSON, and it produced a tool with
+ * no way to carry its actual payload. A bare `content: {}` (no content
+ * types at all) still means "no body," not "unsupported" — and so does a
+ * supported content type with no `schema` at all (a legal, if unusual,
+ * "any JSON body" declaration): the content type itself is fine, there's
+ * just nothing to flatten.
+ *
+ * A non-object body (array, bare `$ref` to a scalar/array, etc.) can't be
+ * form-urlencoded at all — form encoding is inherently flat key/value pairs
+ * — so that combination is also reported as unsupported, rather than
+ * `encodeFormBody` (requestBuilder.ts) silently sending an empty body for
+ * data it has no way to represent.
+ */
 function extractBodyProperties(requestBody: OpenApiRequestBody | undefined): {
+  bodyEncoding?: "form" | "json";
   properties: Map<string, { required: boolean; schema: OpenApiSchema }>;
+  unsupportedBodyContentType?: string;
   wholeBodyKey?: string;
 } {
   const properties = new Map<
@@ -170,10 +225,32 @@ function extractBodyProperties(requestBody: OpenApiRequestBody | undefined): {
     { required: boolean; schema: OpenApiSchema }
   >();
 
-  const schema = requestBody?.content?.["application/json"]?.schema;
+  const content = requestBody?.content;
+
+  if (!content) {
+    return { properties };
+  }
+
+  const hasJson = "application/json" in content;
+  const hasForm = "application/x-www-form-urlencoded" in content;
+
+  if (!hasJson && !hasForm) {
+    const contentTypes = Object.keys(content);
+
+    return contentTypes.length > 0
+      ? { properties, unsupportedBodyContentType: contentTypes[0] }
+      : { properties };
+  }
+
+  const bodyEncoding: "form" | "json" = hasJson ? "json" : "form";
+  const schema = hasJson
+    ? content["application/json"]?.schema
+    : content["application/x-www-form-urlencoded"]?.schema;
 
   if (!schema) {
-    return { properties };
+    // The content type is declared and supported; it just has no schema
+    // (an unconstrained body) — nothing to flatten, but not unsupported.
+    return { bodyEncoding, properties };
   }
 
   const schemaProperties = schema.properties as
@@ -192,17 +269,24 @@ function extractBodyProperties(requestBody: OpenApiRequestBody | undefined): {
       });
     }
 
-    return { properties };
+    return { bodyEncoding, properties };
   }
 
-  // Non-object body (array, bare $ref to a scalar/array, etc.) — expose the
-  // whole thing as a single "body" property rather than flattening it.
+  if (bodyEncoding === "form") {
+    return {
+      properties,
+      unsupportedBodyContentType: "application/x-www-form-urlencoded",
+    };
+  }
+
+  // Non-object JSON body (array, bare $ref to a scalar/array, etc.) — expose
+  // the whole thing as a single "body" property rather than flattening it.
   properties.set("body", {
     required: requestBody?.required ?? false,
     schema,
   });
 
-  return { properties, wholeBodyKey: "body" };
+  return { bodyEncoding, properties, wholeBodyKey: "body" };
 }
 
 /**

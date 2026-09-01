@@ -240,6 +240,134 @@ test("GET never contributes a request body — fetch rejects a body on GET, so i
   expect(wholeBodyKey).toBeUndefined();
 });
 
+test("GET's body skip happens before content-type inspection: a multipart-only body on a GET is not flagged unsupported", () => {
+  const { bodyEncoding, unsupportedBodyContentType } = buildFlatSchema(
+    route({
+      method: "get",
+      requestBody: {
+        content: { "multipart/form-data": { schema: { type: "object" } } },
+      },
+    }),
+    undefined,
+  );
+
+  expect(bodyEncoding).toBeUndefined();
+  expect(unsupportedBodyContentType).toBeUndefined();
+});
+
+test("a form-urlencoded body is flattened like a JSON one, with bodyEncoding: 'form'", () => {
+  const { bodyEncoding, flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: {
+              properties: {
+                amount: { type: "integer" },
+                currency: { type: "string" },
+              },
+              required: ["amount"],
+              type: "object",
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(bodyEncoding).toBe("form");
+  expect(flatSchema.properties).toEqual({
+    amount: { type: "integer" },
+    currency: { type: "string" },
+  });
+  expect(parameterMap.amount).toEqual({ in: "body", name: "amount" });
+  expect(flatSchema.required).toEqual(["amount"]);
+});
+
+test("application/json is preferred over form-urlencoded when a route declares both", () => {
+  const { bodyEncoding, flatSchema } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              properties: { fromJson: { type: "string" } },
+              type: "object",
+            },
+          },
+          "application/x-www-form-urlencoded": {
+            schema: {
+              properties: { fromForm: { type: "string" } },
+              type: "object",
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(bodyEncoding).toBe("json");
+  expect(flatSchema.properties).toEqual({ fromJson: { type: "string" } });
+});
+
+test("a request body declared only in an unsupported content type is signaled for skipping, not silently emptied", () => {
+  const { flatSchema, unsupportedBodyContentType } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: { "multipart/form-data": { schema: { type: "object" } } },
+      },
+    }),
+    undefined,
+  );
+
+  expect(unsupportedBodyContentType).toBe("multipart/form-data");
+  expect(flatSchema.properties).toEqual({});
+});
+
+test("a requestBody with no content types at all is treated as no body, not unsupported", () => {
+  const { bodyEncoding, unsupportedBodyContentType } = buildFlatSchema(
+    route({ requestBody: { content: {} } }),
+    undefined,
+  );
+
+  expect(bodyEncoding).toBeUndefined();
+  expect(unsupportedBodyContentType).toBeUndefined();
+});
+
+test("a supported content type declared with no schema at all (an unconstrained body) is not flagged unsupported", () => {
+  const { bodyEncoding, flatSchema, unsupportedBodyContentType } =
+    buildFlatSchema(
+      route({ requestBody: { content: { "application/json": {} } } }),
+      undefined,
+    );
+
+  expect(bodyEncoding).toBe("json");
+  expect(unsupportedBodyContentType).toBeUndefined();
+  expect(flatSchema.properties).toEqual({});
+});
+
+test("a non-object form-urlencoded body is reported unsupported, since form encoding can't represent it", () => {
+  const { bodyEncoding, unsupportedBodyContentType, wholeBodyKey } =
+    buildFlatSchema(
+      route({
+        requestBody: {
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: { items: { type: "string" }, type: "array" },
+            },
+          },
+        },
+      }),
+      undefined,
+    );
+
+  expect(unsupportedBodyContentType).toBe("application/x-www-form-urlencoded");
+  expect(bodyEncoding).toBeUndefined();
+  expect(wholeBodyKey).toBeUndefined();
+});
+
 test("a body property literally named `nullable` is a field name, not the OpenAPI keyword, and survives", () => {
   const { flatSchema } = buildFlatSchema(
     route({

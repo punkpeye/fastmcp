@@ -126,6 +126,72 @@ test("a caller-supplied header overrides the generated content-type, case-insens
   expect(headers.get("content-type")).toBe("application/vnd.api+json");
 });
 
+test("a form-encoded body (bodyEncoding: 'form') is serialized with URLSearchParams and gets the right content-type", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response("{}", { status: 200 }),
+  );
+
+  await executeRequest({
+    args: { amount: 500, description: "a widget & gear" },
+    bodyEncoding: "form",
+    fetchImpl,
+    parameterMap: {
+      amount: { in: "body", name: "amount" },
+      description: { in: "body", name: "description" },
+    },
+    route: route({ method: "post" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [, calledInit] = fetchImpl.mock.calls[0]!;
+  const headers = calledInit!.headers as Headers;
+  expect(headers.get("content-type")).toBe("application/x-www-form-urlencoded");
+
+  const body = new URLSearchParams(calledInit!.body as string);
+  expect(body.get("amount")).toBe("500");
+  expect(body.get("description")).toBe("a widget & gear");
+});
+
+test("a caller-supplied content-type header overrides the generated form-urlencoded one", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response("{}", { status: 200 }),
+  );
+
+  await executeRequest({
+    args: { name: "Rex" },
+    bodyEncoding: "form",
+    fetchImpl,
+    headers: { "Content-Type": "application/vnd.api+json" },
+    parameterMap: { name: { in: "body", name: "name" } },
+    route: route({ method: "post" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [, calledInit] = fetchImpl.mock.calls[0]!;
+  expect((calledInit!.headers as Headers).get("content-type")).toBe(
+    "application/vnd.api+json",
+  );
+});
+
+test("an array-valued form body property is sent as repeated keys", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response("{}", { status: 200 }),
+  );
+
+  await executeRequest({
+    args: { tag: ["a", "b"] },
+    bodyEncoding: "form",
+    fetchImpl,
+    parameterMap: { tag: { in: "body", name: "tag" } },
+    route: route({ method: "post" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [, calledInit] = fetchImpl.mock.calls[0]!;
+  const body = new URLSearchParams(calledInit!.body as string);
+  expect(body.getAll("tag")).toEqual(["a", "b"]);
+});
+
 test("a non-ok response throws with the status and body surfaced", async () => {
   const fetchImpl = vi.fn(
     async () => new Response("not found", { status: 404 }),
