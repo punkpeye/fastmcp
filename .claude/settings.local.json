@@ -23,8 +23,7 @@
       "Bash(npm run format:check:*)",
       "Bash(npm run:*)",
       "Bash(pnpm run:*)",
-      "Bash(pnpm test:*)",
-      "Bash(pnpm add *)"
+      "Bash(pnpm test:*)"
     ],
     "deny": [],
     "ask": []
