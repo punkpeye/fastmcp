@@ -2,12 +2,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, test, vi } from "vitest";
+import { beforeAll, describe, expect, test, vi } from "vitest";
 
 import type { FastMCP } from "../FastMCP.js";
 import type { JsonSchemaObject } from "../jsonSchemaAdapter.js";
 
 import { jsonSchemaAdapter } from "../jsonSchemaAdapter.js";
+// @ts-expect-error -- plain .mjs helper, shared with the refresh script
+import { ensureBenchmarkSpecs } from "./__fixtures__/ensureBenchmarkSpecs.mjs";
 import { fromOpenAPI } from "./fromOpenAPI.js";
 import { loadSpec } from "./loadSpec.js";
 import { extractRoutes } from "./routes.js";
@@ -16,9 +18,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "__fixtures__");
 
 /**
- * Real-world OpenAPI 3.x documents, vendored under __fixtures__/ so this
- * suite is deterministic and network-free. Refresh them with
- * `pnpm bench:openapi:refresh` (see scripts/refresh-openapi-benchmark-specs.mjs).
+ * The five large specs (~20MB combined) are fetched on demand rather than
+ * vendored, and verified against the sha256 pins in
+ * __fixtures__/benchmark-specs/sources.json — so a run is still reproducible
+ * without that weight sitting in every clone. `petstore.json` and the
+ * multi-file YAML fixture are small enough to commit, and keep part of this
+ * suite runnable offline. Re-pin with `pnpm test:openapi:refresh`.
+ */
+beforeAll(async () => {
+  await ensureBenchmarkSpecs();
+}, 180_000);
+
+/**
+ * Real-world OpenAPI 3.x documents covering the shapes that break naive
+ * converters: multi-file `$ref`s, `nullable` next to `oneOf`, recursive
+ * component schemas, and specs large enough to surface naming collisions.
  */
 const SPECS = [
   { file: "benchmark-specs/petstore.json", name: "Petstore" },
