@@ -15,7 +15,7 @@ import { fromOpenAPI } from "./fromOpenAPI.js";
 import { loadSpec } from "./loadSpec.js";
 import { generateNames } from "./naming.js";
 import { extractRoutes } from "./routes.js";
-import { SUPPORTED_BODY_CONTENT_TYPES } from "./schemas.js";
+import { buildFlatSchema, SUPPORTED_BODY_CONTENT_TYPES } from "./schemas.js";
 import { selectRoutes } from "./selection.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -51,18 +51,18 @@ const SPECS = [
   { file: "multi-file-spec/root.yaml", name: "Multi-file YAML spec" },
 ];
 
-/** A route whose only declared content type(s) this module can't flatten at all. */
-function hasUnsupportedOnlyBody(route: HttpRoute): boolean {
-  if (route.method === "get") {
-    return false;
-  }
-
-  const contentTypes = Object.keys(route.requestBody?.content ?? {});
-
-  return (
-    contentTypes.length > 0 &&
-    !contentTypes.some((ct) => SUPPORTED_BODY_CONTENT_TYPE_SET.has(ct))
-  );
+/**
+ * Whether `fromOpenAPI` skips this route entirely rather than turning it
+ * into a tool — reuses `buildFlatSchema` itself (the actual production
+ * logic) instead of re-deriving "which content types are unsupported" as a
+ * second, parallel heuristic here. A prior version of this check only
+ * looked at the declared content-type string, which drifted out of sync
+ * with `extractBodyProperties` (schemas.ts) treating a non-object body
+ * declared as form-urlencoded as unsupported too — silently over-counting
+ * `expectedToolCount` against real specs that hit that case.
+ */
+function isSkipped(route: HttpRoute): boolean {
+  return !!buildFlatSchema(route, undefined).unsupportedBodyContentType;
 }
 
 describe.each(SPECS)("fromOpenAPI benchmark: $name", ({ file }) => {
@@ -76,7 +76,7 @@ describe.each(SPECS)("fromOpenAPI benchmark: $name", ({ file }) => {
       const routes = extractRoutes(document);
       const nonDeprecated = routes.filter((route) => !route.deprecated);
       const expectedToolCount = nonDeprecated.filter(
-        (route) => !hasUnsupportedOnlyBody(route),
+        (route) => !isSkipped(route),
       ).length;
 
       // Mirrors fromOpenAPI's own internal selection/naming so a tool's name
@@ -172,7 +172,7 @@ describe.each(SPECS)("fromOpenAPI benchmark: $name", ({ file }) => {
       const specPath = path.join(FIXTURES_DIR, file);
       const { document } = await loadSpec(specPath);
       const expectedCount = extractRoutes(document).filter(
-        (route) => !route.deprecated && !hasUnsupportedOnlyBody(route),
+        (route) => !route.deprecated && !isSkipped(route),
       ).length;
 
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
