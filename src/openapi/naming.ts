@@ -6,7 +6,10 @@ const MAX_NAME_LENGTH = 56;
 const MAX_BASE_LENGTH = MAX_NAME_LENGTH - 5;
 
 /**
- * Generates a unique tool name per route.
+ * Generates a unique name per route — used both for tools and, when
+ * `resources: true`, for the resources/resource templates a `GET` route
+ * maps to instead. One pass over the whole selected set keeps names unique
+ * regardless of which destination a route ends up at.
  *
  * Ports the Python implementation's naming rule
  * (`server/providers/openapi/provider.py:_generate_default_name`): prefer
@@ -19,7 +22,7 @@ const MAX_BASE_LENGTH = MAX_NAME_LENGTH - 5;
  * (e.g. both "foo" and "foo_2" present) could produce two identically-named
  * tools, one of which `FastMCP.addTool` would silently drop.
  */
-export function generateToolNames(
+export function generateNames(
   routes: HttpRoute[],
   mcpNames: Record<string, string> | undefined,
 ): Map<HttpRoute, string> {

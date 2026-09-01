@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import type { HttpRoute } from "./types.js";
 
-import { generateToolNames } from "./naming.js";
+import { generateNames } from "./naming.js";
 
 function route(overrides: Partial<HttpRoute>): HttpRoute {
   return {
@@ -16,7 +16,7 @@ function route(overrides: Partial<HttpRoute>): HttpRoute {
 }
 
 test("uses operationId, slugified", () => {
-  const names = generateToolNames(
+  const names = generateNames(
     [route({ operationId: "list Pets!" })],
     undefined,
   );
@@ -24,14 +24,14 @@ test("uses operationId, slugified", () => {
 });
 
 test("mcpNames overrides operationId", () => {
-  const names = generateToolNames([route({ operationId: "listPets" })], {
+  const names = generateNames([route({ operationId: "listPets" })], {
     listPets: "getAllPets",
   });
   expect([...names.values()]).toEqual(["getAllPets"]);
 });
 
 test("strips FastAPI-style __ suffixes from operationId", () => {
-  const names = generateToolNames(
+  const names = generateNames(
     [route({ operationId: "get_user__users__get" })],
     undefined,
   );
@@ -39,7 +39,7 @@ test("strips FastAPI-style __ suffixes from operationId", () => {
 });
 
 test("falls back to method_path when there is no operationId or summary", () => {
-  const names = generateToolNames(
+  const names = generateNames(
     [route({ method: "get", path: "/pets/{id}" })],
     undefined,
   );
@@ -52,7 +52,7 @@ test("collisions get a numeric suffix", () => {
     route({ operationId: "listPets", path: "/v2/pets" }),
     route({ operationId: "listPets", path: "/v3/pets" }),
   ];
-  const names = generateToolNames(routes, undefined);
+  const names = generateNames(routes, undefined);
   expect([...names.values()]).toEqual(["listPets", "listPets_2", "listPets_3"]);
 });
 
@@ -62,7 +62,7 @@ test("a collision is checked against the final name, not just the base — a spe
     route({ operationId: "foo_2", path: "/2" }),
     route({ operationId: "foo", path: "/3" }),
   ];
-  const names = [...generateToolNames(routes, undefined).values()];
+  const names = [...generateNames(routes, undefined).values()];
   expect(names).toEqual(["foo", "foo_2", "foo_3"]);
   expect(new Set(names).size).toBe(3);
 });
@@ -74,7 +74,7 @@ test("a collision suffix never pushes the name past 56 characters", () => {
     route({ operationId: longId, path: "/2" }),
     route({ operationId: longId, path: "/3" }),
   ];
-  const names = [...generateToolNames(routes, undefined).values()];
+  const names = [...generateNames(routes, undefined).values()];
   expect(new Set(names).size).toBe(3);
 
   for (const name of names) {

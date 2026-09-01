@@ -240,6 +240,134 @@ test("GET never contributes a request body — fetch rejects a body on GET, so i
   expect(wholeBodyKey).toBeUndefined();
 });
 
+test("GET's body skip happens before content-type inspection: a multipart-only body on a GET is not flagged unsupported", () => {
+  const { bodyEncoding, unsupportedBodyContentType } = buildFlatSchema(
+    route({
+      method: "get",
+      requestBody: {
+        content: { "multipart/form-data": { schema: { type: "object" } } },
+      },
+    }),
+    undefined,
+  );
+
+  expect(bodyEncoding).toBeUndefined();
+  expect(unsupportedBodyContentType).toBeUndefined();
+});
+
+test("a form-urlencoded body is flattened like a JSON one, with bodyEncoding: 'form'", () => {
+  const { bodyEncoding, flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: {
+              properties: {
+                amount: { type: "integer" },
+                currency: { type: "string" },
+              },
+              required: ["amount"],
+              type: "object",
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(bodyEncoding).toBe("form");
+  expect(flatSchema.properties).toEqual({
+    amount: { type: "integer" },
+    currency: { type: "string" },
+  });
+  expect(parameterMap.amount).toEqual({ in: "body", name: "amount" });
+  expect(flatSchema.required).toEqual(["amount"]);
+});
+
+test("application/json is preferred over form-urlencoded when a route declares both", () => {
+  const { bodyEncoding, flatSchema } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              properties: { fromJson: { type: "string" } },
+              type: "object",
+            },
+          },
+          "application/x-www-form-urlencoded": {
+            schema: {
+              properties: { fromForm: { type: "string" } },
+              type: "object",
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(bodyEncoding).toBe("json");
+  expect(flatSchema.properties).toEqual({ fromJson: { type: "string" } });
+});
+
+test("a request body declared only in an unsupported content type is signaled for skipping, not silently emptied", () => {
+  const { flatSchema, unsupportedBodyContentType } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: { "multipart/form-data": { schema: { type: "object" } } },
+      },
+    }),
+    undefined,
+  );
+
+  expect(unsupportedBodyContentType).toBe("multipart/form-data");
+  expect(flatSchema.properties).toEqual({});
+});
+
+test("a requestBody with no content types at all is treated as no body, not unsupported", () => {
+  const { bodyEncoding, unsupportedBodyContentType } = buildFlatSchema(
+    route({ requestBody: { content: {} } }),
+    undefined,
+  );
+
+  expect(bodyEncoding).toBeUndefined();
+  expect(unsupportedBodyContentType).toBeUndefined();
+});
+
+test("a supported content type declared with no schema at all (an unconstrained body) is not flagged unsupported", () => {
+  const { bodyEncoding, flatSchema, unsupportedBodyContentType } =
+    buildFlatSchema(
+      route({ requestBody: { content: { "application/json": {} } } }),
+      undefined,
+    );
+
+  expect(bodyEncoding).toBe("json");
+  expect(unsupportedBodyContentType).toBeUndefined();
+  expect(flatSchema.properties).toEqual({});
+});
+
+test("a non-object form-urlencoded body is reported unsupported, since form encoding can't represent it", () => {
+  const { bodyEncoding, unsupportedBodyContentType, wholeBodyKey } =
+    buildFlatSchema(
+      route({
+        requestBody: {
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: { items: { type: "string" }, type: "array" },
+            },
+          },
+        },
+      }),
+      undefined,
+    );
+
+  expect(unsupportedBodyContentType).toBe("application/x-www-form-urlencoded");
+  expect(bodyEncoding).toBeUndefined();
+  expect(wholeBodyKey).toBeUndefined();
+});
+
 test("a body property literally named `nullable` is a field name, not the OpenAPI keyword, and survives", () => {
   const { flatSchema } = buildFlatSchema(
     route({
@@ -324,4 +452,130 @@ test("`example`/`default` payloads are instance data, not schemas, and are passe
     example: { nullable: "yes" },
     type: "object",
   });
+});
+
+test("a form-urlencoded body declared as a `$ref` to a component object schema is resolved and flattened (FastAPI's `Body_<operation>` shape)", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: {
+        Body_login: {
+          properties: {
+            grant_type: { $ref: "#/components/schemas/GrantType" },
+            password: { type: "string" },
+            username: { type: "string" },
+          },
+          required: ["username", "password"],
+          type: "object",
+        },
+        GrantType: { enum: ["password"], type: "string" },
+      },
+    },
+  };
+
+  const { bodyEncoding, flatSchema, parameterMap, unsupportedBodyContentType } =
+    buildFlatSchema(
+      route({
+        requestBody: {
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: { $ref: "#/components/schemas/Body_login" },
+            },
+          },
+          required: true,
+        },
+      }),
+      buildSharedDefs(document),
+    );
+
+  expect(unsupportedBodyContentType).toBeUndefined();
+  expect(bodyEncoding).toBe("form");
+  expect(Object.keys(flatSchema.properties!).sort()).toEqual([
+    "grant_type",
+    "password",
+    "username",
+  ]);
+  expect([...flatSchema.required!].sort()).toEqual(["password", "username"]);
+  expect(parameterMap.username).toEqual({ in: "body", name: "username" });
+  // A property that itself references a shared schema still travels with
+  // the tool as a filtered $defs entry, exactly as an inline body would —
+  // while the resolved body schema itself is inlined, not carried as a def.
+  expect(flatSchema.properties!.grant_type).toEqual({
+    $ref: "#/$defs/GrantType",
+  });
+  expect(flatSchema.$defs).toEqual({
+    GrantType: { enum: ["password"], type: "string" },
+  });
+});
+
+test("a form-urlencoded `$ref` is followed through an alias chain to the object it ends at", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: {
+        Credentials: { $ref: "#/components/schemas/LoginForm" },
+        LoginForm: {
+          properties: { username: { type: "string" } },
+          type: "object",
+        },
+      },
+    },
+  };
+
+  const { bodyEncoding, flatSchema } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: { $ref: "#/components/schemas/Credentials" },
+          },
+        },
+      },
+    }),
+    buildSharedDefs(document),
+  );
+
+  expect(bodyEncoding).toBe("form");
+  expect(flatSchema.properties).toEqual({ username: { type: "string" } });
+});
+
+test("a form-urlencoded `$ref` that resolves to a non-object schema is still reported unsupported", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: { Ids: { items: { type: "string" }, type: "array" } },
+    },
+  };
+
+  const { bodyEncoding, unsupportedBodyContentType, wholeBodyKey } =
+    buildFlatSchema(
+      route({
+        requestBody: {
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: { $ref: "#/components/schemas/Ids" },
+            },
+          },
+        },
+      }),
+      buildSharedDefs(document),
+    );
+
+  expect(unsupportedBodyContentType).toBe("application/x-www-form-urlencoded");
+  expect(bodyEncoding).toBeUndefined();
+  expect(wholeBodyKey).toBeUndefined();
+});
+
+test("a form-urlencoded `$ref` that can't be resolved is reported unsupported rather than throwing", () => {
+  const { unsupportedBodyContentType } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/x-www-form-urlencoded": {
+            schema: { $ref: "#/components/schemas/Missing" },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(unsupportedBodyContentType).toBe("application/x-www-form-urlencoded");
 });
