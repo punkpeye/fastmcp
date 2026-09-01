@@ -5,7 +5,7 @@ import type { HttpRoute } from "./types.js";
 import { executeRequest, resolveBaseUrl } from "./requestBuilder.js";
 
 test("a relative servers[0].url is resolved against the spec's own origin", () => {
-  // The exact case the critique calls out: Petstore's own servers entry is
+  // The Petstore's own servers entry is
   // "/api/v3", which is only usable once resolved against where the spec
   // itself was loaded from.
   const url = resolveBaseUrl(

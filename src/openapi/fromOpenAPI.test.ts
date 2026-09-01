@@ -10,7 +10,7 @@ import { fromOpenAPI } from "./fromOpenAPI.js";
 const PETSTORE_SPEC_URL = "https://petstore3.swagger.io/api/v3/openapi.json";
 
 /**
- * The "test that can fail" the critique asks for: schema validation proves
+ * The "test that can fail": schema validation proves
  * tools are well-formed, not that the transport works. This does a real
  * initialize + tools/list + tool call against the public Petstore v3 API —
  * whose own `servers[0].url` is the relative "/api/v3" that only resolves
