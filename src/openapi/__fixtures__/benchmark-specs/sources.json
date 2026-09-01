@@ -6,7 +6,7 @@
       "url": "https://raw.githubusercontent.com/box/box-openapi/main/openapi.json"
     },
     "posthog.yaml": {
-      "sha256": "bf1d3c3b018ed5c8e22774c4f2452a664351e4a0d5889853526685bb55f068ea",
+      "sha256": "0d814511997cd8f975869d93b26f19abc5844d744fa44375d7974ca60281986d",
       "url": "https://app.posthog.com/api/schema/"
     },
     "slack.json": {
