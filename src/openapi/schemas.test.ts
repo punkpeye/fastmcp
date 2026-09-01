@@ -178,6 +178,45 @@ test("no $defs key is added when a tool's schema references nothing shared", () 
   expect(flatSchema.$defs).toBeUndefined();
 });
 
+test("`nullable: true` alongside a `type` is folded into a type array", () => {
+  const { flatSchema } = buildFlatSchema(
+    route({
+      parameters: [
+        {
+          in: "query",
+          name: "status",
+          schema: { nullable: true, type: "string" },
+        },
+      ],
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties!.status).toEqual({ type: ["string", "null"] });
+});
+
+test("`nullable` with no sibling `type` (e.g. next to `oneOf`) is dropped rather than left for AJV to reject", () => {
+  const { flatSchema } = buildFlatSchema(
+    route({
+      parameters: [
+        {
+          in: "query",
+          name: "length",
+          schema: {
+            nullable: false,
+            oneOf: [{ type: "string" }, { type: "integer" }],
+          },
+        },
+      ],
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties!.length).toEqual({
+    oneOf: [{ type: "string" }, { type: "integer" }],
+  });
+});
+
 test("GET never contributes a request body — fetch rejects a body on GET, so it would be permanently broken", () => {
   const { flatSchema, parameterMap, wholeBodyKey } = buildFlatSchema(
     route({

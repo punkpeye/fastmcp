@@ -125,6 +125,9 @@ export function buildSharedDefs(
  * alongside a `$defs` object built from the document's `components.schemas`
  * (see `buildSharedDefs`). Ports the equivalent rewrite from the Python
  * implementation (`utilities/openapi/schemas.py:_replace_ref_with_defs`).
+ *
+ * Also normalizes OpenAPI 3.0's `nullable` keyword (see `normalizeNullable`),
+ * since real specs carry both.
  */
 export function rewriteComponentRefs<TValue>(value: TValue): TValue {
   if (Array.isArray(value)) {
@@ -146,7 +149,9 @@ export function rewriteComponentRefs<TValue>(value: TValue): TValue {
       },
     );
 
-    return Object.fromEntries(entries) as TValue;
+    return normalizeNullable(
+      Object.fromEntries(entries) as Record<string, unknown>,
+    ) as TValue;
   }
 
   return value;
@@ -249,4 +254,38 @@ function filterReferencedDefs(
   return Object.fromEntries(
     [...referenced].map((name) => [name, allDefs[name]]),
   );
+}
+
+/**
+ * OpenAPI 3.0's `nullable` keyword only makes sense alongside a sibling
+ * `type`, which it widens (`nullable: true` + `type: "string"` means
+ * "string or null") — but it is not itself standard JSON Schema. AJV
+ * recognizes the keyword and throws ('"nullable" cannot be used without
+ * "type"') if it finds one with no `type` on the same node, which real
+ * specs do produce (e.g. `nullable` sibling to `oneOf`/`allOf`/`$ref`
+ * instead of `type`, as in Box's API). Folded into `type` where there is
+ * one to widen, dropped otherwise.
+ */
+function normalizeNullable(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!("nullable" in schema)) {
+    return schema;
+  }
+
+  const { nullable, type, ...rest } = schema;
+
+  if (nullable !== true) {
+    return rest;
+  }
+
+  if (typeof type === "string") {
+    return { ...rest, type: [type, "null"] };
+  }
+
+  if (Array.isArray(type)) {
+    return { ...rest, type: [...new Set(["null", ...type])] };
+  }
+
+  return rest;
 }

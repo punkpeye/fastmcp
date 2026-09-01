@@ -23,7 +23,7 @@ test("resolves external $refs across YAML files, including the bare fragment for
   const getPet = routes.find((route) => route.operationId === "getPet");
 
   // "resources/pets.yaml#/Pet" — relative path + bare fragment (no
-  // "components" prefix), the exact form the critique calls out.
+  // "components" prefix)
   expect(createPet?.requestBody?.content?.["application/json"]?.schema).toEqual(
     {
       properties: {
@@ -44,8 +44,7 @@ test("resolves external $refs across YAML files, including the bare fragment for
 });
 
 test("a spec passed as an already-parsed object has no real resolution base for external $refs", async () => {
-  // This is exactly the failure mode the critique warns about: if a caller
-  // fetches a spec's text themselves and hands loadSpec the parsed object
+  // If a caller fetches a spec's text themselves and hands loadSpec the parsed object
   // instead of the URL/path, any external $ref in it resolves against the
   // wrong base (here, the process's cwd) instead of the document's own
   // location — so it fails loudly rather than silently dropping operations.
