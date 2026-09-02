@@ -111,6 +111,12 @@ export interface HttpRoute {
   parameters: OpenApiParameter[];
   path: string;
   requestBody?: OpenApiRequestBody;
+  /**
+   * Keyed by HTTP status code (e.g. `"200"`), as declared in the spec.
+   * Populated regardless of `method` — unlike `requestBody`, there's no
+   * equivalent to the GET-never-has-a-body rule for responses.
+   */
+  responses?: Record<string, OpenApiResponse>;
   summary?: string;
   tags: string[];
 }
@@ -118,10 +124,18 @@ export interface HttpRoute {
 export interface OpenApiParameter {
   deprecated?: boolean;
   description?: string;
+  /**
+   * Only meaningful for `in: "query"`. `"deepObject"`, `"spaceDelimited"`,
+   * and `"pipeDelimited"` get dedicated serialization in requestBuilder.ts;
+   * anything else (including unset, which defaults to `"form"` per the
+   * OpenAPI spec) uses the default repeated-key serialization.
+   */
+  explode?: boolean;
   in: ParameterLocation;
   name: string;
   required?: boolean;
   schema?: OpenApiSchema;
+  style?: string;
 }
 
 export interface OpenApiParameterRef {
@@ -131,6 +145,10 @@ export interface OpenApiParameterRef {
 export interface OpenApiRequestBody {
   content?: Record<string, { schema?: OpenApiSchema }>;
   required?: boolean;
+}
+
+export interface OpenApiResponse {
+  content?: Record<string, { schema?: OpenApiSchema }>;
 }
 
 /**
@@ -171,6 +189,7 @@ export interface RawOperation {
   operationId?: string;
   parameters?: (OpenApiParameter | OpenApiParameterRef)[];
   requestBody?: OpenApiParameterRef | OpenApiRequestBody;
+  responses?: Record<string, OpenApiParameterRef | OpenApiResponse>;
   summary?: string;
   tags?: string[];
 }

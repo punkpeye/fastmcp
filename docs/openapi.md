@@ -7,6 +7,8 @@
 - [Basic Usage](#basic-usage)
 - [Choosing which operations become tools](#choosing-which-operations-become-tools)
 - [GET → resources](#get--resources)
+- [Structured output](#structured-output)
+- [Query and form-body serialization](#query-and-form-body-serialization)
 - [Options](#options)
 - [Authentication](#authentication)
 - [Adding to an existing server](#adding-to-an-existing-server)
@@ -66,6 +68,30 @@ This means a "get by ID" style endpoint typically becomes a resource template, w
 
 There's no per-operation override for this — an eligible `GET` always maps to a resource when `resources: true`; use `exclude` if you want a specific one to stay a tool instead of being generated at all.
 
+Eligibility doesn't check the response's own content type, only the request shape. A `GET` returning binary data (an image, a PDF, ...) can still become a resource, and its response is read as text, not as the binary-safe `blob` a resource can also return — corrupting non-text bytes. If your spec has binary-returning `GET`s you want as resources, use `exclude` to keep them as tools instead until this is addressed.
+
+## Structured output
+
+When an operation declares a `2xx` `application/json` response schema, its tool is given an `outputSchema`, and a successful call returns `structuredContent` (the parsed response object) instead of just a text blob — so an agent can consume typed fields directly rather than parsing JSON out of a string.
+
+This only ever adds capability, never risk: real API responses commonly drift from their declared schema, so a response is checked against the schema _before_ being returned as structured content. If it doesn't match — or isn't a JSON object at all (an array-typed response, for instance, is never wired to `outputSchema` in the first place) — the call still succeeds, falling back to the same plain-text result you'd get without this feature. Nothing that works today can start failing because of `outputSchema`.
+
+An operation whose response schema is unusually large (more than 50 transitively-referenced component schemas — real for some "core" resource objects in large APIs) doesn't get `outputSchema` wired at all, both to keep `tools/list` fast and because a schema that large has limited practical value as structured output anyway.
+
+## Query and form-body serialization
+
+Query parameters are serialized according to their declared `style`:
+
+- `deepObject` (e.g. Stripe's `created[gte]=...`, `expand[]=...` filters) expands as bracket-notation pairs.
+- `spaceDelimited` / `pipeDelimited` array values join into a single space- or pipe-separated value.
+- Anything else (no style, or the OpenAPI default `style: form`) uses repeated keys — `tag=a&tag=b`.
+
+`explode: false` is not implemented — an array-typed query parameter is always sent exploded (repeated keys), even if the spec declares `explode: false` (which OpenAPI defines as a single comma-joined value instead).
+
+An **object**-valued query, header, or cookie parameter with no `deepObject` style has no defined serialization here — it's sent as the literal string `"[object Object]"`, which is very unlikely to be what the target API expects. This only affects a non-`deepObject` parameter whose own schema is `type: object`, which is uncommon in practice; `deepObject` is what real specs (Stripe) actually use for this case.
+
+Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded.
+
 ## Options
 
 | Option      | Type                                                       | Description                                                                                |
@@ -112,8 +138,8 @@ await fromOpenAPI({ spec: "https://api.example.com/openapi.json", server });
 This scope is deliberately kept tight:
 
 - **Tools by default.** Every operation becomes a tool unless you opt into [`resources: true`](#get--resources), and even then only an eligible `GET` is affected.
-- **`application/json` and `application/x-www-form-urlencoded` request bodies.** A nested object/array _value_ inside a form-urlencoded body property is JSON-stringified into a single form value rather than expanded with bracket notation (e.g. Stripe's own `metadata[key]=value` style) — correct for flat scalar properties, which cover the large majority of real-world form-encoded APIs (Stripe, Twilio), not a full form-encoding implementation. Other content types (`multipart/form-data`, `application/json-patch+json`, `application/octet-stream`, ...) are skipped, not silently turned into a tool with no way to carry its payload — `fromOpenAPI` logs one `console.warn` listing every operation it skipped this way.
-- **Common query parameter styles only.** Array query parameters are sent as repeated keys (the OpenAPI default `style: form, explode: true`). `deepObject`, `spaceDelimited`, and `pipeDelimited` are not implemented.
+- **`application/json` and `application/x-www-form-urlencoded` request bodies.** Other content types (`multipart/form-data`, `application/json-patch+json`, `application/octet-stream`, ...) are skipped, not silently turned into a tool with no way to carry its payload — `fromOpenAPI` logs one `console.warn` listing every operation it skipped this way.
+- **An array-of-objects form-body property bracket-expands under `key[]`** (not indexed `key[0][...]`) — see [Query and form-body serialization](#query-and-form-body-serialization).
 - **OpenAPI 3.x only.** Swagger 2.0 documents are rejected with a clear error.
-- **No response/`outputSchema` validation.** A tool's result is the raw response body (pretty-printed if JSON), not validated against the spec's response schemas.
+- **A very large response schema doesn't get `outputSchema` wired** — see [Structured output](#structured-output).
 - **No CLI.** `fromOpenAPI` is a programmatic API; there is no `fastmcp openapi <spec>` command yet.

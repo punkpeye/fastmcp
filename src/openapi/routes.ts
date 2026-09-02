@@ -5,6 +5,7 @@ import type {
   OpenApiParameter,
   OpenApiParameterRef,
   OpenApiRequestBody,
+  OpenApiResponse,
 } from "./types.js";
 
 const HTTP_METHODS: HttpMethod[] = ["get", "put", "post", "delete", "patch"];
@@ -45,6 +46,7 @@ export function extractRoutes(document: BundledOpenApiDocument): HttpRoute[] {
         requestBody: operation.requestBody
           ? resolveRef<OpenApiRequestBody>(document, operation.requestBody)
           : undefined,
+        responses: resolveResponses(document, operation.responses),
         summary: operation.summary,
         tags: operation.tags ?? [],
       });
@@ -103,4 +105,23 @@ function resolveRef<TValue>(
   }
 
   return node as TValue;
+}
+
+/** A response object can itself be `$ref`'d to `#/components/responses/X`. */
+function resolveResponses(
+  document: BundledOpenApiDocument,
+  rawResponses:
+    | Record<string, OpenApiParameterRef | OpenApiResponse>
+    | undefined,
+): Record<string, OpenApiResponse> | undefined {
+  if (!rawResponses) {
+    return undefined;
+  }
+
+  return Object.fromEntries(
+    Object.entries(rawResponses).map(([code, response]) => [
+      code,
+      resolveRef<OpenApiResponse>(document, response),
+    ]),
+  );
 }

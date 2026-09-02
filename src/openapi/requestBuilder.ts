@@ -17,9 +17,16 @@ export interface ExecuteRequestOptions {
   wholeBodyKey?: string;
 }
 
+export interface ExecuteRequestResult {
+  /** The response body, parsed, when the response's content-type indicated JSON and it parsed successfully. */
+  json?: unknown;
+  /** The response body as text — pretty-printed if `json` is set. */
+  text: string;
+}
+
 export async function executeRequest(
   options: ExecuteRequestOptions,
-): Promise<string> {
+): Promise<ExecuteRequestResult> {
   const baseUrl = resolveBaseUrl(
     options.servers,
     options.origin,
@@ -64,9 +71,7 @@ export async function executeRequest(
         pathParams[mapping.name] = String(value);
         break;
       case "query":
-        for (const item of Array.isArray(value) ? value : [value]) {
-          query.append(mapping.name, String(item));
-        }
+        appendQueryValue(query, mapping.name, mapping.style, value);
         break;
     }
   }
@@ -118,13 +123,14 @@ export async function executeRequest(
 
   if (response.headers.get("content-type")?.includes("json")) {
     try {
-      return JSON.stringify(JSON.parse(text), null, 2);
+      const json: unknown = JSON.parse(text);
+      return { json, text: JSON.stringify(json, null, 2) };
     } catch {
-      return text;
+      return { text };
     }
   }
 
-  return text;
+  return { text };
 }
 
 /**
@@ -170,14 +176,94 @@ export function resolveBaseUrl(
 }
 
 /**
- * Serializes a flattened body payload as `application/x-www-form-urlencoded`.
- * Array values become repeated keys, matching the existing query-parameter
- * convention. A nested object/array *value* is JSON-stringified into a
- * single form value rather than expanded with bracket notation (e.g.
- * Stripe's own `metadata[key]=value` style) — correct for the flat scalar
- * properties that make up the overwhelming majority of real form-encoded
- * APIs (Stripe, Twilio), not a full form-encoding implementation.
- * `URLSearchParams` handles percent-encoding for free.
+ * Appends `value` under `key`, expanding nested structure with bracket
+ * notation rather than JSON-encoding it:
+ *
+ * - a plain object → `key[subkey]=...` recursively;
+ * - an array of scalars → repeated `key=...` entries (the existing,
+ *   unchanged convention for both query arrays and form arrays);
+ * - an array containing an object → each such item bracket-expands under
+ *   `key[]` (PHP/Rails-style, and what Stripe's own list-of-objects form
+ *   fields expect);
+ * - anything else (including a scalar where an object/array was expected —
+ *   e.g. a caller passing a plain value for a `deepObject`-styled query
+ *   param) → `key=value` directly, rather than assuming a shape that isn't
+ *   there.
+ *
+ * Shared between `encodeFormBody` (request bodies) and `deepObject` query
+ * parameters (`appendQueryValue`) — both need the same expansion.
+ */
+function appendBracketPairs(
+  params: URLSearchParams,
+  key: string,
+  value: unknown,
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (item !== null && typeof item === "object") {
+        appendBracketPairs(params, `${key}[]`, item);
+      } else {
+        params.append(key, String(item));
+      }
+    }
+
+    return;
+  }
+
+  if (value !== null && typeof value === "object") {
+    for (const [subKey, subValue] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
+      if (subValue !== undefined) {
+        appendBracketPairs(params, `${key}[${subKey}]`, subValue);
+      }
+    }
+
+    return;
+  }
+
+  params.append(key, String(value));
+}
+
+/**
+ * Appends a query parameter's value using the serialization its declared
+ * `style` requires. `deepObject` and `spaceDelimited`/`pipeDelimited` are
+ * real, if less common, OpenAPI styles — Stripe alone uses `deepObject` 354
+ * times across its filter/expand-style query params. Anything else (no
+ * style, or the OpenAPI default `style: "form"`) keeps the existing
+ * repeated-key serialization.
+ */
+function appendQueryValue(
+  query: URLSearchParams,
+  name: string,
+  style: string | undefined,
+  value: unknown,
+): void {
+  if (style === "deepObject") {
+    appendBracketPairs(query, name, value);
+    return;
+  }
+
+  if (style === "spaceDelimited" || style === "pipeDelimited") {
+    const items = Array.isArray(value) ? value : [value];
+    const separator = style === "spaceDelimited" ? " " : "|";
+    query.append(name, items.map(String).join(separator));
+    return;
+  }
+
+  for (const item of Array.isArray(value) ? value : [value]) {
+    query.append(name, String(item));
+  }
+}
+
+/**
+ * Serializes a flattened body payload as `application/x-www-form-urlencoded`,
+ * bracket-expanding nested objects/arrays (e.g. Stripe's own
+ * `metadata[key]=value` style) via `appendBracketPairs` — the same helper
+ * used for `deepObject`-styled query parameters, since both are the same
+ * underlying problem: serializing non-scalar values into a position that
+ * expects flat key/value pairs, not a JSON blob. `URLSearchParams` handles
+ * percent-encoding for free.
  */
 function encodeFormBody(payload: unknown): string {
   const params = new URLSearchParams();
@@ -190,14 +276,7 @@ function encodeFormBody(payload: unknown): string {
         continue;
       }
 
-      for (const item of Array.isArray(value) ? value : [value]) {
-        params.append(
-          key,
-          item !== null && typeof item === "object"
-            ? JSON.stringify(item)
-            : String(item),
-        );
-      }
+      appendBracketPairs(params, key, value);
     }
   }
 
