@@ -2947,6 +2947,24 @@ export class FastMCP<
   }
 
   #authenticate: Authenticate<T> | undefined;
+
+  /**
+   * In-flight `authenticate` result, keyed on the HTTP request it belongs to.
+   *
+   * `startHTTPServer` authenticates every request itself, and the `createServer`
+   * callback handed to it needs the same result to build the session. Both were
+   * calling the consumer's hook, so it ran twice for one request — observable
+   * whenever `authenticate` is not idempotent (a rate limiter charged from it
+   * spends each caller's budget at twice the intended rate).
+   *
+   * A `WeakMap` keyed on the request preserves per-request authentication (#182):
+   * a new request is a new object, so it authenticates again. Entries live exactly
+   * as long as the request.
+   */
+  #authInFlight = new WeakMap<
+    http.IncomingMessage,
+    Promise<null | T | undefined>
+  >();
   #honoApp = new Hono();
   #httpStreamServer: null | SSEServer = null;
   #logger: Logger;
@@ -3497,14 +3515,16 @@ export class FastMCP<
         );
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
-          ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
+          ...(this.#authenticate
+            ? { authenticate: this.#authenticateOncePerRequest }
+            : {}),
           cors: httpConfig.cors,
           createServer: async (request) => {
             let auth: T | undefined;
 
             if (this.#authenticate) {
               auth = this.#requireAuthenticated(
-                await this.#authenticate(request),
+                await this.#authenticateOncePerRequest(request),
               );
             }
 
@@ -3560,14 +3580,16 @@ export class FastMCP<
       } else {
         // Regular mode with session management
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
-          ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
+          ...(this.#authenticate
+            ? { authenticate: this.#authenticateOncePerRequest }
+            : {}),
           cors: httpConfig.cors,
           createServer: async (request) => {
             let auth: T | undefined;
 
             if (this.#authenticate) {
               auth = this.#requireAuthenticated(
-                await this.#authenticate(request),
+                await this.#authenticateOncePerRequest(request),
               );
             }
 
@@ -3652,6 +3674,36 @@ export class FastMCP<
    * Creates a new FastMCPSession instance with the current configuration.
    * Used both for regular sessions and stateless requests.
    */
+  /**
+   * `authenticate`, invoked at most once per HTTP request.
+   *
+   * The PROMISE is stored rather than the resolved value: the second caller can
+   * arrive before the first settles, and it must join that attempt rather than
+   * start a competing one — which also means a rejection is shared rather than
+   * re-derived.
+   */
+  #authenticateOncePerRequest = (
+    request: http.IncomingMessage,
+  ): Promise<null | T | undefined> => {
+    const authenticate = this.#authenticate;
+
+    if (!authenticate) {
+      throw new Error("authenticate is not configured");
+    }
+
+    const inFlight = this.#authInFlight.get(request);
+
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const result = authenticate(request);
+
+    this.#authInFlight.set(request, result);
+
+    return result;
+  };
+
   #createSession(
     auth?: T,
     sessionId?: string,
