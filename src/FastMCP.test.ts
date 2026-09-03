@@ -5061,19 +5061,19 @@ test("authentication failure handling: returns 401 with WWW-Authenticate even wh
   const port = await getRandomPort();
   let callCount = 0;
 
-  // Regression test for a session-mode (non-stateless) request where
-  // `authenticate()` is invoked twice for the same request -- once by the
-  // transport layer and once internally by FastMCP when building the
-  // session. If the second call reports a failure whose message doesn't
-  // happen to contain a magic keyword (e.g. "Authentication", "Token",
-  // "Unauthorized"), the response must still be 401, not a generic 500.
+  // Regression test for a session-mode (non-stateless) request whose
+  // `authenticate()` reports a failure with a message that doesn't happen to
+  // contain a magic keyword (e.g. "Authentication", "Token", "Unauthorized").
+  // The response must still be 401 carrying the `WWW-Authenticate` challenge,
+  // not a generic 500 and not a bare 401.
+  //
+  // This used to return `{ authenticated: true }` on the first call and the
+  // failure on the second, because `authenticate()` ran twice for one request.
+  // It now runs once, so the failure is reported on that single invocation --
+  // which is the same path, reached without depending on two calls disagreeing.
   const server = new FastMCP<{ authenticated: boolean; error?: string }>({
     authenticate: async () => {
       callCount += 1;
-
-      if (callCount === 1) {
-        return { authenticated: true };
-      }
 
       return { authenticated: false, error: "Access denied" };
     },
@@ -5114,6 +5114,9 @@ test("authentication failure handling: returns 401 with WWW-Authenticate even wh
       error?: { code?: number; message?: string };
     };
     expect(body.error?.message).toBe("Access denied");
+
+    // One request, one authentication.
+    expect(callCount).toBe(1);
   } finally {
     await server.stop();
   }

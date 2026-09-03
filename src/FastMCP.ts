@@ -3697,7 +3697,11 @@ export class FastMCP<
       return inFlight;
     }
 
-    const result = authenticate(request);
+    const result = Promise.resolve(authenticate(request)).then((auth) => {
+      this.#throwIfUnauthenticated(auth);
+
+      return auth;
+    });
 
     this.#authInFlight.set(request, result);
 
@@ -3709,20 +3713,7 @@ export class FastMCP<
     sessionId?: string,
     stateless = false,
   ): FastMCPSession<T> {
-    // Check if authentication failed
-    if (
-      auth &&
-      typeof auth === "object" &&
-      "authenticated" in auth &&
-      !(auth as { authenticated: unknown }).authenticated
-    ) {
-      const errorMessage =
-        "error" in auth &&
-        typeof (auth as { error: unknown }).error === "string"
-          ? (auth as { error: string }).error
-          : "Authentication failed";
-      throw this.#createUnauthorizedResponse(errorMessage);
-    }
+    this.#throwIfUnauthenticated(auth);
 
     const allowedTools = auth
       ? this.#tools.filter((tool) =>
@@ -4527,22 +4518,6 @@ export class FastMCP<
     }
   }
 
-  /**
-   * Rejects a failed authentication result before it can become a session.
-   *
-   * Authentication is REQUIRED whenever an `authenticate` function is
-   * configured. mcp-proxy gates the HTTP Stream endpoint before `createServer`
-   * runs, but it does not gate the SSE endpoint it serves at `/sse` by default:
-   * `handleSSERequest` never receives `authenticate`. Throwing here is what
-   * stops `/sse` from handing out a session — with access to every tool, since
-   * `#createSession` skips `canAccess` filtering when `auth` is falsy — to a
-   * client that `/mcp` would have answered with a 401.
-   *
-   * The falsy test matches mcp-proxy's own check so that both endpoints agree
-   * on what counts as a failed authentication. Returning a nullish value is the
-   * idiomatic way to signal failure, and is what the built-in OAuth
-   * `AuthProvider` does for a missing or invalid bearer token.
-   */
   #requireAuthenticated<TAuth>(auth: TAuth): NonNullable<TAuth> {
     if (!auth) {
       throw this.#createUnauthorizedResponse("Authentication required");
@@ -4566,6 +4541,48 @@ export class FastMCP<
   #resourceTemplatesListChanged(templates: InputResourceTemplate<T>[]) {
     for (const session of this.#sessions) {
       session.resourceTemplatesListChanged(templates);
+    }
+  }
+
+  /**
+   * Rejects a failed authentication result before it can become a session.
+   *
+   * Authentication is REQUIRED whenever an `authenticate` function is
+   * configured. mcp-proxy gates the HTTP Stream endpoint before `createServer`
+   * runs, but it does not gate the SSE endpoint it serves at `/sse` by default:
+   * `handleSSERequest` never receives `authenticate`. Throwing here is what
+   * stops `/sse` from handing out a session — with access to every tool, since
+   * `#createSession` skips `canAccess` filtering when `auth` is falsy — to a
+   * client that `/mcp` would have answered with a 401.
+   *
+   * The falsy test matches mcp-proxy's own check so that both endpoints agree
+   * on what counts as a failed authentication. Returning a nullish value is the
+   * idiomatic way to signal failure, and is what the built-in OAuth
+   * `AuthProvider` does for a missing or invalid bearer token.
+   */
+  /**
+   * Rejects the `{ authenticated: false }` envelope with a 401 that carries the
+   * `WWW-Authenticate` challenge.
+   *
+   * This has to run on FastMCP's side of the boundary. `startHTTPServer` refuses
+   * the same envelope, but it can only build a challenge when the consumer
+   * configured `oauth`, so a server without one would answer 401 with no
+   * `WWW-Authenticate` header at all.
+   */
+  #throwIfUnauthenticated(auth: unknown): void {
+    if (
+      auth &&
+      typeof auth === "object" &&
+      "authenticated" in auth &&
+      !(auth as { authenticated: unknown }).authenticated
+    ) {
+      const errorMessage =
+        "error" in auth &&
+        typeof (auth as { error: unknown }).error === "string"
+          ? (auth as { error: string }).error
+          : "Authentication failed";
+
+      throw this.#createUnauthorizedResponse(errorMessage);
     }
   }
 
