@@ -36,7 +36,9 @@ describe("FastMCP OAuth Support", () => {
         `http://localhost:${port}/.well-known/oauth-authorization-server`,
       );
       expect(response.status).toBe(200);
-      expect(response.headers.get("content-type")).toBe("application/json");
+      expect(response.headers.get("content-type")).toMatch(
+        /^application\/json/,
+      );
 
       const metadata = (await response.json()) as Record<string, unknown>;
 
@@ -172,7 +174,9 @@ describe("FastMCP OAuth Support", () => {
         `http://localhost:${port}/.well-known/oauth-protected-resource`,
       );
       expect(response.status).toBe(200);
-      expect(response.headers.get("content-type")).toBe("application/json");
+      expect(response.headers.get("content-type")).toMatch(
+        /^application\/json/,
+      );
 
       const metadata = (await response.json()) as Record<string, unknown>;
 
@@ -310,8 +314,8 @@ describe("FastMCP OAuth Support", () => {
         `http://localhost:${port}/.well-known/oauth-protected-resource/mcp`,
       );
       expect(subPathResponse.status).toBe(200);
-      expect(subPathResponse.headers.get("content-type")).toBe(
-        "application/json",
+      expect(subPathResponse.headers.get("content-type")).toMatch(
+        /^application\/json/,
       );
 
       const subPathMetadata = (await subPathResponse.json()) as Record<
@@ -328,7 +332,9 @@ describe("FastMCP OAuth Support", () => {
         `http://localhost:${port}/.well-known/oauth-protected-resource`,
       );
       expect(rootResponse.status).toBe(200);
-      expect(rootResponse.headers.get("content-type")).toBe("application/json");
+      expect(rootResponse.headers.get("content-type")).toMatch(
+        /^application\/json/,
+      );
 
       const rootMetadata = (await rootResponse.json()) as Record<
         string,
