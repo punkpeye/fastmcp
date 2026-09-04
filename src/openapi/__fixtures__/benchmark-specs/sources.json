@@ -2,11 +2,11 @@
   "_comment": "Large real-world specs for fromOpenAPI.benchmark.test.ts. Not vendored (~20MB combined); fetched on demand by the benchmark and pinned by sha256 so a run is still reproducible. Re-pin with `pnpm test:openapi:refresh` when a spec legitimately changes upstream.",
   "specs": {
     "box.json": {
-      "sha256": "e6f5854703ec94fb2a27fc67a5e12db0e00d33c04a0a8959b992c1f87b98f542",
+      "sha256": "0f8794edec1caf44761777f791b36388ec997f4220233a1a0166712e0d3b0a06",
       "url": "https://raw.githubusercontent.com/box/box-openapi/main/openapi.json"
     },
     "posthog.yaml": {
-      "sha256": "ff8f2c8d4af2f3fbc1556200716307f21c27e282293322aefdbec10b94140a5f",
+      "sha256": "69274094e9e9d8291730f544c056baf0255cea23024a0cae45edfb5d929d2143",
       "url": "https://app.posthog.com/api/schema/"
     },
     "slack.json": {

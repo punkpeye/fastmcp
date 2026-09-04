@@ -163,6 +163,63 @@ describe("resolveCimdClient", () => {
     expect(client).toBeNull();
   });
 
+  it("cancels the response body on a non-2xx response", async () => {
+    let cancelled = false;
+    const body = new ReadableStream({
+      cancel() {
+        cancelled = true;
+      },
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode("ignored"));
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status: 404 })),
+    );
+
+    const client = await resolveCimdClient(
+      CLIENT_ID,
+      REDIRECT_URI,
+      alwaysAllow,
+    );
+
+    expect(client).toBeNull();
+    // Node will not free the socket until the unread body is cancelled.
+    expect(cancelled).toBe(true);
+  });
+
+  it("cancels the response body when rejecting via Content-Length", async () => {
+    let cancelled = false;
+    const body = new ReadableStream({
+      cancel() {
+        cancelled = true;
+      },
+      pull() {
+        throw new Error("body should not be read");
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(body, {
+            headers: { "content-length": "999999" },
+            status: 200,
+          }),
+      ),
+    );
+
+    const client = await resolveCimdClient(
+      CLIENT_ID,
+      REDIRECT_URI,
+      alwaysAllow,
+    );
+
+    expect(client).toBeNull();
+    expect(cancelled).toBe(true);
+  });
+
   it("rejects a response body that is not valid JSON", async () => {
     mockFetchOnce("not json");
 
