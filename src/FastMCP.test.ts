@@ -5075,6 +5075,7 @@ test("authentication failure handling: returns 401 with WWW-Authenticate even wh
     oauth: {
       enabled: true,
       protectedResource: {
+        authorizationServers: ["https://auth.example.com"],
         resource: "mcp://test-server",
       },
     },
