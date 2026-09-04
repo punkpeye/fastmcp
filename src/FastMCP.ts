@@ -3367,35 +3367,6 @@ export class FastMCP<
   }
 
   /**
-   * mcp-proxy only emits `WWW-Authenticate` on 401 when `oauth` is set.
-   * Custom `authenticate()` still needs that challenge with no OAuth metadata
-   * configured (RFC 7235). Pass an empty oauth object in that case so the
-   * header is present without advertising a resource_metadata URL that 404s.
-   */
-  #httpStreamOAuthConfig(): {
-    oauth?: {
-      protectedResource?: { resource: string };
-    };
-  } {
-    const resource = this.#options.oauth?.enabled
-      ? this.#options.oauth.protectedResource?.resource
-      : undefined;
-    if (resource) {
-      return {
-        oauth: {
-          protectedResource: {
-            resource,
-          },
-        },
-      };
-    }
-    if (this.#authenticate) {
-      return { oauth: {} };
-    }
-    return {};
-  }
-
-  /**
    * Starts the server.
    */
   public async start(
@@ -4326,6 +4297,35 @@ export class FastMCP<
       }
     }
   };
+
+  /**
+   * mcp-proxy only emits `WWW-Authenticate` on 401 when `oauth` is set.
+   * Custom `authenticate()` still needs that challenge with no OAuth metadata
+   * configured (RFC 7235). Pass an empty oauth object in that case so the
+   * header is present without advertising a resource_metadata URL that 404s.
+   */
+  #httpStreamOAuthConfig(): {
+    oauth?: {
+      protectedResource?: { resource: string };
+    };
+  } {
+    const resource = this.#options.oauth?.enabled
+      ? this.#options.oauth.protectedResource?.resource
+      : undefined;
+    if (resource) {
+      return {
+        oauth: {
+          protectedResource: {
+            resource,
+          },
+        },
+      };
+    }
+    if (this.#authenticate) {
+      return { oauth: {} };
+    }
+    return {};
+  }
 
   /**
    * On `httpStream`, `authenticate` is handed to both mcp-proxy (which calls it
