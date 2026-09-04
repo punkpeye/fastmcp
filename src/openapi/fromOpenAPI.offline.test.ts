@@ -30,6 +30,60 @@ const WIDGETS_SPEC = {
   servers: [{ url: "https://api.example.com" }],
 };
 
+const WIDGETS_TYPED_SPEC = {
+  info: { title: "Widgets API", version: "1.0.0" },
+  openapi: "3.0.3",
+  paths: {
+    "/widgets/typed": {
+      get: {
+        operationId: "listTypedWidgets",
+        responses: {
+          200: {
+            content: {
+              "application/json": {
+                schema: { items: { type: "string" }, type: "array" },
+              },
+            },
+            description: "OK",
+          },
+        },
+      },
+      post: {
+        operationId: "createTypedWidget",
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { name: { type: "string" } },
+                required: ["name"],
+                type: "object",
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            content: {
+              "application/json": {
+                schema: {
+                  properties: {
+                    id: { type: "string" },
+                    name: { type: "string" },
+                  },
+                  required: ["id", "name"],
+                  type: "object",
+                },
+              },
+            },
+            description: "OK",
+          },
+        },
+      },
+    },
+  },
+  servers: [{ url: "https://api.example.com" }],
+};
+
 const WIDGETS_READ_SPEC = {
   info: { title: "Widgets API", version: "1.0.0" },
   openapi: "3.0.3",
@@ -248,4 +302,87 @@ test("a FastAPI-style form body (`$ref` to a component schema) becomes a tool wi
     "application/x-www-form-urlencoded",
   );
   expect(new URLSearchParams(init!.body as string).get("username")).toBe("ann");
+});
+
+test("outputSchema: a schema-matching JSON response returns structuredContent", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () =>
+      new Response(JSON.stringify({ id: "w1", name: "sprocket" }), {
+        headers: { "content-type": "application/json" },
+      }),
+  );
+
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    spec: WIDGETS_TYPED_SPEC,
+  });
+  const client = await connect(server);
+
+  const { tools } = await client.listTools();
+  expect(
+    tools.find((tool) => tool.name === "createTypedWidget")?.outputSchema,
+  ).toBeDefined();
+
+  const result = await client.callTool({
+    arguments: { name: "sprocket" },
+    name: "createTypedWidget",
+  });
+
+  expect(result.isError).toBeFalsy();
+  expect(result.structuredContent).toEqual({ id: "w1", name: "sprocket" });
+});
+
+test("outputSchema: a real response that doesn't match the wired schema falls back to plain text, not an error", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () =>
+      new Response(JSON.stringify({ unexpected: true }), {
+        headers: { "content-type": "application/json" },
+      }),
+  );
+
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    spec: WIDGETS_TYPED_SPEC,
+  });
+  const client = await connect(server);
+
+  const result = await client.callTool({
+    arguments: { name: "sprocket" },
+    name: "createTypedWidget",
+  });
+
+  expect(result.isError).toBeFalsy();
+  expect(result.structuredContent).toBeUndefined();
+  expect((result.content as { text: string }[])[0].text).toContain(
+    "unexpected",
+  );
+});
+
+test("outputSchema: an array-shaped response schema is never wired, and a real array response stays plain text", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () =>
+      new Response(JSON.stringify(["a", "b"]), {
+        headers: { "content-type": "application/json" },
+      }),
+  );
+
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    spec: WIDGETS_TYPED_SPEC,
+  });
+  const client = await connect(server);
+
+  const { tools } = await client.listTools();
+  expect(
+    tools.find((tool) => tool.name === "listTypedWidgets")?.outputSchema,
+  ).toBeUndefined();
+
+  const result = await client.callTool({
+    arguments: {},
+    name: "listTypedWidgets",
+  });
+
+  expect(result.isError).toBeFalsy();
+  expect(result.structuredContent).toBeUndefined();
+  expect((result.content as { text: string }[])[0].text).toContain("a");
 });

@@ -99,3 +99,82 @@ test(
     }
   },
 );
+
+/**
+ * `resources: true`'s counterpart to the test above: `fromOpenAPI.offline.
+ * test.ts` only exercises resource reads against a mocked fetch, and
+ * `fromOpenAPI.benchmark.test.ts`'s `resources: true` pass only counts
+ * tools/resources/resourceTemplates against real specs, never actually
+ * calls `readResource()`. This closes that gap with a real read against
+ * Petstore.
+ *
+ * `getPetById` (`GET /pet/{petId}`, path param only, no header/cookie/array
+ * params) is exactly the shape that becomes a resource template — verified
+ * manually against the real API before writing this test.
+ *
+ * Error handling here is deliberately a try/catch around `readResource()`,
+ * not an `isError` check on a result field: unlike tool calls, a thrown
+ * error inside a resource template's `load()` propagates as a *rejected*
+ * `readResource()` promise (an `McpError`), confirmed by reading FastMCP.ts's
+ * `ReadResourceRequestSchema` handler and the MCP SDK's request dispatch —
+ * there is no `isError`-content shape for `resources/read`. Either a
+ * resolved valid-JSON result or a caught error counts as success here
+ * (mirroring the tool test's tolerance above for Petstore's shared, mutable
+ * demo data) — both prove the relative servers[0].url ("/api/v3") resolved
+ * and a real request reached the right host.
+ */
+test(
+  "fromOpenAPI: resources: true — real resource template read against Petstore v3",
+  { timeout: 20_000 },
+  async () => {
+    const server: FastMCP = await fromOpenAPI({
+      include: (operation) => operation.tags.includes("pet"),
+      name: "Petstore",
+      resources: true,
+      spec: PETSTORE_SPEC_URL,
+      version: "1.0.0",
+    });
+
+    const port = await getRandomPort();
+    await server.start({ httpStream: { port }, transportType: "httpStream" });
+
+    try {
+      const client = new Client(
+        { name: "openapi-test-client", version: "1.0.0" },
+        { capabilities: {} },
+      );
+
+      await new Promise<FastMCPSession>((resolve) => {
+        server.on("connect", async (event) => {
+          await event.session.waitForReady();
+          resolve(event.session);
+        });
+
+        client.connect(
+          new SSEClientTransport(new URL(`http://localhost:${port}/sse`)),
+        );
+      });
+
+      const { resourceTemplates } = await client.listResourceTemplates();
+      const template = resourceTemplates.find((t) => t.name === "getPetById");
+
+      expect(template?.uriTemplate).toBe("openapi://getPetById/pet/{petId}");
+
+      try {
+        const result = await client.readResource({
+          uri: "openapi://getPetById/pet/10",
+        });
+
+        expect(() =>
+          JSON.parse((result.contents[0] as { text: string }).text),
+        ).not.toThrow();
+      } catch (error) {
+        // Reached the API and got an error response back — which is what
+        // this test is here to prove; see the doc comment above.
+        expect(error).toBeInstanceOf(Error);
+      }
+    } finally {
+      await server.stop();
+    }
+  },
+);

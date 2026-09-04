@@ -6,7 +6,7 @@
 // growth on every clone of this repo for files nobody reads in review. The
 // hash pin is what keeps a benchmark run reproducible without committing
 // them — a spec that drifts upstream fails loudly rather than silently
-// changing what the suite tests.
+// changing what the suite tests. One exception: see UNSTABLE_SPECS below.
 //
 // Shared by fromOpenAPI.benchmark.test.ts (fetch if missing) and
 // scripts/refresh-openapi-benchmark-specs.mjs (re-fetch and re-pin).
@@ -30,6 +30,20 @@ export async function readManifest() {
 export function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
 }
+
+/**
+ * Specs whose upstream content is known to be transiently unstable — not
+ * "changed since we last pinned it," but genuinely different on back-to-back
+ * fetches seconds apart, apparently served from different backend instances
+ * or during a deploy. PostHog's `/api/schema/` was observed returning three
+ * different (each individually valid) responses within a few minutes, while
+ * every GitHub-hosted spec here has only ever changed via a real upstream
+ * update. A byte-for-byte hash isn't a meaningful signal for these, so a
+ * mismatch is a warning, not a hard failure that blocks the whole suite —
+ * `fromOpenAPI.benchmark.test.ts`'s own assertions are still what actually
+ * verifies whatever gets fetched converts correctly.
+ */
+const UNSTABLE_SPECS = new Set(["posthog.yaml"]);
 
 /**
  * Slack's own example OAuth responses embed realistic-looking (but fake)
@@ -81,12 +95,21 @@ export async function ensureBenchmarkSpecs() {
     const actual = sha256(text);
 
     if (actual !== expected) {
-      throw new Error(
-        `${file} does not match its pinned hash.\n` +
-          `  expected ${expected}\n  actual   ${actual}\n  from     ${url}\n` +
-          "The spec changed upstream. Re-pin it with `pnpm test:openapi:refresh` " +
-          "and commit the updated sources.json.",
-      );
+      if (UNSTABLE_SPECS.has(file)) {
+        console.warn(
+          `${file} does not match its pinned hash (expected ${expected}, got ${actual}) — ` +
+            "this spec's upstream is known to be transiently unstable, so proceeding with " +
+            "the freshly-fetched content rather than failing the run. Re-pin with " +
+            "`pnpm test:openapi:refresh` if this persists across runs.",
+        );
+      } else {
+        throw new Error(
+          `${file} does not match its pinned hash.\n` +
+            `  expected ${expected}\n  actual   ${actual}\n  from     ${url}\n` +
+            "The spec changed upstream. Re-pin it with `pnpm test:openapi:refresh` " +
+            "and commit the updated sources.json.",
+        );
+      }
     }
 
     await writeFile(target, text);

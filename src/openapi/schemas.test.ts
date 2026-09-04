@@ -1,8 +1,16 @@
 import { expect, test } from "vitest";
 
-import type { BundledOpenApiDocument, HttpRoute } from "./types.js";
+import type {
+  BundledOpenApiDocument,
+  HttpRoute,
+  OpenApiSchema,
+} from "./types.js";
 
-import { buildFlatSchema, buildSharedDefs } from "./schemas.js";
+import {
+  buildFlatSchema,
+  buildOutputSchema,
+  buildSharedDefs,
+} from "./schemas.js";
 
 function route(overrides: Partial<HttpRoute>): HttpRoute {
   return {
@@ -424,7 +432,7 @@ test("a component schema named `nullable` survives, while a real `nullable: true
   });
 });
 
-test("`example`/`default` payloads are instance data, not schemas, and are passed through verbatim", () => {
+test("`default` payload is instance data, not a schema, and is passed through verbatim", () => {
   const { flatSchema } = buildFlatSchema(
     route({
       requestBody: {
@@ -434,7 +442,6 @@ test("`example`/`default` payloads are instance data, not schemas, and are passe
               properties: {
                 config: {
                   default: { $ref: "#/components/schemas/X", nullable: 1 },
-                  example: { nullable: "yes" },
                   type: "object",
                 },
               },
@@ -449,9 +456,119 @@ test("`example`/`default` payloads are instance data, not schemas, and are passe
 
   expect(flatSchema.properties!.config).toEqual({
     default: { $ref: "#/components/schemas/X", nullable: 1 },
-    example: { nullable: "yes" },
     type: "object",
   });
+});
+
+const AMBIGUOUS_EXAMPLE = { $id: "01234500-12f1-1234-aa12-b1d234cb567e" };
+
+test("`example`/`examples` are dropped entirely from an outputSchema, not just left unwalked — a real sample payload can coincidentally contain JSON-Schema-keyword-shaped keys (e.g. Box's own `$id` field) that would otherwise confuse AJV's $id discovery", () => {
+  const outputSchema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                example: AMBIGUOUS_EXAMPLE,
+                examples: [AMBIGUOUS_EXAMPLE],
+                type: "object",
+              },
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(outputSchema).toEqual({ type: "object" });
+});
+
+test("the `$defs` an outputSchema embeds are stripped too — the shared defs are built once and reused by the input path, so the strip has to happen where they are embedded", () => {
+  const outputSchema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { item: { $ref: "#/components/schemas/Item" } },
+                type: "object",
+              },
+            },
+          },
+        },
+      },
+    }),
+    {
+      Item: { example: AMBIGUOUS_EXAMPLE, type: "object" },
+    },
+  );
+
+  expect(outputSchema!.$defs).toEqual({ Item: { type: "object" } });
+});
+
+test("a tool's *input* schema keeps its examples — they are useful signal for a model filling in arguments, and the AJV collision has only ever been observed on the output path", () => {
+  const { flatSchema } = buildFlatSchema(
+    route({
+      parameters: [
+        {
+          in: "query",
+          name: "metadata",
+          schema: { example: AMBIGUOUS_EXAMPLE, type: "object" },
+        },
+      ],
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties!.metadata).toEqual({
+    example: AMBIGUOUS_EXAMPLE,
+    type: "object",
+  });
+});
+
+test("a property literally named `example` survives in an outputSchema — inside `properties` it is a field name, not the annotation keyword", () => {
+  const outputSchema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { example: { type: "string" } },
+                type: "object",
+              },
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(outputSchema!.properties).toEqual({ example: { type: "string" } });
+});
+
+test("a property literally named `example` (inside `properties`, a schemaMap) is a field name, not the annotation keyword, and survives", () => {
+  const { flatSchema } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              properties: { example: { type: "string" } },
+              type: "object",
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties!.example).toEqual({ type: "string" });
 });
 
 test("a form-urlencoded body declared as a `$ref` to a component object schema is resolved and flattened (FastAPI's `Body_<operation>` shape)", () => {
@@ -578,4 +695,318 @@ test("a form-urlencoded `$ref` that can't be resolved is reported unsupported ra
   );
 
   expect(unsupportedBodyContentType).toBe("application/x-www-form-urlencoded");
+});
+
+test("a query parameter's `style` is threaded into its parameterMap entry", () => {
+  const { parameterMap } = buildFlatSchema(
+    route({
+      parameters: [
+        {
+          in: "query",
+          name: "created",
+          schema: { type: "object" },
+          style: "deepObject",
+        },
+      ],
+    }),
+    undefined,
+  );
+
+  expect(parameterMap.created).toEqual({
+    in: "query",
+    name: "created",
+    style: "deepObject",
+  });
+});
+
+test("buildOutputSchema picks the first 2xx application/json response schema", () => {
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { id: { type: "integer" } },
+                type: "object",
+              },
+            },
+          },
+        },
+        "400": {
+          content: {
+            "application/json": { schema: { type: "object" } },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(schema).toEqual({
+    properties: { id: { type: "integer" } },
+    type: "object",
+  });
+});
+
+test("buildOutputSchema skips a response that's explicitly non-object (e.g. an array)", () => {
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { items: { type: "string" }, type: "array" },
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(schema).toBeUndefined();
+});
+
+test("buildOutputSchema resolves a bare $ref to the object it points to, rather than advertising an unresolved $ref", () => {
+  // The MCP SDK's client-side tools/list validation requires an advertised
+  // outputSchema.type to literally be "object" — an unresolved bare $ref
+  // (no top-level type) fails that check and breaks tools/list for every
+  // tool in the response, not just this one. A response schema being a
+  // bare $ref (e.g. `{ $ref: "#/components/schemas/Pet" }`) is extremely
+  // common, so this has to resolve it, not just accept or reject it as-is.
+  const document: BundledOpenApiDocument = {
+    components: { schemas: { Pet: { type: "object" } } },
+  };
+
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Pet" },
+            },
+          },
+        },
+      },
+    }),
+    buildSharedDefs(document),
+  );
+
+  expect(schema).toEqual({ type: "object" });
+});
+
+test("buildOutputSchema still attaches $defs when the resolved object itself references another component", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: {
+        Pet: {
+          properties: { tag: { $ref: "#/components/schemas/Tag" } },
+          type: "object",
+        },
+        Tag: { type: "string" },
+      },
+    },
+  };
+
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Pet" },
+            },
+          },
+        },
+      },
+    }),
+    buildSharedDefs(document),
+  );
+
+  expect(schema).toEqual({
+    $defs: { Tag: { type: "string" } },
+    properties: { tag: { $ref: "#/$defs/Tag" } },
+    type: "object",
+  });
+});
+
+test("buildOutputSchema skips a response whose $ref doesn't resolve to an object (or doesn't resolve at all)", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: { PetIds: { items: { type: "integer" }, type: "array" } },
+    },
+  };
+
+  const arraySchema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PetIds" },
+            },
+          },
+        },
+      },
+    }),
+    buildSharedDefs(document),
+  );
+
+  expect(arraySchema).toBeUndefined();
+
+  const danglingSchema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Missing" },
+            },
+          },
+        },
+      },
+    }),
+    buildSharedDefs(document),
+  );
+
+  expect(danglingSchema).toBeUndefined();
+});
+
+test("buildOutputSchema does not set additionalProperties: false — an undocumented extra field is the most common form of drift", () => {
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { id: { type: "integer" } },
+                type: "object",
+              },
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(schema?.additionalProperties).toBeUndefined();
+});
+
+test("buildOutputSchema returns undefined when there's no 2xx response with a JSON schema", () => {
+  const schema = buildOutputSchema(
+    route({ responses: { "204": { content: {} } } }),
+    undefined,
+  );
+
+  expect(schema).toBeUndefined();
+});
+
+test("buildOutputSchema normalizes an inline nullable object response to the literal type 'object', not an array", () => {
+  // The MCP SDK's tools/list validation requires outputSchema.type to be
+  // literally the string "object" — rewriteComponentRefs folds `nullable:
+  // true` into `type: ["object", "null"]`, which would fail that check
+  // (breaking tools/list for every tool, not just this one) if the
+  // object-shape check ran before normalization instead of after.
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                nullable: true,
+                properties: { id: { type: "string" } },
+                type: "object",
+              },
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(schema?.type).toBe("object");
+});
+
+test("buildOutputSchema normalizes a $ref to an already-nullable shared def to the literal type 'object'", () => {
+  // buildSharedDefs already normalizes nullable when building $defs, so a
+  // $ref target arrives with type: ["object", "null"] rather than a
+  // `nullable` keyword to fold — the same normalization has to apply here
+  // too, not just to inline schemas.
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: {
+        Pet: {
+          nullable: true,
+          properties: { id: { type: "string" } },
+          type: "object",
+        },
+      },
+    },
+  };
+
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Pet" },
+            },
+          },
+        },
+      },
+    }),
+    buildSharedDefs(document),
+  );
+
+  expect(schema?.type).toBe("object");
+});
+
+test("buildOutputSchema skips wiring when the schema transitively references too many definitions", () => {
+  // Real "core" response objects (Stripe's Charge/Customer/PaymentIntent)
+  // routinely reference hundreds of other types this way — measured
+  // directly, the median Stripe operation's output schema pulled in 868
+  // definitions, and the full tools/list response across all 588
+  // operations would have been ~320MB. A schema built from a document with
+  // 60 mutually-independent, transitively-reachable defs exercises the cap
+  // without needing a fixture that large.
+  const schemas: Record<string, OpenApiSchema> = {
+    Root: {
+      properties: { child: { $ref: "#/components/schemas/Def0" } },
+      type: "object",
+    },
+  };
+
+  for (let i = 0; i < 60; i++) {
+    schemas[`Def${i}`] = {
+      properties:
+        i < 59 ? { next: { $ref: `#/components/schemas/Def${i + 1}` } } : {},
+      type: "object",
+    };
+  }
+
+  const document: BundledOpenApiDocument = { components: { schemas } };
+
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Root" },
+            },
+          },
+        },
+      },
+    }),
+    buildSharedDefs(document),
+  );
+
+  expect(schema).toBeUndefined();
 });
