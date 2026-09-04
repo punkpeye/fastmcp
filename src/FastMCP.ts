@@ -3525,16 +3525,7 @@ export class FastMCP<
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
           host: httpConfig.host,
-          ...(this.#options.oauth?.enabled &&
-          this.#options.oauth.protectedResource?.resource
-            ? {
-                oauth: {
-                  protectedResource: {
-                    resource: this.#options.oauth.protectedResource.resource,
-                  },
-                },
-              }
-            : {}),
+          ...this.#httpStreamOAuthConfig(),
           // In stateless mode, we don't track sessions
           onClose: async () => {
             // No session tracking in stateless mode
@@ -3591,16 +3582,7 @@ export class FastMCP<
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
           host: httpConfig.host,
-          ...(this.#options.oauth?.enabled &&
-          this.#options.oauth.protectedResource?.resource
-            ? {
-                oauth: {
-                  protectedResource: {
-                    resource: this.#options.oauth.protectedResource.resource,
-                  },
-                },
-              }
-            : {}),
+          ...this.#httpStreamOAuthConfig(),
           onClose: async (session) => {
             const sessionIndex = this.#sessions.indexOf(session);
 
@@ -4315,6 +4297,35 @@ export class FastMCP<
       }
     }
   };
+
+  /**
+   * mcp-proxy only emits `WWW-Authenticate` on 401 when `oauth` is set.
+   * Custom `authenticate()` still needs that challenge with no OAuth metadata
+   * configured (RFC 7235). Pass an empty oauth object in that case so the
+   * header is present without advertising a resource_metadata URL that 404s.
+   */
+  #httpStreamOAuthConfig(): {
+    oauth?: {
+      protectedResource?: { resource: string };
+    };
+  } {
+    const resource = this.#options.oauth?.enabled
+      ? this.#options.oauth.protectedResource?.resource
+      : undefined;
+    if (resource) {
+      return {
+        oauth: {
+          protectedResource: {
+            resource,
+          },
+        },
+      };
+    }
+    if (this.#authenticate) {
+      return { oauth: {} };
+    }
+    return {};
+  }
 
   /**
    * On `httpStream`, `authenticate` is handed to both mcp-proxy (which calls it

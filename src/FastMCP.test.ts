@@ -4671,6 +4671,7 @@ test("authentication failure handling: should throw error when auth.authenticate
       error?: { code?: number; message?: string };
     };
     expect(body.error?.message).toContain("Invalid JWT token");
+    expect(response.headers.get("WWW-Authenticate")).toContain("Bearer");
   } finally {
     await server.stop();
   }
