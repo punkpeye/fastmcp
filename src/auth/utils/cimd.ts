@@ -6,8 +6,9 @@
  * of requiring a prior POST /oauth/register call.
  */
 
-import { cancelResponseBody } from "../../cancelResponseBody.js";
 import type { DCRClientMetadata, ProxyDCRClient } from "../types.js";
+
+import { cancelResponseBody } from "../../cancelResponseBody.js";
 
 const CIMD_FETCH_TIMEOUT_MS = 5000;
 
