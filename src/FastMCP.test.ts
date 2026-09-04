@@ -5059,25 +5059,25 @@ test("authentication failure handling: should not create session for authenticat
 // See https://github.com/punkpeye/fastmcp/issues/180
 test("authentication failure handling: returns 401 with WWW-Authenticate even when the error message has no auth-related keywords", async () => {
   const port = await getRandomPort();
-  let callCount = 0;
 
-  // Regression test for a session-mode (non-stateless) request where
-  // `authenticate()` is invoked twice for the same request -- once by the
-  // transport layer and once internally by FastMCP when building the
-  // session. If the second call reports a failure whose message doesn't
-  // happen to contain a magic keyword (e.g. "Authentication", "Token",
-  // "Unauthorized"), the response must still be 401, not a generic 500.
+  // Regression test: an `authenticate()` that reports failure as
+  // `{ authenticated: false, error }` must yield a 401 (never a generic 500)
+  // whose message is surfaced verbatim, even when it contains none of the
+  // keywords (e.g. "Authentication", "Token", "Unauthorized") that
+  // transport-layer heuristics look for. mcp-proxy's per-request gate rejects
+  // the failure before the session is built, and with a protected-resource
+  // configured it emits the RFC 9728 `WWW-Authenticate: Bearer` challenge.
   const server = new FastMCP<{ authenticated: boolean; error?: string }>({
     authenticate: async () => {
-      callCount += 1;
-
-      if (callCount === 1) {
-        return { authenticated: true };
-      }
-
       return { authenticated: false, error: "Access denied" };
     },
     name: "Test server",
+    oauth: {
+      enabled: true,
+      protectedResource: {
+        resource: "mcp://test-server",
+      },
+    },
     version: "1.0.0",
   });
 
