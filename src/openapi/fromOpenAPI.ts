@@ -207,7 +207,7 @@ function registerResource(
 async function resolveToolResult(
   result: ExecuteRequestResult,
   outputSchema: ReturnType<typeof jsonSchemaAdapter> | undefined,
-): Promise<string | unknown> {
+): Promise<unknown> {
   const { json, text } = result;
 
   if (

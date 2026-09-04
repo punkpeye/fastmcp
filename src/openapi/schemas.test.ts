@@ -460,25 +460,95 @@ test("`default` payload is instance data, not a schema, and is passed through ve
   });
 });
 
-test("`example`/`examples` are dropped entirely, not just left unwalked — a real sample payload can coincidentally contain JSON-Schema-keyword-shaped keys (e.g. Box's own `$id` field) that would otherwise confuse AJV's $id discovery", () => {
+const AMBIGUOUS_EXAMPLE = { $id: "01234500-12f1-1234-aa12-b1d234cb567e" };
+
+test("`example`/`examples` are dropped entirely from an outputSchema, not just left unwalked — a real sample payload can coincidentally contain JSON-Schema-keyword-shaped keys (e.g. Box's own `$id` field) that would otherwise confuse AJV's $id discovery", () => {
+  const outputSchema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                example: AMBIGUOUS_EXAMPLE,
+                examples: [AMBIGUOUS_EXAMPLE],
+                type: "object",
+              },
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(outputSchema).toEqual({ type: "object" });
+});
+
+test("the `$defs` an outputSchema embeds are stripped too — the shared defs are built once and reused by the input path, so the strip has to happen where they are embedded", () => {
+  const outputSchema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { item: { $ref: "#/components/schemas/Item" } },
+                type: "object",
+              },
+            },
+          },
+        },
+      },
+    }),
+    {
+      Item: { example: AMBIGUOUS_EXAMPLE, type: "object" },
+    },
+  );
+
+  expect(outputSchema!.$defs).toEqual({ Item: { type: "object" } });
+});
+
+test("a tool's *input* schema keeps its examples — they are useful signal for a model filling in arguments, and the AJV collision has only ever been observed on the output path", () => {
   const { flatSchema } = buildFlatSchema(
     route({
       parameters: [
         {
           in: "query",
           name: "metadata",
-          schema: {
-            example: { $id: "01234500-12f1-1234-aa12-b1d234cb567e" },
-            examples: [{ $id: "01234500-12f1-1234-aa12-b1d234cb567e" }],
-            type: "object",
-          },
+          schema: { example: AMBIGUOUS_EXAMPLE, type: "object" },
         },
       ],
     }),
     undefined,
   );
 
-  expect(flatSchema.properties!.metadata).toEqual({ type: "object" });
+  expect(flatSchema.properties!.metadata).toEqual({
+    example: AMBIGUOUS_EXAMPLE,
+    type: "object",
+  });
+});
+
+test("a property literally named `example` survives in an outputSchema — inside `properties` it is a field name, not the annotation keyword", () => {
+  const outputSchema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { example: { type: "string" } },
+                type: "object",
+              },
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(outputSchema!.properties).toEqual({ example: { type: "string" } });
 });
 
 test("a property literally named `example` (inside `properties`, a schemaMap) is a field name, not the annotation keyword, and survives", () => {

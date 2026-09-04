@@ -124,17 +124,16 @@ export interface HttpRoute {
 export interface OpenApiParameter {
   deprecated?: boolean;
   description?: string;
+  in: ParameterLocation;
+  name: string;
+  required?: boolean;
+  schema?: OpenApiSchema;
   /**
    * Only meaningful for `in: "query"`. `"deepObject"`, `"spaceDelimited"`,
    * and `"pipeDelimited"` get dedicated serialization in requestBuilder.ts;
    * anything else (including unset, which defaults to `"form"` per the
    * OpenAPI spec) uses the default repeated-key serialization.
    */
-  explode?: boolean;
-  in: ParameterLocation;
-  name: string;
-  required?: boolean;
-  schema?: OpenApiSchema;
   style?: string;
 }
 

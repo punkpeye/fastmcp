@@ -36,8 +36,12 @@ const DATA_KEYS = new Set(["const", "default", "enum", "example", "examples"]);
  * these are documentation rather than schema, and throws
  * ("reference ... resolves to more than one schema") on the collision.
  * These keys carry zero validation meaning, so dropping them removes the
- * only thing AJV could misinterpret this way — and shrinks the schema
- * advertised to clients besides.
+ * only thing AJV could misinterpret this way.
+ *
+ * Stripping is opt-in (`stripExamples`) and only `buildOutputSchema` opts
+ * in. Tool *input* schemas keep their examples: they are useful signal for
+ * a model filling in arguments, and the collision has never been observed
+ * on that path — Box's input schemas compile fine on `main` today.
  */
 const STRIP_KEYS = new Set(["example", "examples"]);
 
@@ -192,6 +196,8 @@ export function buildSharedDefs(
 
 const SUCCESS_STATUS_PATTERN = /^2\d\d$/;
 
+const MAX_OUTPUT_SCHEMA_DEFS = 50;
+
 /**
  * Builds a tool's `outputSchema` from the route's first declared `2xx`
  * `application/json` response, or `undefined` if there isn't a usable one.
@@ -243,8 +249,6 @@ const SUCCESS_STATUS_PATTERN = /^2\d\d$/;
  * keep today's plain-text-only behavior; nothing breaks, they just don't
  * get `structuredContent`.
  */
-const MAX_OUTPUT_SCHEMA_DEFS = 50;
-
 export function buildOutputSchema(
   route: HttpRoute,
   sharedDefs: Record<string, OpenApiSchema> | undefined,
@@ -261,7 +265,7 @@ export function buildOutputSchema(
   }
 
   const schema = resolveComponentRef(declaredSchema, sharedDefs);
-  const rewritten = rewriteComponentRefs(schema) as OpenApiSchema;
+  const rewritten = rewriteComponentRefs(schema, true) as OpenApiSchema;
   const { type } = rewritten;
 
   const isObjectShaped =
@@ -282,7 +286,14 @@ export function buildOutputSchema(
 
   return {
     ...normalized,
-    ...(usedDefs ? { $defs: usedDefs } : {}),
+    ...(usedDefs
+      ? {
+          $defs: rewriteNode(usedDefs, "schemaMap", true) as Record<
+            string,
+            OpenApiSchema
+          >,
+        }
+      : {}),
   } as JsonSchemaObject;
 }
 
@@ -296,8 +307,11 @@ export function buildOutputSchema(
  * Also normalizes OpenAPI 3.0's `nullable` keyword (see `normalizeNullable`),
  * since real specs carry both.
  */
-export function rewriteComponentRefs<TValue>(value: TValue): TValue {
-  return rewriteNode(value, "schema") as TValue;
+export function rewriteComponentRefs<TValue>(
+  value: TValue,
+  stripExamples = false,
+): TValue {
+  return rewriteNode(value, "schema", stripExamples) as TValue;
 }
 
 function childMode(key: string): WalkMode {
@@ -569,13 +583,17 @@ function resolveComponentRef(
  * a property named `nullable` from the generated tool schema, since
  * `normalizeNullable` cannot tell the keyword from a same-named field.
  */
-function rewriteNode(value: unknown, mode: WalkMode): unknown {
+function rewriteNode(
+  value: unknown,
+  mode: WalkMode,
+  stripExamples = false,
+): unknown {
   if (mode === "data") {
     return value;
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => rewriteNode(item, "schema"));
+    return value.map((item) => rewriteNode(item, "schema", stripExamples));
   }
 
   if (!value || typeof value !== "object") {
@@ -583,10 +601,12 @@ function rewriteNode(value: unknown, mode: WalkMode): unknown {
   }
 
   const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([key]) => mode !== "schema" || !STRIP_KEYS.has(key))
+    .filter(
+      ([key]) => !stripExamples || mode !== "schema" || !STRIP_KEYS.has(key),
+    )
     .map(([key, entryValue]): [string, unknown] => {
       if (mode === "schemaMap") {
-        return [key, rewriteNode(entryValue, "schema")];
+        return [key, rewriteNode(entryValue, "schema", stripExamples)];
       }
 
       if (
@@ -597,7 +617,7 @@ function rewriteNode(value: unknown, mode: WalkMode): unknown {
         return [key, entryValue.replace("#/components/schemas/", "#/$defs/")];
       }
 
-      return [key, rewriteNode(entryValue, childMode(key))];
+      return [key, rewriteNode(entryValue, childMode(key), stripExamples)];
     });
 
   const rewritten = Object.fromEntries(entries) as Record<string, unknown>;
