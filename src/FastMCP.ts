@@ -3496,16 +3496,21 @@ export class FastMCP<
           `[FastMCP info] Starting server in stateless mode on HTTP Stream at ${protocol}://${httpConfig.host}:${httpConfig.port}${streamEndpoint}`,
         );
 
+        // Shared per-request memo: mcp-proxy's gating call and the
+        // `createServer` call below collapse into one real `authenticate`
+        // invocation per request (see `#memoizedAuthenticate`).
+        const authenticate = this.#authenticate
+          ? this.#memoizedAuthenticate()
+          : undefined;
+
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
-          ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
+          ...(authenticate ? { authenticate } : {}),
           cors: httpConfig.cors,
           createServer: async (request) => {
             let auth: T | undefined;
 
-            if (this.#authenticate) {
-              auth = this.#requireAuthenticated(
-                await this.#authenticate(request),
-              );
+            if (authenticate) {
+              auth = this.#requireAuthenticated(await authenticate(request));
             }
 
             // Extract session ID from headers
@@ -3559,16 +3564,21 @@ export class FastMCP<
         });
       } else {
         // Regular mode with session management
+        // Shared per-request memo: mcp-proxy's gating call and the
+        // `createServer` call below collapse into one real `authenticate`
+        // invocation per request (see `#memoizedAuthenticate`).
+        const authenticate = this.#authenticate
+          ? this.#memoizedAuthenticate()
+          : undefined;
+
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
-          ...(this.#authenticate ? { authenticate: this.#authenticate } : {}),
+          ...(authenticate ? { authenticate } : {}),
           cors: httpConfig.cors,
           createServer: async (request) => {
             let auth: T | undefined;
 
-            if (this.#authenticate) {
-              auth = this.#requireAuthenticated(
-                await this.#authenticate(request),
-              );
+            if (authenticate) {
+              auth = this.#requireAuthenticated(await authenticate(request));
             }
 
             // Extract session ID from headers
@@ -4305,6 +4315,52 @@ export class FastMCP<
       }
     }
   };
+
+  /**
+   * On `httpStream`, `authenticate` is handed to both mcp-proxy (which calls it
+   * once per request to gate the 401) and this server's own `createServer`
+   * callback (which calls it again to obtain the session auth). Both receive
+   * the identical `IncomingMessage`, so a single request would otherwise be
+   * authenticated twice — halving the effective budget of any non-idempotent
+   * `authenticate` (see #352).
+   *
+   * This wraps `#authenticate` in a per-request memo keyed on the request
+   * object, collapsing the two calls into one real invocation. The *promise* is
+   * cached (not the resolved value) so a second call that arrives before the
+   * first settles joins it rather than starting a competing attempt. Keys are
+   * the request objects themselves, so each request is authenticated exactly
+   * once, a distinct request is authenticated afresh, and entries are collected
+   * with their requests — nothing leaks across requests. A rejected or nullish
+   * result is cached as-is, so a failed authentication is never seen as a
+   * success by the second caller.
+   */
+  #memoizedAuthenticate(): Authenticate<T> {
+    const authenticate = this.#authenticate!;
+    const cache = new WeakMap<
+      http.IncomingMessage,
+      Promise<null | T | undefined>
+    >();
+
+    return (request: http.IncomingMessage) => {
+      // stdio passes `undefined`; there is nothing to key a memo on, and this
+      // path is httpStream-only anyway, so fall straight through.
+      if (!request) {
+        return authenticate(request);
+      }
+
+      const cached = cache.get(request);
+
+      if (cached) {
+        return cached;
+      }
+
+      const result = Promise.resolve(authenticate(request));
+
+      cache.set(request, result);
+
+      return result;
+    };
+  }
 
   /**
    * Converts Node.js IncomingMessage to Web Request for Hono
