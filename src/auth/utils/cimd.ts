@@ -6,6 +6,7 @@
  * of requiring a prior POST /oauth/register call.
  */
 
+import { cancelResponseBody } from "../../cancelResponseBody.js";
 import type { DCRClientMetadata, ProxyDCRClient } from "../types.js";
 
 const CIMD_FETCH_TIMEOUT_MS = 5000;
@@ -72,6 +73,7 @@ export async function resolveCimdClient(
   }
 
   if (!response.ok) {
+    await cancelResponseBody(response);
     return null;
   }
 
@@ -258,6 +260,7 @@ async function readBoundedText(response: Response): Promise<null | string> {
   const contentLength = response.headers.get("content-length");
 
   if (contentLength && Number(contentLength) > CIMD_MAX_RESPONSE_BYTES) {
+    await cancelResponseBody(response);
     return null;
   }
 
