@@ -1102,3 +1102,51 @@ test("custom route stream stops when a quiet client disconnects", async () => {
     await server.stop();
   }
 });
+
+test("custom route stream failure after headers are sent settles the response", async () => {
+  const port = await getRandomPort();
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+  const unhandledRejections: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => {
+    unhandledRejections.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandledRejection);
+
+  const app = server.getApp();
+  app.get("/failing-stream", () => {
+    const encoder = new TextEncoder();
+    let pulls = 0;
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls += 1;
+          if (pulls === 1) {
+            controller.enqueue(encoder.encode("first chunk"));
+            return;
+          }
+          controller.error(new Error("stream failed after first chunk"));
+        },
+      }),
+      { headers: { "Content-Type": "text/plain" } },
+    );
+  });
+
+  await server.start({
+    httpStream: { port },
+    transportType: "httpStream",
+  });
+
+  try {
+    const response = await fetch(`http://localhost:${port}/failing-stream`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("first chunk");
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(unhandledRejections).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", onUnhandledRejection);
+    await server.stop();
+  }
+});
