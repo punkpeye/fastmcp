@@ -340,6 +340,36 @@ test("custom routes handle HTML responses", async () => {
   });
 });
 
+test("custom routes preserve multiple Set-Cookie response fields", async () => {
+  await runWithTestServer({
+    run: async ({ port }) => {
+      const response = await fetch(`http://localhost:${port}/cookies`);
+      expect(response.status).toBe(200);
+      expect(response.headers.getSetCookie()).toEqual([
+        "session=one; Path=/; HttpOnly",
+        "preference=two; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Path=/",
+      ]);
+    },
+    server: async () => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      server.getApp().get(
+        "/cookies",
+        () =>
+          new Response("ok", {
+            headers: [
+              ["Set-Cookie", "session=one; Path=/; HttpOnly"],
+              [
+                "Set-Cookie",
+                "preference=two; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Path=/",
+              ],
+            ],
+          }),
+      );
+      return server;
+    },
+  });
+});
+
 test("custom routes handle errors gracefully", async () => {
   await runWithTestServer({
     run: async ({ port }) => {
