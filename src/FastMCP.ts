@@ -3819,6 +3819,19 @@ export class FastMCP<
         return;
       }
     } catch (error) {
+      // A streaming custom route may fail after its first chunk has committed
+      // the Node response. At that point this request was matched: falling
+      // through to the health/OAuth/default handlers would try to write a
+      // second response and can throw ERR_HTTP_HEADERS_SENT. End the committed
+      // response and stop routing it instead.
+      if (res.headersSent) {
+        this.#logger.error("[FastMCP error] custom route stream failed", error);
+        if (!res.writableEnded) {
+          res.end();
+        }
+        return;
+      }
+
       // If Hono throws, log and continue to other endpoints
       this.#logger.debug("[FastMCP debug] Hono route not matched", error);
     }
