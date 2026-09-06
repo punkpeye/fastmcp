@@ -3774,8 +3774,19 @@ export class FastMCP<
         if (!res.headersSent) {
           res.statusCode = honoResponse.status;
           honoResponse.headers.forEach((value, key) => {
+            // Fetch Headers exposes Set-Cookie through getSetCookie() because
+            // combining multiple cookies with a comma changes their meaning
+            // (notably when Expires itself contains a comma). Preserve each
+            // field as a distinct Node response header below.
+            if (key.toLowerCase() === "set-cookie") {
+              return;
+            }
             res.setHeader(key, value);
           });
+          const setCookies = honoResponse.headers.getSetCookie();
+          if (setCookies.length > 0) {
+            res.setHeader("Set-Cookie", setCookies);
+          }
 
           if (honoResponse.body) {
             const reader = honoResponse.body.getReader();
