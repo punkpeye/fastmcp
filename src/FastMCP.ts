@@ -2596,7 +2596,11 @@ export class FastMCPSession<
             }
 
             try {
-              await this.#server.notification({
+              // Send via the request-scoped notifier so the SDK tags the message with
+              // this call's relatedRequestId. Without it, the notification has no request
+              // to attach to and falls back to the standalone GET SSE stream — which
+              // doesn't exist for stateless HTTP transports, so it's silently dropped.
+              await extra.sendNotification({
                 method: "notifications/progress",
                 params: {
                   ...progress,
