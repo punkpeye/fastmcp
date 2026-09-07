@@ -1132,3 +1132,77 @@ test("custom route stream stops when a quiet client disconnects", async () => {
     await server.stop();
   }
 });
+
+test("custom route stream failure after headers are sent settles the response", async () => {
+  const port = await getRandomPort();
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+  const unhandledRejections: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => {
+    unhandledRejections.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandledRejection);
+
+  const failAfterFirstChunk = (headers: Record<string, string>) => () => {
+    const encoder = new TextEncoder();
+    let pulls = 0;
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls += 1;
+          if (pulls === 1) {
+            controller.enqueue(encoder.encode("first chunk"));
+            return;
+          }
+          controller.error(new Error("stream failed after first chunk"));
+        },
+      }),
+      { headers },
+    );
+  };
+
+  const app = server.getApp();
+  app.get(
+    "/failing-stream",
+    failAfterFirstChunk({
+      "Content-Type": "text/plain",
+    }),
+  );
+  // A declared length the body never reaches: ending cleanly leaves the client
+  // waiting on bytes that will never arrive.
+  app.get(
+    "/failing-sized-stream",
+    failAfterFirstChunk({
+      "Content-Length": "100",
+      "Content-Type": "text/plain",
+    }),
+  );
+
+  await server.start({
+    httpStream: { port },
+    transportType: "httpStream",
+  });
+
+  try {
+    // The connection is dropped rather than ended, so the client sees the
+    // failure. Ending cleanly would look like a complete chunked body here,
+    // and would hang the client forever on the Content-Length route below.
+    await expect(
+      fetch(`http://localhost:${port}/failing-stream`).then((r) => r.text()),
+    ).rejects.toThrow();
+
+    await expect(
+      fetch(`http://localhost:${port}/failing-sized-stream`).then((r) =>
+        r.text(),
+      ),
+    ).rejects.toThrow();
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(unhandledRejections).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", onUnhandledRejection);
+    await server.stop();
+  }
+});
