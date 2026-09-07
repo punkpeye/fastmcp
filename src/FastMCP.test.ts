@@ -4158,6 +4158,95 @@ test("stateless mode works correctly", async () => {
   }
 });
 
+test("reports progress notifications in stateless HTTP mode", async () => {
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Test tool for progress in stateless mode",
+    execute: async (args, { reportProgress }) => {
+      await reportProgress({ progress: 0, total: 100 });
+      await reportProgress({ progress: 50, total: 100 });
+      await reportProgress({ progress: 100, total: 100 });
+
+      return String(args.a + args.b);
+    },
+    name: "add",
+    parameters: z.object({
+      a: z.number(),
+      b: z.number(),
+    }),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const client = new Client(
+      {
+        name: "Test client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+
+    await client.connect(transport);
+
+    const progressCalls: Array<{ progress: number; total: number }> = [];
+
+    const onProgress = vi.fn((data) => {
+      progressCalls.push(data);
+    });
+
+    // Progress notifications have no relatedRequestId to attach to unless they're
+    // sent through the request-scoped notifier, and there's no standalone SSE
+    // stream to fall back to in stateless mode, so this used to be silently dropped.
+    const result = await client.callTool(
+      {
+        arguments: { a: 5, b: 7 },
+        name: "add",
+      },
+      undefined,
+      {
+        onprogress: onProgress,
+      },
+    );
+
+    expect(result.content).toEqual([
+      {
+        text: "12",
+        type: "text",
+      },
+    ]);
+
+    expect(onProgress).toHaveBeenCalledTimes(3);
+    expect(progressCalls).toEqual([
+      { progress: 0, total: 100 },
+      { progress: 50, total: 100 },
+      { progress: 100, total: 100 },
+    ]);
+
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
 test("stateless mode does not warn when client capabilities are unavailable", async () => {
   const port = await getRandomPort();
   const logger = {
