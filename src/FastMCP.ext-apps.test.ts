@@ -9,11 +9,11 @@
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { getRandomPort } from "get-port-please";
 import { expect, test } from "vitest";
 import { z } from "zod";
 
 import { FastMCP, FastMCPSession } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 const runWithTestServer = async ({
   client: createClient,
@@ -31,7 +31,7 @@ const runWithTestServer = async ({
   }) => Promise<void>;
   server?: () => Promise<FastMCP>;
 }) => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = createServer
     ? await createServer()

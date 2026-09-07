@@ -1,10 +1,10 @@
 import type http from "http";
 
-import { getRandomPort } from "get-port-please";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
 
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 /**
  * On `httpStream`, FastMCP passes `authenticate` to mcp-proxy (which calls it
@@ -68,7 +68,7 @@ const startServer = async (
 
 for (const stateless of [true, false]) {
   test(`authenticate runs exactly once per httpStream request (stateless: ${stateless})`, async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const seen: http.IncomingMessage[] = [];
     const authenticate = vi.fn(async (request: http.IncomingMessage) => {
       seen.push(request);
@@ -98,7 +98,7 @@ for (const stateless of [true, false]) {
     // The memo must be per-request, not per-server: two separate requests are
     // two invocations, so per-request auth (and its rate-limiting side effects)
     // is preserved.
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const authenticate = vi.fn(async () => ({ userId: "repro" }));
     const server = await startServer(authenticate, port, stateless);
 

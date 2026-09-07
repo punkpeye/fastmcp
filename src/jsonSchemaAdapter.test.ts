@@ -1,10 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { getRandomPort } from "get-port-please";
 import { expect, test, vi } from "vitest";
 import { toJsonSchema } from "xsschema";
 
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 import { jsonSchemaAdapter } from "./jsonSchemaAdapter.js";
 
 const personSchema = {
@@ -182,7 +182,7 @@ test("converts to JSON Schema without a vendor-specific converter", async () => 
 const withGreetServer = async (
   run: (client: Client) => Promise<void>,
 ): Promise<void> => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const server = new FastMCP({ name: "Test server", version: "1.0.0" });
 
   server.addTool({

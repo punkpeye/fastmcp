@@ -2,11 +2,11 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { getRandomPort } from "get-port-please";
 import { afterAll, beforeAll, describe, expect, it, test } from "vitest";
 import { z } from "zod";
 
 import { FastMCP, FastMCPSession, ServerState } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 // Suppress AbortError from MCP SDK during test cleanup
 const originalUnhandledRejection: Array<
@@ -61,7 +61,7 @@ const runWithTestServer = async ({
   }) => Promise<void>;
   server?: () => Promise<FastMCP>;
 }) => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = createServer
     ? await createServer()

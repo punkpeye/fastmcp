@@ -1,16 +1,15 @@
+import { OutgoingMessage } from "node:http";
 /**
  * OAuth Proxy body-reader robustness tests
  * Exercises the /oauth/* POST endpoints over raw sockets to cover request
  * bodies that are aborted mid-stream or exceed the accepted size limit.
  */
-
-import { getRandomPort } from "get-port-please";
-import { OutgoingMessage } from "node:http";
 import { connect, type Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 
 import { OAuthProxy } from "./auth/OAuthProxy.js";
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -79,7 +78,7 @@ describe("OAuth proxy body readers", { timeout: 15000 }, () => {
   it.each(["/oauth/register", "/oauth/consent", "/oauth/token"])(
     "settles with 400 invalid_request when the client aborts mid-body (%s)",
     async (path) => {
-      const port = await getRandomPort();
+      const port = await getTestPort();
       const server = await startOAuthProxyServer(port);
       const endSpy = vi.spyOn(OutgoingMessage.prototype, "end");
 
@@ -123,7 +122,7 @@ describe("OAuth proxy body readers", { timeout: 15000 }, () => {
   );
 
   it("rejects an over-limit body before it is fully received", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const server = await startOAuthProxyServer(port);
 
     try {
@@ -170,7 +169,7 @@ describe("OAuth proxy body readers", { timeout: 15000 }, () => {
   });
 
   it("closes a keep-alive request after rejecting an over-limit body", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const server = await startOAuthProxyServer(port);
 
     try {
@@ -216,7 +215,7 @@ describe("OAuth proxy body readers", { timeout: 15000 }, () => {
   });
 
   it("still accepts a valid body delivered in slow chunks", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const server = await startOAuthProxyServer(port);
 
     try {
@@ -247,7 +246,7 @@ describe("OAuth proxy body readers", { timeout: 15000 }, () => {
   });
 
   it("preserves a UTF-8 character split across request chunks", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const server = await startOAuthProxyServer(port);
 
     try {
@@ -299,7 +298,7 @@ describe("OAuth proxy body readers", { timeout: 15000 }, () => {
   // the chunked path (Transfer-Encoding: chunked uses no Content-Length header).
 
   it("rejects an oversize chunked body (no Content-Length)", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const server = await startOAuthProxyServer(port);
 
     try {
@@ -350,7 +349,7 @@ describe("OAuth proxy body readers", { timeout: 15000 }, () => {
   });
 
   it("preserves UTF-8 characters split across chunked wire boundaries", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const server = await startOAuthProxyServer(port);
 
     try {
@@ -404,7 +403,7 @@ describe("OAuth proxy body readers", { timeout: 15000 }, () => {
   });
 
   it("handles chunked request aborted before terminating chunk", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const server = await startOAuthProxyServer(port);
 
     try {

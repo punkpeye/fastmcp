@@ -1,11 +1,11 @@
-import { getRandomPort } from "get-port-please";
 import { describe, expect, it } from "vitest";
 
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 describe("FastMCP OAuth Support", () => {
   it("should serve OAuth authorization server metadata", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const server = new FastMCP({
       name: "Test Server",
@@ -69,7 +69,7 @@ describe("FastMCP OAuth Support", () => {
   });
 
   it("should serve OAuth metadata under an issuer path base", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const server = new FastMCP({
       name: "Test Server",
@@ -130,7 +130,7 @@ describe("FastMCP OAuth Support", () => {
   });
 
   it("should serve OAuth protected resource metadata", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const server = new FastMCP({
       name: "Test Server",
@@ -229,7 +229,7 @@ describe("FastMCP OAuth Support", () => {
   });
 
   it("should return 404 for OAuth endpoints when disabled", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const server = new FastMCP({
       name: "Test Server",
@@ -260,7 +260,7 @@ describe("FastMCP OAuth Support", () => {
   });
 
   it("should return 404 for OAuth endpoints when not configured", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const server = new FastMCP({
       name: "Test Server",
@@ -289,7 +289,7 @@ describe("FastMCP OAuth Support", () => {
   });
 
   it("should serve OAuth protected resource metadata at sub-path (MCP 2025-11-25 compliance)", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const server = new FastMCP({
       name: "Test Server",
@@ -353,7 +353,7 @@ describe("FastMCP OAuth Support", () => {
   });
 
   it("should serve OAuth protected resource metadata at custom sub-path", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const server = new FastMCP({
       name: "Test Server",
@@ -396,7 +396,7 @@ describe("FastMCP OAuth Support", () => {
   });
 
   it("should return 404 for non-matching sub-paths", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const server = new FastMCP({
       name: "Test Server",

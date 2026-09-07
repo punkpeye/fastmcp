@@ -1,11 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
-import { getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "timers/promises";
 import { describe, expect, it } from "vitest";
 
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 const KEEPALIVE_LOGGER = "fastmcp-keepalive";
 const TOOL_DURATION_MS = 100;
@@ -53,7 +53,7 @@ const startServer = async (
   },
   stateless = true,
 ) => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",

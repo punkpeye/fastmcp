@@ -1,10 +1,10 @@
 import type http from "http";
 
-import { getRandomPort } from "get-port-please";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
 
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 /**
  * mcp-proxy serves an SSE endpoint at `/sse` by default and — unlike the HTTP
@@ -116,7 +116,7 @@ const initialize = (port: number) =>
   });
 
 test("rejects unauthenticated SSE connections when authenticate returns undefined", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const authenticate = vi.fn(async () => undefined);
   const server = await startServer(authenticate, port);
 
@@ -139,7 +139,7 @@ test("rejects unauthenticated SSE connections when authenticate returns undefine
 });
 
 test("rejects unauthenticated SSE connections when authenticate returns null", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const server = await startServer(async () => null, port);
 
   try {
@@ -158,7 +158,7 @@ test("rejects SSE connections for any falsy authenticate result", async () => {
   // to agree — `#createSession` skips `canAccess` filtering for falsy auth,
   // which would otherwise expose every tool.
   for (const result of [false, "", 0, NaN]) {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const server = await startServer(
       (async () => result) as unknown as () => Promise<undefined>,
       port,
@@ -181,7 +181,7 @@ test("rejects SSE connections for any falsy authenticate result", async () => {
 });
 
 test("still allows authenticated SSE connections", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const server = await startServer(async (request) => {
     if (request.headers.authorization === "Bearer good-token") {
       return { id: 1 };

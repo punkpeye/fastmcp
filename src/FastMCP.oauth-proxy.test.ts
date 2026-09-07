@@ -1,17 +1,16 @@
+import { describe, expect, it, vi } from "vitest";
 /**
  * OAuth Proxy Integration Tests
  * Tests the seamless integration of OAuth Proxy with FastMCP HTTP transport
  */
 
-import { getRandomPort } from "get-port-please";
-import { describe, expect, it, vi } from "vitest";
-
 import { OAuthProxy } from "./auth/OAuthProxy.js";
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 describe("FastMCP OAuth Proxy Integration", () => {
   it("should automatically register OAuth endpoints when proxy is provided", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     // Create OAuth Proxy
     const authProxy = new OAuthProxy({
@@ -78,7 +77,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
   });
 
   it("should register OAuth proxy endpoints under an issuer path base", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const authProxy = new OAuthProxy({
       allowedRedirectUriPatterns: ["https://client.example.com/*"],
@@ -156,7 +155,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
   });
 
   it("should not register OAuth endpoints when proxy is not provided", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const server = new FastMCP({
       name: "Test Server Without Proxy",
@@ -205,7 +204,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
   });
 
   it("should handle authorization endpoint", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const authProxy = new OAuthProxy({
       allowedRedirectUriPatterns: ["https://client.example.com/*"],
@@ -272,7 +271,7 @@ describe("FastMCP OAuth Proxy Integration", () => {
 
 describe("OAuth Token Endpoint Basic Auth", () => {
   it("should accept Basic auth header for client credentials", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const authProxy = new OAuthProxy({
       baseUrl: `http://localhost:${port}`,
       scopes: ["openid"],
@@ -334,7 +333,7 @@ describe("OAuth Token Endpoint Basic Auth", () => {
   });
 
   it("should fall back to POST body credentials when no Basic auth header", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const authProxy = new OAuthProxy({
       baseUrl: `http://localhost:${port}`,
       scopes: ["openid"],
@@ -392,7 +391,7 @@ describe("OAuth Token Endpoint Basic Auth", () => {
   });
 
   it("should accept Basic auth with empty client_secret", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
     const authProxy = new OAuthProxy({
       baseUrl: `http://localhost:${port}`,
       scopes: ["openid"],

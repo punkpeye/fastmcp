@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest";
 /**
  * The token and dynamic-registration endpoints hand back credentials, so their
  * responses must not be storable. RFC 6749 §5.1 requires `Cache-Control:
@@ -5,15 +6,13 @@
  * requires the same for a registration response carrying `client_secret`.
  */
 
-import { getRandomPort } from "get-port-please";
-import { describe, expect, it } from "vitest";
-
 import { OAuthProxy } from "./auth/OAuthProxy.js";
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 describe("OAuth credential responses are not storable", () => {
   it("sets no-store on the registration and token endpoints", async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     const authProxy = new OAuthProxy({
       allowedRedirectUriPatterns: ["https://client.example.com/*"],

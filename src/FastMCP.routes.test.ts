@@ -2,11 +2,11 @@ import type { Context } from "hono";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { getRandomPort } from "get-port-please";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
 
 import { FastMCP, FastMCPSession } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 const runWithTestServer = async ({
   run,
@@ -25,7 +25,7 @@ const runWithTestServer = async ({
   }) => Promise<void>;
   server?: () => Promise<FastMCP>;
 }) => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = createServer
     ? await createServer()
@@ -514,7 +514,7 @@ test("custom routes with authentication", { timeout: 10000 }, async () => {
     userId: string;
   }
 
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const server = new FastMCP<TestAuth>({
     authenticate: async (req) => {
       const authHeader = req.headers.authorization;
@@ -679,7 +679,7 @@ test("public routes bypass authentication", async () => {
     userId: string;
   }
 
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const server = new FastMCP<TestAuth>({
     authenticate: async (req) => {
       const authHeader = req.headers.authorization;
@@ -777,7 +777,7 @@ test("public routes bypass authentication", async () => {
 });
 
 test("public routes work with OAuth discovery endpoints", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const server = new FastMCP({
     authenticate: async () => {
       // Always reject auth to verify public routes bypass this
@@ -840,7 +840,7 @@ test("public routes work with OAuth discovery endpoints", async () => {
 });
 
 test("public routes work with wildcards", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const server = new FastMCP({
     authenticate: async () => {
       throw new Error("Auth should be bypassed");
@@ -886,7 +886,7 @@ test("mixed public and private routes with same path pattern", async () => {
     role: string;
   }
 
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const server = new FastMCP<TestAuth>({
     authenticate: async (req) => {
       const authHeader = req.headers.authorization;
@@ -1011,7 +1011,7 @@ test("route options validation", async () => {
 });
 
 test("custom route stream stops when the client disconnects", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",
@@ -1070,7 +1070,7 @@ test("custom route stream stops when the client disconnects", async () => {
 });
 
 test("custom route stream stops when a quiet client disconnects", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",
@@ -1134,7 +1134,7 @@ test("custom route stream stops when a quiet client disconnects", async () => {
 });
 
 test("custom route stream failure after headers are sent settles the response", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const server = new FastMCP({
     name: "Test",
     version: "1.0.0",

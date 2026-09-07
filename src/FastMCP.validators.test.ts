@@ -1,12 +1,12 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { type } from "arktype";
-import { getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "timers/promises";
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
 
 import { FastMCP, FastMCPSession } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 // The README documents Zod, ArkType and Valibot as supported parameter
 // validators (all wired through the Standard Schema spec), but only Zod is
@@ -60,7 +60,7 @@ const runWithTestServer = async ({
   }) => Promise<void>;
   server?: FastMCP;
 }) => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server =
     providedServer ??

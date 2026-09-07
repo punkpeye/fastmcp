@@ -12,7 +12,6 @@ import {
   Root,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createEventSource, EventSourceClient } from "eventsource-client";
-import { getRandomPort } from "get-port-please";
 import { setTimeout as delay } from "timers/promises";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
@@ -29,6 +28,7 @@ import {
   type TextContent,
   UserError,
 } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 const runWithTestServer = async ({
   client: createClient,
@@ -46,7 +46,7 @@ const runWithTestServer = async ({
   }) => Promise<void>;
   server?: () => Promise<FastMCP>;
 }) => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = createServer
     ? await createServer()
@@ -221,7 +221,7 @@ test("adds tools with Zod v4 schema", async () => {
 });
 
 test("health endpoint returns ok", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     health: { message: "healthy", path: "/healthz" },
@@ -244,7 +244,7 @@ test("health endpoint returns ok", async () => {
 });
 
 test("health and ready endpoints respect httpStream basePath", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     health: { message: "healthy", path: "/healthz" },
@@ -275,7 +275,7 @@ test("health and ready endpoints respect httpStream basePath", async () => {
 });
 
 test("health and ready endpoints respond to HEAD requests", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     health: { message: "healthy", path: "/healthz" },
@@ -308,7 +308,7 @@ test("health and ready endpoints respond to HEAD requests", async () => {
 });
 
 test("ready endpoint returns 503 for HEAD when not ready", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",
@@ -1654,7 +1654,7 @@ test("adds prompts", async () => {
 });
 
 test("uses events to notify server of client connect/disconnect", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",
@@ -1708,7 +1708,7 @@ test("uses events to notify server of client connect/disconnect", async () => {
 });
 
 test("handles multiple clients", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",
@@ -2290,7 +2290,7 @@ test(
   "HTTP Stream: custom endpoint works with /another-mcp",
   { timeout: 20000 },
   async () => {
-    const port = await getRandomPort();
+    const port = await getTestPort();
 
     // Create server with custom endpoint
     const server = new FastMCP({
@@ -2749,7 +2749,7 @@ test("server remains usable after InvalidParams error", async () => {
 });
 
 test("allows new clients to connect after a client disconnects", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",
@@ -2839,7 +2839,7 @@ test("allows new clients to connect after a client disconnects", async () => {
 });
 
 test("able to close server immediately after starting it", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",
@@ -2859,7 +2859,7 @@ test("able to close server immediately after starting it", async () => {
 });
 
 test("closing event source does not produce error", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",
@@ -2913,7 +2913,7 @@ test("closing event source does not produce error", async () => {
 });
 
 test("provides auth to tools", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const authenticate = vi.fn(async () => {
     return {
@@ -3021,7 +3021,7 @@ test("provides auth to tools", async () => {
 });
 
 test("provides auth to resources", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const authenticate = vi.fn(async () => {
     return {
@@ -3110,7 +3110,7 @@ test("provides auth to resources", async () => {
 });
 
 test("provides auth to resource templates", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const authenticate = vi.fn(async () => {
     return {
@@ -3203,7 +3203,7 @@ test("provides auth to resource templates", async () => {
 });
 
 test("provides auth to resource templates returning arrays", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const authenticate = vi.fn(async () => {
     return {
@@ -3306,7 +3306,7 @@ test("provides auth to resource templates returning arrays", async () => {
 });
 
 test("provides auth to prompt argument completion", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const authenticate = vi.fn(async () => {
     return {
@@ -3406,7 +3406,7 @@ test("provides auth to prompt argument completion", async () => {
 });
 
 test("provides auth to prompt load function", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const authenticate = vi.fn(async () => {
     return {
@@ -3499,7 +3499,7 @@ test("provides auth to prompt load function", async () => {
 });
 
 test("provides auth to resource template argument completion", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const authenticate = vi.fn(async () => {
     return {
@@ -3744,7 +3744,7 @@ test("streamed content is observable by a client that registers a handler", asyn
 });
 
 test("blocks unauthorized requests", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{ id: number }>({
     authenticate: async () => {
@@ -3784,7 +3784,7 @@ test("blocks unauthorized requests", async () => {
 });
 
 test("filters tools based on canAccess property", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{ role: string }>({
     authenticate: async (request) => {
@@ -3893,7 +3893,7 @@ test("tools without canAccess are accessible to all", async () => {
 });
 
 test("canAccess works without authentication", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{ role: string }>({
     name: "Test",
@@ -3942,7 +3942,7 @@ test("canAccess works without authentication", async () => {
 test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
   console.log("Starting HTTP Stream test...");
 
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   // Create server directly (don't use helper function)
   const server = new FastMCP({
@@ -4079,7 +4079,7 @@ test("uses `formatInvalidParamsErrorMessage` callback to build ErrorCode.Invalid
 });
 
 test("stateless mode works correctly", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test server",
@@ -4159,7 +4159,7 @@ test("stateless mode works correctly", async () => {
 });
 
 test("reports progress notifications in stateless HTTP mode", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test server",
@@ -4256,7 +4256,7 @@ test("streams content in stateless HTTP mode", async () => {
     }),
   });
 
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test server",
@@ -4333,7 +4333,7 @@ test("streams content in stateless HTTP mode", async () => {
 });
 
 test("stateless mode does not warn when client capabilities are unavailable", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const logger = {
     debug: vi.fn(),
     error: vi.fn(),
@@ -4406,7 +4406,7 @@ test("stateless mode does not warn when client capabilities are unavailable", as
 });
 
 test("stateless mode health check includes mode indicator", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test server",
@@ -4438,7 +4438,7 @@ test("stateless mode health check includes mode indicator", async () => {
 });
 
 test("stateless mode with valid authentication allows access", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{ userId: string }>({
     authenticate: async () => {
@@ -4505,7 +4505,7 @@ test("stateless mode with valid authentication allows access", async () => {
 });
 
 test("stateless mode rejects missing Authorization header", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{ userId: string }>({
     authenticate: async (req) => {
@@ -4566,7 +4566,7 @@ test("stateless mode rejects missing Authorization header", async () => {
 });
 
 test("stateless mode rejects invalid authentication token", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const VALID_TOKEN = "valid_jwt_token";
   const INVALID_TOKEN = "invalid_jwt_token";
 
@@ -4639,7 +4639,7 @@ test("stateless mode rejects invalid authentication token", async () => {
 });
 
 test("stateless mode handles authentication function throwing errors", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{ userId: string }>({
     authenticate: async () => {
@@ -4697,7 +4697,7 @@ test("stateless mode handles authentication function throwing errors", async () 
 });
 
 test("stateless mode handles concurrent requests with authentication", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   let requestCount = 0;
 
   const server = new FastMCP<{ requestId: number }>({
@@ -4789,7 +4789,7 @@ test("stateless mode handles concurrent requests with authentication", async () 
 // Testing the fix for session creation despite authentication failure
 
 test("authentication failure handling: should throw error when auth.authenticated is false", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{ authenticated: boolean; error?: string }>({
     authenticate: async () => {
@@ -4852,7 +4852,7 @@ test("authentication failure handling: should throw error when auth.authenticate
 });
 
 test("authentication failure handling: should create session when auth.authenticated is true", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{
     authenticated: boolean;
@@ -4919,7 +4919,7 @@ test("authentication failure handling: should create session when auth.authentic
 });
 
 test("authentication failure handling: should create session when auth is null/undefined (anonymous)", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     // No authenticate function - anonymous access
@@ -4980,7 +4980,7 @@ test("authentication failure handling: should create session when auth is null/u
 });
 
 test("authentication failure handling: should use default error message when auth.error is not provided", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{ authenticated: boolean }>({
     authenticate: async () => {
@@ -5039,7 +5039,7 @@ test("authentication failure handling: should use default error message when aut
 });
 
 test("authentication failure handling: should preserve existing behavior for truthy auth results", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{ role: string; userId: string }>({
     authenticate: async () => {
@@ -5103,7 +5103,7 @@ test("authentication failure handling: should preserve existing behavior for tru
 });
 
 test("authentication failure handling: should handle authentication with custom error messages", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const CUSTOM_ERROR_MSG = "Token expired at 2025-10-07T12:00:00Z";
 
   const server = new FastMCP<{ authenticated: boolean; error?: string }>({
@@ -5162,7 +5162,7 @@ test("authentication failure handling: should handle authentication with custom 
 });
 
 test("authentication failure handling: should not create session for authenticated=false even with session data", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP<{
     authenticated: boolean;
@@ -5233,7 +5233,7 @@ test("authentication failure handling: should not create session for authenticat
 
 // See https://github.com/punkpeye/fastmcp/issues/180
 test("authentication failure handling: returns 401 with WWW-Authenticate even when the error message has no auth-related keywords", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   // Regression test: an `authenticate()` that reports failure as
   // `{ authenticated: false, error }` must yield a 401 (never a generic 500)
@@ -5296,7 +5296,7 @@ test("authentication failure handling: returns 401 with WWW-Authenticate even wh
 });
 
 test("host configuration works with 0.0.0.0", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test server",
@@ -5503,7 +5503,7 @@ test("prompts can access client info via load context", async () => {
 });
 
 test("OAuth config is passed to mcp-proxy and returns RFC 9728 compliant WWW-Authenticate header", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     authenticate: async (request) => {
@@ -5589,7 +5589,7 @@ test("OAuth config is passed to mcp-proxy and returns RFC 9728 compliant WWW-Aut
 });
 
 test("OAuth config with only protectedResource returns Bearer WWW-Authenticate", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     authenticate: async () => {
@@ -6122,7 +6122,7 @@ test("tools without outputSchema omit it from listing", async () => {
 });
 
 test("httpStream forwards custom cors allowedHeaders to mcp-proxy", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",
@@ -6166,7 +6166,7 @@ test("httpStream forwards custom cors allowedHeaders to mcp-proxy", async () => 
 });
 
 test("httpStream respects cors: false by not setting CORS headers", async () => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
 
   const server = new FastMCP({
     name: "Test",

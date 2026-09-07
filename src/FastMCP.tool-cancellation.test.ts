@@ -1,11 +1,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { getRandomPort } from "get-port-please";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 const runWithTestServer = async ({
   run,
@@ -20,7 +20,7 @@ const runWithTestServer = async ({
   }) => Promise<void>;
   server: () => Promise<FastMCP>;
 }) => {
-  const port = await getRandomPort();
+  const port = await getTestPort();
   const server = await createServer();
 
   await server.start({
