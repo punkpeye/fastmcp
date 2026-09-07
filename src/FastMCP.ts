@@ -3826,9 +3826,13 @@ export class FastMCP<
       // response and stop routing it instead.
       if (res.headersSent) {
         this.#logger.error("[FastMCP error] custom route stream failed", error);
-        if (!res.writableEnded) {
-          res.end();
-        }
+        // Drop the connection so the client sees the failure. Ending cleanly
+        // would terminate a chunked body as if it were complete, or stall a
+        // Content-Length response forever. end() writes nothing after
+        // destroy() but sets writableEnded, which mcp-proxy checks before
+        // running its own fallback response.
+        res.destroy();
+        res.end();
         return;
       }
 

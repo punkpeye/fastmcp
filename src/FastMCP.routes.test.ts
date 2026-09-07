@@ -1115,8 +1115,7 @@ test("custom route stream failure after headers are sent settles the response", 
   };
   process.on("unhandledRejection", onUnhandledRejection);
 
-  const app = server.getApp();
-  app.get("/failing-stream", () => {
+  const failAfterFirstChunk = (headers: Record<string, string>) => () => {
     const encoder = new TextEncoder();
     let pulls = 0;
     return new Response(
@@ -1130,9 +1129,26 @@ test("custom route stream failure after headers are sent settles the response", 
           controller.error(new Error("stream failed after first chunk"));
         },
       }),
-      { headers: { "Content-Type": "text/plain" } },
+      { headers },
     );
-  });
+  };
+
+  const app = server.getApp();
+  app.get(
+    "/failing-stream",
+    failAfterFirstChunk({
+      "Content-Type": "text/plain",
+    }),
+  );
+  // A declared length the body never reaches: ending cleanly leaves the client
+  // waiting on bytes that will never arrive.
+  app.get(
+    "/failing-sized-stream",
+    failAfterFirstChunk({
+      "Content-Length": "100",
+      "Content-Type": "text/plain",
+    }),
+  );
 
   await server.start({
     httpStream: { port },
@@ -1140,9 +1156,19 @@ test("custom route stream failure after headers are sent settles the response", 
   });
 
   try {
-    const response = await fetch(`http://localhost:${port}/failing-stream`);
-    expect(response.status).toBe(200);
-    expect(await response.text()).toBe("first chunk");
+    // The connection is dropped rather than ended, so the client sees the
+    // failure. Ending cleanly would look like a complete chunked body here,
+    // and would hang the client forever on the Content-Length route below.
+    await expect(
+      fetch(`http://localhost:${port}/failing-stream`).then((r) => r.text()),
+    ).rejects.toThrow();
+
+    await expect(
+      fetch(`http://localhost:${port}/failing-sized-stream`).then((r) =>
+        r.text(),
+      ),
+    ).rejects.toThrow();
+
     await new Promise((resolve) => setImmediate(resolve));
     expect(unhandledRejections).toEqual([]);
   } finally {
