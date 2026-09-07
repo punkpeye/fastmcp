@@ -4247,6 +4247,91 @@ test("reports progress notifications in stateless HTTP mode", async () => {
   }
 });
 
+test("streams content in stateless HTTP mode", async () => {
+  const StreamContentNotificationSchema = z.object({
+    method: z.literal("notifications/tool/streamContent"),
+    params: z.object({
+      content: z.array(z.any()),
+      toolName: z.string(),
+    }),
+  });
+
+  const port = await getRandomPort();
+
+  const server = new FastMCP({
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    annotations: { streamingHint: true },
+    description: "Streams content in stateless mode",
+    execute: async (_args, { streamContent }) => {
+      await streamContent({ text: "chunk 1", type: "text" });
+      await streamContent({ text: "chunk 2", type: "text" });
+
+      return "chunk 1chunk 2";
+    },
+    name: "streaming-tool",
+    parameters: z.object({}),
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const client = new Client(
+      {
+        name: "Test client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://localhost:${port}/mcp`),
+    );
+
+    await client.connect(transport);
+
+    const chunks: string[] = [];
+
+    client.setNotificationHandler(
+      StreamContentNotificationSchema,
+      (notification) => {
+        chunks.push(notification.params.content[0].text);
+      },
+    );
+
+    // Same failure mode as progress: without a relatedRequestId this looks for
+    // a standalone SSE stream that stateless mode never opens, so the chunks
+    // used to vanish while the final result still arrived.
+    const result = await client.callTool({
+      arguments: {},
+      name: "streaming-tool",
+    });
+
+    expect(chunks).toEqual(["chunk 1", "chunk 2"]);
+    expect(result.content).toEqual([
+      {
+        text: "chunk 1chunk 2",
+        type: "text",
+      },
+    ]);
+
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
 test("stateless mode does not warn when client capabilities are unavailable", async () => {
   const port = await getRandomPort();
   const logger = {

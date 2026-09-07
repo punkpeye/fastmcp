@@ -2630,7 +2630,10 @@ export class FastMCPSession<
             const contentArray = Array.isArray(content) ? content : [content];
 
             try {
-              await this.#server.notification({
+              // Request-scoped for the same reason as reportProgress above:
+              // without a relatedRequestId this falls back to the standalone
+              // GET SSE stream, which stateless HTTP transports never have.
+              await extra.sendNotification({
                 method: "notifications/tool/streamContent",
                 params: {
                   content: contentArray,
