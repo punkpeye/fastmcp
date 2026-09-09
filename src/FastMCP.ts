@@ -3192,9 +3192,16 @@ export class FastMCP<
       const results = Array.isArray(result) ? result : [result];
       const firstResult = results[0];
 
+      if (!firstResult) {
+        throw new UnexpectedStateError(
+          `Resource returned no contents: ${uri}`,
+          { uri },
+        );
+      }
+
       const resourceData: ResourceContent["resource"] = {
-        mimeType: directResource.mimeType,
-        uri,
+        mimeType: firstResult.mimeType ?? directResource.mimeType,
+        uri: firstResult.uri ?? uri,
       };
 
       if ("text" in firstResult) {
@@ -3220,17 +3227,27 @@ export class FastMCP<
         params as ResourceTemplateArgumentsToObject<typeof template.arguments>,
       );
 
-      const resourceData: ResourceContent["resource"] = {
-        mimeType: template.mimeType,
-        uri,
-      };
+      const results = Array.isArray(result) ? result : [result];
+      const firstResult = results[0];
 
-      if ("text" in result) {
-        resourceData.text = result.text;
+      if (!firstResult) {
+        throw new UnexpectedStateError(
+          `Resource returned no contents: ${uri}`,
+          { uri },
+        );
       }
 
-      if ("blob" in result) {
-        resourceData.blob = result.blob;
+      const resourceData: ResourceContent["resource"] = {
+        mimeType: firstResult.mimeType ?? template.mimeType,
+        uri: firstResult.uri ?? uri,
+      };
+
+      if ("text" in firstResult) {
+        resourceData.text = firstResult.text;
+      }
+
+      if ("blob" in firstResult) {
+        resourceData.blob = firstResult.blob;
       }
 
       return resourceData; // The resource we're looking for

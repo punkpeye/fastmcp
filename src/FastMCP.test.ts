@@ -26,6 +26,7 @@ import {
   imageContent,
   SessionError,
   type TextContent,
+  UnexpectedStateError,
   UserError,
 } from "./FastMCP.js";
 import { getTestPort } from "./getTestPort.js";
@@ -1586,6 +1587,302 @@ test("embedded resources work with complex URI template patterns", async () => {
       return server;
     },
   });
+});
+
+test("embedded resources include text when a template load() returns an array", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {},
+          name: "get_doc",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "text/plain",
+              text: "doc 7",
+              uri: "doc://7",
+            },
+            type: "resource",
+          },
+        ],
+      });
+    },
+
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResourceTemplate({
+        arguments: [
+          {
+            name: "id",
+            required: true,
+          },
+        ],
+        async load(args) {
+          return [
+            {
+              text: `doc ${args.id}`,
+            },
+          ];
+        },
+        mimeType: "text/plain",
+        name: "Doc",
+        uriTemplate: "doc://{id}",
+      });
+
+      server.addTool({
+        description: "Get a doc",
+        execute: async () => {
+          return {
+            content: [
+              {
+                resource: await server.embedded("doc://7"),
+                type: "resource",
+              },
+            ],
+          };
+        },
+        name: "get_doc",
+        parameters: z.object({}),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("embedded resources use the mimeType from a template load() result", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {},
+          name: "get_doc",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "text/markdown",
+              text: "doc 7",
+              uri: "doc://7",
+            },
+            type: "resource",
+          },
+        ],
+      });
+    },
+
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResourceTemplate({
+        arguments: [
+          {
+            name: "id",
+            required: true,
+          },
+        ],
+        async load(args) {
+          return {
+            mimeType: "text/markdown",
+            text: `doc ${args.id}`,
+          };
+        },
+        mimeType: "text/plain",
+        name: "Doc",
+        uriTemplate: "doc://{id}",
+      });
+
+      server.addTool({
+        description: "Get a doc",
+        execute: async () => {
+          return {
+            content: [
+              {
+                resource: await server.embedded("doc://7"),
+                type: "resource",
+              },
+            ],
+          };
+        },
+        name: "get_doc",
+        parameters: z.object({}),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("embedded resources use the mimeType from a direct resource load() result", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {},
+          name: "get_readme",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "text/markdown",
+              text: "# Readme",
+              uri: "file:///readme",
+            },
+            type: "resource",
+          },
+        ],
+      });
+    },
+
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResource({
+        async load() {
+          return {
+            mimeType: "text/markdown",
+            text: "# Readme",
+          };
+        },
+        mimeType: "text/plain",
+        name: "Readme",
+        uri: "file:///readme",
+      });
+
+      server.addTool({
+        description: "Get the readme",
+        execute: async () => {
+          return {
+            content: [
+              {
+                resource: await server.embedded("file:///readme"),
+                type: "resource",
+              },
+            ],
+          };
+        },
+        name: "get_readme",
+        parameters: z.object({}),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("embedded resources use the uri from a load() result", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      expect(
+        await client.callTool({
+          arguments: {},
+          name: "get_readme",
+        }),
+      ).toEqual({
+        content: [
+          {
+            resource: {
+              mimeType: "text/plain",
+              text: "# Readme",
+              uri: "file:///readme@v2",
+            },
+            type: "resource",
+          },
+        ],
+      });
+    },
+
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResource({
+        async load() {
+          return {
+            text: "# Readme",
+            uri: "file:///readme@v2",
+          };
+        },
+        mimeType: "text/plain",
+        name: "Readme",
+        uri: "file:///readme",
+      });
+
+      server.addTool({
+        description: "Get the readme",
+        execute: async () => {
+          return {
+            content: [
+              {
+                resource: await server.embedded("file:///readme"),
+                type: "resource",
+              },
+            ],
+          };
+        },
+        name: "get_readme",
+        parameters: z.object({}),
+      });
+
+      return server;
+    },
+  });
+});
+
+test("embedded resources throw when load() returns an empty array", async () => {
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  server.addResource({
+    async load() {
+      return [];
+    },
+    mimeType: "text/plain",
+    name: "Readme",
+    uri: "file:///readme",
+  });
+
+  server.addResourceTemplate({
+    arguments: [
+      {
+        name: "id",
+        required: true,
+      },
+    ],
+    async load() {
+      return [];
+    },
+    mimeType: "text/plain",
+    name: "Doc",
+    uriTemplate: "doc://{id}",
+  });
+
+  await expect(server.embedded("file:///readme")).rejects.toThrow(
+    UnexpectedStateError,
+  );
+
+  await expect(server.embedded("doc://7")).rejects.toThrow(
+    UnexpectedStateError,
+  );
 });
 
 test("adds prompts", async () => {
