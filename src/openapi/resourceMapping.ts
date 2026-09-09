@@ -43,7 +43,7 @@ export function buildResourceMapping(
   for (const [flatKey, mapping] of entries) {
     if (mapping.in === "path") {
       if (flatKey !== mapping.name) {
-        path = path.replace(`{${mapping.name}}`, `{${flatKey}}`);
+        path = path.replaceAll(`{${mapping.name}}`, `{${flatKey}}`);
       }
     } else {
       queryKeys.push(flatKey);
