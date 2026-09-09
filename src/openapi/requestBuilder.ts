@@ -79,7 +79,7 @@ export async function executeRequest(
   let path = options.route.path;
 
   for (const [name, value] of Object.entries(pathParams)) {
-    path = path.replace(`{${name}}`, encodeURIComponent(value));
+    path = path.replaceAll(`{${name}}`, encodeURIComponent(value));
   }
 
   const url = new URL(baseUrl.replace(/\/$/, "") + path);
