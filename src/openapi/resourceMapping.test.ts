@@ -151,3 +151,23 @@ test("a collision-suffixed flat key rewrites the specific path variable it repla
     "openapi://getItem/items/{id__path}{?id__query}",
   );
 });
+
+test("a collision-suffixed flat key rewrites every occurrence of a repeated path variable", () => {
+  // e.g. /accounts/{id}/mirrors/{id} where "id" also collides with a query
+  // param named "id" — buildFlatSchema would have suffixed the path one to
+  // "id__path". Both occurrences of {id} must be rewritten, not just the
+  // first.
+  const mapping = buildResourceMapping(
+    route({ path: "/accounts/{id}/mirrors/{id}" }),
+    "getMirror",
+    {
+      id__path: { in: "path", name: "id" },
+      id__query: { in: "query", name: "id" },
+    },
+    ["id__path"],
+  );
+  expect(mapping.kind).toBe("template");
+  expect((mapping as { uriTemplate: string }).uriTemplate).toBe(
+    "openapi://getMirror/accounts/{id__path}/mirrors/{id__path}{?id__query}",
+  );
+});
