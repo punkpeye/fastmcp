@@ -106,6 +106,25 @@ test("executeRequest builds the URL, path substitution, query, headers, and JSON
   expect((calledInit!.headers as Headers).get("x-api-key")).toBe("secret");
 });
 
+test("executeRequest replaces every occurrence of a repeated path parameter", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response("{}", { status: 200 }),
+  );
+
+  await executeRequest({
+    args: { id: "team/42" },
+    fetchImpl,
+    parameterMap: { id: { in: "path", name: "id" } },
+    route: route({ path: "/accounts/{id}/mirrors/{id}" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [calledUrl] = fetchImpl.mock.calls[0]!;
+  expect(new URL(calledUrl).pathname).toBe(
+    "/accounts/team%2F42/mirrors/team%2F42",
+  );
+});
+
 test("a caller-supplied header overrides the generated content-type, case-insensitively", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () => new Response("{}", { status: 200 }),
