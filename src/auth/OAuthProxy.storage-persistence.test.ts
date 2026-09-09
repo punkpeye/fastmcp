@@ -126,6 +126,29 @@ describe("OAuthProxy TokenStorage persistence", () => {
     );
   });
 
+  it("does not cache a DCR client when persistence fails", async () => {
+    const tokenStorage = createStorage();
+    const proxy = createProxy(tokenStorage);
+    let failedKey: string | undefined;
+
+    vi.spyOn(tokenStorage, "save").mockImplementationOnce(async (key) => {
+      failedKey = key;
+      throw new Error("storage unavailable");
+    });
+
+    await expect(
+      proxy.registerClient({ redirect_uris: [CALLBACK_URL] }),
+    ).rejects.toThrow("storage unavailable");
+
+    expect(failedKey).toMatch(/^client:/);
+    const clientId = failedKey?.slice("client:".length);
+    expect(clientId).toBeTruthy();
+
+    await expect(proxy.authorize(authParams(clientId!))).rejects.toMatchObject({
+      code: "invalid_client",
+    });
+  });
+
   it("completes authorize to callback to token exchange across shared-storage instances", async () => {
     // Given separate instances that share one TokenStorage backend.
     const tokenStorage = createStorage();

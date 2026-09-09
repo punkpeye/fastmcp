@@ -14,6 +14,7 @@ import type { AuthorizationParams, UpstreamTokenSet } from "./types.js";
 
 import { OAuthProxy, OAuthProxyError } from "./OAuthProxy.js";
 import { PKCEUtils } from "./utils/pkce.js";
+import { MemoryTokenStorage } from "./utils/tokenStore.js";
 
 const CLIENT_METADATA_URL = "https://client.example.com/client-metadata.json";
 const REDIRECT_URI = "http://127.0.0.1:33418/";
@@ -210,6 +211,28 @@ describe("OAuthProxy CIMD support", () => {
     expect(clientMetadataFetches).toHaveLength(1);
 
     proxy.destroy();
+  });
+
+  it("does not cache a CIMD client when durable persistence fails", async () => {
+    const tokenStorage = new MemoryTokenStorage();
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      enableCimd: true,
+      tokenStorage,
+    });
+    const fetchMock = mockFetchRouting(clientMetadataResponse);
+    vi.spyOn(tokenStorage, "save").mockRejectedValueOnce(
+      new Error("storage unavailable"),
+    );
+
+    await expect(proxy.authorize(buildAuthParams())).rejects.toThrow(
+      "storage unavailable",
+    );
+    await expect(proxy.authorize(buildAuthParams())).resolves.toBeDefined();
+    expect(clientMetadataFetchCount(fetchMock)).toBe(2);
+
+    proxy.destroy();
+    tokenStorage.destroy();
   });
 
   it("re-reads the metadata document once the cached resolution lapses", async () => {

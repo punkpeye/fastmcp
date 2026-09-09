@@ -686,8 +686,8 @@ export class OAuthProxy {
       registeredAt: new Date(),
     };
 
-    this.stateStore.cacheRegisteredClient(client);
     await this.stateStore.saveRegisteredClient(client);
+    this.stateStore.cacheRegisteredClient(client);
 
     // Return RFC 7591 compliant response with proxy-issued credentials.
     const response: DCRResponse = {
@@ -1580,8 +1580,8 @@ export class OAuthProxy {
     );
 
     if (resolved) {
-      this.stateStore.cacheRegisteredClient(resolved);
       await this.stateStore.saveRegisteredClient(resolved);
+      this.stateStore.cacheRegisteredClient(resolved);
     }
 
     return resolved;
