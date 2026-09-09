@@ -106,6 +106,12 @@ export class WebStreamableHTTPServerTransport implements Transport {
   private _requestToStreamMapping = new Map<RequestId, StreamId>();
 
   private _sessionClosing = false;
+  /**
+   * Identifies the initialization attempt that currently owns `sessionId`.
+   * Session ids are caller-generated and may be reused, so comparing the id
+   * alone cannot keep a late callback from rolling back a newer session.
+   */
+  private _sessionGeneration = 0;
   private _standaloneSseStreamId = "_GET_stream";
   /**
    * Whether a client has held the standalone GET stream during this session.
@@ -162,6 +168,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     // `onclose` is the only way a handler can tell which session ended. Flag
     // the teardown instead and clear the id once `onclose` has had it.
     this._sessionClosing = true;
+    this._sessionGeneration += 1;
     try {
       await this.teardownStreams();
     } finally {
@@ -361,6 +368,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     }
 
     this._sessionClosing = true;
+    this._sessionGeneration += 1;
     const closedSessionId = this.sessionId ?? "";
     this.sessionId = undefined;
     try {
@@ -586,8 +594,26 @@ export class WebStreamableHTTPServerTransport implements Transport {
 
     // Generate or validate session ID
     if (hasInitRequest && this.sessionIdGenerator) {
-      this.sessionId = this.sessionIdGenerator();
-      await this._onsessioninitialized?.(this.sessionId);
+      const generatedSessionId = this.sessionIdGenerator();
+      const sessionGeneration = ++this._sessionGeneration;
+      this.sessionId = generatedSessionId;
+      try {
+        await this._onsessioninitialized?.(generatedSessionId);
+        if (
+          this._sessionGeneration !== sessionGeneration ||
+          this.activeSessionId !== generatedSessionId
+        ) {
+          throw new Error("Session initialization was superseded");
+        }
+      } catch (error) {
+        if (
+          this._sessionGeneration === sessionGeneration &&
+          this.sessionId === generatedSessionId
+        ) {
+          this.sessionId = undefined;
+        }
+        throw error;
+      }
     } else if (requestSessionId) {
       if (
         this.sessionIdGenerator &&

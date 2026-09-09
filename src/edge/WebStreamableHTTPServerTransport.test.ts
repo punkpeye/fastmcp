@@ -269,6 +269,82 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(onsessioninitialized).toHaveBeenCalledTimes(1);
   });
 
+  it("allows initialization to retry when onsessioninitialized rejects", async () => {
+    const sessionIdGenerator = vi
+      .fn<() => string>()
+      .mockReturnValueOnce("failed-session")
+      .mockReturnValueOnce("retry-session");
+    const onsessioninitialized = vi
+      .fn<(sessionId: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("session registry unavailable"))
+      .mockResolvedValueOnce();
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      onsessioninitialized,
+      sessionIdGenerator,
+    });
+    await createServer().connect(transport);
+
+    await expect(
+      transport.handleRequest(createInitializeRequest("application/json")),
+    ).rejects.toThrow("session registry unavailable");
+    expect(transport.sessionId).toBeUndefined();
+
+    const retry = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+    expect(retry.status).toBe(200);
+    await retry.json();
+    expect(transport.sessionId).toBe("retry-session");
+    expect(sessionIdGenerator).toHaveBeenCalledTimes(2);
+    expect(onsessioninitialized).toHaveBeenNthCalledWith(1, "failed-session");
+    expect(onsessioninitialized).toHaveBeenNthCalledWith(2, "retry-session");
+  });
+
+  it("does not let a late initialization failure clear a newer reused session id", async () => {
+    let rejectFirstInitialization: ((reason: Error) => void) | undefined;
+    let markFirstInitializationStarted: (() => void) | undefined;
+    const firstInitializationStarted = new Promise<void>((resolve) => {
+      markFirstInitializationStarted = resolve;
+    });
+    const firstInitialization = new Promise<void>((_resolve, reject) => {
+      rejectFirstInitialization = reject;
+    });
+    const onsessioninitialized = vi
+      .fn<(sessionId: string) => Promise<void>>()
+      .mockImplementationOnce(async () => {
+        markFirstInitializationStarted?.();
+        await firstInitialization;
+      })
+      .mockResolvedValueOnce();
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      onsessioninitialized,
+      sessionIdGenerator: () => "reused-session",
+    });
+    await createServer().connect(transport);
+
+    const staleInitialization = transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+    await firstInitializationStarted;
+    const deleted = await transport.handleRequest(
+      createDeleteRequest("reused-session"),
+    );
+    expect(deleted.status).toBe(204);
+
+    const currentInitialization = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+    expect(currentInitialization.status).toBe(200);
+    await currentInitialization.json();
+    expect(transport.sessionId).toBe("reused-session");
+
+    rejectFirstInitialization?.(new Error("stale registry failure"));
+    await expect(staleInitialization).rejects.toThrow("stale registry failure");
+    expect(transport.sessionId).toBe("reused-session");
+  });
+
   it("never echoes the active session id on a rejected request", async () => {
     const transport = new WebStreamableHTTPServerTransport({
       enableJsonResponse: true,
