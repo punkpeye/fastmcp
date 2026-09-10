@@ -1449,6 +1449,8 @@ export class FastMCPSession<
    */
   #subscriptions: Set<string> = new Set();
 
+  #transportType?: "httpStream" | "stdio";
+
   #utils?: ServerOptions<T>["utils"];
 
   constructor({
@@ -1504,6 +1506,7 @@ export class FastMCPSession<
     this.#sessionId = sessionId;
     this.#stateless = stateless;
     this.#streamKeepaliveConfig = streamKeepalive;
+    this.#transportType = transportType;
     this.#needsEventLoopFlush = transportType === "httpStream";
 
     if (tools.length) {
@@ -1649,7 +1652,7 @@ export class FastMCPSession<
       }
 
       if (this.#clientCapabilities) {
-        const pingConfig = this.#getPingConfig(transport);
+        const pingConfig = this.#getPingConfig();
 
         if (pingConfig.enabled) {
           this.#pingInterval = setInterval(async () => {
@@ -1919,21 +1922,16 @@ export class FastMCPSession<
           .join(", ");
   }
 
-  #getPingConfig(transport: Transport): {
+  #getPingConfig(): {
     enabled: boolean;
     intervalMs: number;
     logLevel: LoggingLevel;
   } {
     const pingConfig = this.#pingConfig || {};
 
-    let defaultEnabled = false;
-
-    if ("type" in transport) {
-      // Enable by default for SSE and HTTP streaming
-      if (transport.type === "httpStream") {
-        defaultEnabled = true;
-      }
-    }
+    // Enabled by default for httpStream, which also serves the SSE endpoint;
+    // disabled for stdio.
+    const defaultEnabled = this.#transportType === "httpStream";
 
     return {
       enabled:

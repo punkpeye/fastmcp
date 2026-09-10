@@ -2301,6 +2301,30 @@ test("session does not overlap pings when the client is slow", async () => {
   });
 });
 
+test("session enables pings by default over httpStream", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      const onPing = vi.fn().mockReturnValue({});
+
+      client.setRequestHandler(PingRequestSchema, onPing);
+
+      await delay(2000);
+
+      expect(onPing.mock.calls.length).toBeGreaterThanOrEqual(1);
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        ping: {
+          intervalMs: 500,
+        },
+        version: "1.0.0",
+      });
+      return server;
+    },
+  });
+});
+
 test("completes prompt arguments", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
