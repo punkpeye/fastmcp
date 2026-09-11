@@ -1453,6 +1453,7 @@ export class FastMCPSession<
 
   constructor({
     auth,
+    hasTools,
     icons,
     instructions,
     logger,
@@ -1474,6 +1475,11 @@ export class FastMCPSession<
     websiteUrl,
   }: {
     auth?: T;
+    /**
+     * Whether the server has any tools at all, including ones this session's
+     * `canAccess` filtering removed from `tools`. Defaults to `tools.length > 0`.
+     */
+    hasTools?: boolean;
     icons?: Icon[];
     instructions?: string;
     logger: Logger;
@@ -1506,7 +1512,14 @@ export class FastMCPSession<
     this.#streamKeepaliveConfig = streamKeepalive;
     this.#needsEventLoopFlush = transportType === "httpStream";
 
-    if (tools.length) {
+    // The `tools` capability describes the server, not what this session may
+    // see: a session whose `canAccess` filtering removed every tool still
+    // belongs to a server that supports tools. Gating on the filtered list
+    // answered `tools/list` with -32601 instead of an empty list and made
+    // `addTool()` throw while such a session was connected (#370).
+    const supportsTools = hasTools ?? tools.length > 0;
+
+    if (supportsTools) {
       this.#capabilities.tools = {};
     }
 
@@ -1544,7 +1557,7 @@ export class FastMCPSession<
     this.setupRootsHandlers();
     this.setupCompleteHandlers();
 
-    if (tools.length) {
+    if (supportsTools) {
       this.setupToolHandlers(tools);
     }
 
@@ -3695,6 +3708,7 @@ export class FastMCP<
       : this.#tools;
     return new FastMCPSession<T>({
       auth,
+      hasTools: this.#tools.length > 0,
       icons: this.#options.icons,
       instructions: this.#options.instructions,
       logger: this.#logger,
