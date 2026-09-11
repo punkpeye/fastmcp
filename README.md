@@ -631,9 +631,10 @@ server.addTool({
 });
 ```
 
-Works for `outputSchema` too. Note that FastMCP advertises every tool schema
-with `additionalProperties: false`, whatever your schema said — the same
-treatment Zod and Valibot schemas get.
+Works for `outputSchema` too. Note that FastMCP advertises input schemas with
+`additionalProperties: false`, whatever your schema said — the same treatment
+Zod and Valibot schemas get. Output schemas keep whatever additional-properties
+rule your schema declared.
 
 Unlike the schema libraries above, a plain JSON Schema carries no TypeScript
 types, so `execute` receives `unknown` arguments. Cast or narrow them yourself.
