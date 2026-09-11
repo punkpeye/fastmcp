@@ -2546,9 +2546,9 @@ export class FastMCPSession<
                 }) as SDKTool["inputSchema"],
             name: tool.name,
             ...(tool.outputSchema && {
-              outputSchema: strictJsonSchema(
-                await toJsonSchema(tool.outputSchema),
-              ) as SDKTool["inputSchema"],
+              outputSchema: (await toJsonSchema(
+                tool.outputSchema,
+              )) as SDKTool["outputSchema"],
             }),
             // Pass through _meta for MCP ext-apps UI support (issue #229)
             ...(tool._meta && { _meta: tool._meta }),

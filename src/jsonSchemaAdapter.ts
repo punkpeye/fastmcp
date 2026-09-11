@@ -50,9 +50,8 @@ type AjvValidateFunction = {
  * (and `ajv-formats` if you use `format` keywords) to use this. It is imported
  * on first validation, so servers that never call this pay nothing for it.
  *
- * Note that FastMCP applies the same strictness to every tool schema: objects
- * are advertised with `additionalProperties: false`, whatever the input schema
- * said.
+ * FastMCP advertises tool input objects with `additionalProperties: false`.
+ * Output schemas preserve the declared rules for additional properties.
  *
  * @example
  * ```ts
