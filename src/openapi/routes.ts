@@ -23,12 +23,7 @@ export function extractRoutes(document: BundledOpenApiDocument): HttpRoute[] {
   const routes: HttpRoute[] = [];
 
   for (const [path, rawPathItem] of Object.entries(document.paths ?? {})) {
-    // Bundling can leave shared path items as local refs. Preserve any
-    // sibling fields, such as parameters defined alongside the ref.
-    const pathItem = {
-      ...resolveRef<RawPathItem>(document, rawPathItem),
-      ...rawPathItem,
-    };
+    const pathItem = resolvePathItem(document, rawPathItem);
     const pathLevelParams = (pathItem.parameters ?? []).map((param) =>
       resolveRef<OpenApiParameter>(document, param),
     );
@@ -77,6 +72,34 @@ function mergeParameters(
     ),
     ...operationLevel,
   ];
+}
+
+/**
+ * Resolves a path item's `$ref`, following chains of them — bundling leaves
+ * shared path items as local refs, and doesn't collapse a chain whose
+ * intermediate items have sibling fields.
+ *
+ * A referring item's sibling fields (e.g. `parameters`) replace the
+ * referenced item's rather than merging with them: bundling inlines a shared
+ * path item at one referrer with that referrer's siblings folded in, so
+ * merging would leak them into every other path sharing the item.
+ */
+function resolvePathItem(
+  document: BundledOpenApiDocument,
+  pathItem: RawPathItem,
+): RawPathItem {
+  const visited = new Set<string>();
+  let resolved = pathItem;
+
+  while (resolved.$ref && !visited.has(resolved.$ref)) {
+    visited.add(resolved.$ref);
+
+    const { $ref, ...siblings } = resolved;
+
+    resolved = { ...resolveRef<RawPathItem>(document, { $ref }), ...siblings };
+  }
+
+  return resolved;
 }
 
 function resolveRef<TValue>(
