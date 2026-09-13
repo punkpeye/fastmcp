@@ -6,13 +6,14 @@ import type {
   OpenApiParameterRef,
   OpenApiRequestBody,
   OpenApiResponse,
+  RawPathItem,
 } from "./types.js";
 
 const HTTP_METHODS: HttpMethod[] = ["get", "put", "post", "delete", "patch"];
 
 /**
  * Walks a bundled document's `paths` into a flat list of routes, resolving
- * any structural (non-schema) `$ref`s on parameters and request bodies —
+ * any structural (non-schema) `$ref`s on path items, parameters and request bodies —
  * e.g. `#/components/parameters/Limit` — against the same document.
  *
  * Bundling (see `loadSpec.ts`) guarantees every remaining `$ref` here is
@@ -21,7 +22,13 @@ const HTTP_METHODS: HttpMethod[] = ["get", "put", "post", "delete", "patch"];
 export function extractRoutes(document: BundledOpenApiDocument): HttpRoute[] {
   const routes: HttpRoute[] = [];
 
-  for (const [path, pathItem] of Object.entries(document.paths ?? {})) {
+  for (const [path, rawPathItem] of Object.entries(document.paths ?? {})) {
+    // Bundling can leave shared path items as local refs. Preserve any
+    // sibling fields, such as parameters defined alongside the ref.
+    const pathItem = {
+      ...resolveRef<RawPathItem>(document, rawPathItem),
+      ...rawPathItem,
+    };
     const pathLevelParams = (pathItem.parameters ?? []).map((param) =>
       resolveRef<OpenApiParameter>(document, param),
     );

@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { fileURLToPath } from "node:url";
 import { expect, test, vi } from "vitest";
 
 import { FastMCP } from "../FastMCP.js";
@@ -124,6 +125,130 @@ async function connect(server: FastMCP) {
 
   return client;
 }
+
+test.each([false, true])(
+  "shared external path items stay callable at each path (resources: %s)",
+  async (resources) => {
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ id: 42 })),
+    );
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      resources,
+      spec: fileURLToPath(
+        new URL("./__fixtures__/shared-path-items/root.yaml", import.meta.url),
+      ),
+    });
+    const client = await connect(server);
+
+    try {
+      if (resources) {
+        const { resourceTemplates } = await client.listResourceTemplates();
+        expect(
+          resourceTemplates.map((template) => template.uriTemplate).sort(),
+        ).toEqual([
+          "openapi://get_archived_pets_petId/archived-pets/{petId}",
+          "openapi://get_pets_petId/pets/{petId}",
+        ]);
+
+        for (const template of resourceTemplates) {
+          const result = await client.readResource({
+            uri: template.uriTemplate.replace("{petId}", "42"),
+          });
+          expect(result.contents).toEqual([
+            expect.objectContaining({ text: JSON.stringify({ id: 42 }) }),
+          ]);
+        }
+      } else {
+        const { tools } = await client.listTools();
+        expect(tools.map((tool) => tool.name).sort()).toEqual([
+          "get_archived_pets_petId",
+          "get_pets_petId",
+        ]);
+
+        for (const tool of tools) {
+          const result = await client.callTool({
+            arguments: { petId: 42 },
+            name: tool.name,
+          });
+          expect(result.isError).toBeFalsy();
+          expect(result.content).toEqual([
+            { text: JSON.stringify({ id: 42 }), type: "text" },
+          ]);
+        }
+      }
+
+      expect(fetchImpl.mock.calls.map(([url]) => url).sort()).toEqual([
+        "https://api.example.com/archived-pets/42",
+        "https://api.example.com/pets/42",
+      ]);
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each(["3.0.3", "3.1.0"])(
+  "internal path item references preserve sibling parameters in OpenAPI %s",
+  async (openapi) => {
+    const prefix =
+      openapi === "3.0.3" ? "#/x-path-items" : "#/components/pathItems";
+    const pathItems = {
+      Alias: { $ref: `${prefix}/Pet` },
+      Pet: {
+        get: {
+          operationId: "getPet",
+          responses: { 200: { description: "OK" } },
+        },
+      },
+    };
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("pet"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        ...(openapi === "3.0.3"
+          ? { "x-path-items": pathItems }
+          : { components: { pathItems } }),
+        info: { title: "Internal path items", version: "1.0.0" },
+        openapi,
+        paths: {
+          "/pets/{petId}": {
+            $ref: `${prefix}/Alias`,
+            parameters: [
+              {
+                in: "path",
+                name: "petId",
+                required: true,
+                schema: { type: "integer" },
+              },
+            ],
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.map((tool) => tool.name)).toEqual(["getPet"]);
+      const result = await client.callTool({
+        arguments: { petId: 42 },
+        name: "getPet",
+      });
+      expect(result.content).toEqual([{ text: "pet", type: "text" }]);
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledWith(
+        "https://api.example.com/pets/42",
+        expect.objectContaining({ method: "GET" }),
+      );
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);
 
 test("defaults the server name to the spec's info.title, and the version to 1.0.0", async () => {
   const server = await fromOpenAPI({
