@@ -194,5 +194,6 @@ export interface RawOperation {
 }
 
 export type RawPathItem = {
+  $ref?: string;
   parameters?: (OpenApiParameter | OpenApiParameterRef)[];
 } & Partial<Record<HttpMethod, RawOperation>>;

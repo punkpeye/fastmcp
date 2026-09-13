@@ -29,6 +29,8 @@ await server.start({ transportType: "stdio" });
 
 `spec` accepts a URL, a local file path, or an already-parsed OpenAPI document (JSON or YAML). Passing a URL or file path — rather than an object you fetched and parsed yourself — is what lets external `$ref`s (multi-file specs) and a relative `servers[0].url` resolve correctly, since both are resolved relative to that value.
 
+Path Item `$ref`s are supported too: when multiple paths share a definition, each remains a separate tool or resource at its own path.
+
 ## Choosing which operations become tools
 
 Turning every operation in a large spec into a tool produces a tool list most MCP clients can't work with well. There is no way to make this fully automatic, so `fromOpenAPI` asks you to choose:

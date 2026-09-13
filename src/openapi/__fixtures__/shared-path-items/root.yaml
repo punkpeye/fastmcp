@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info:
+  title: Shared Path Items
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /pets/{petId}:
+    $ref: ./pet.yaml
+  /archived-pets/{petId}:
+    $ref: ./pet.yaml
