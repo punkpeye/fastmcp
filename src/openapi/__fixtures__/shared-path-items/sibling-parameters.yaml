@@ -1,0 +1,23 @@
+openapi: 3.0.3
+info:
+  title: Shared Path Item Siblings
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /pets/{petId}:
+    $ref: ./operation.yaml
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+  /archived-pets/{archivedId}:
+    $ref: ./operation.yaml
+    parameters:
+      - name: archivedId
+        in: path
+        required: true
+        schema:
+          type: integer

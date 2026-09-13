@@ -250,6 +250,92 @@ test.each(["3.0.3", "3.1.0"])(
   },
 );
 
+test("path item reference chains keep sibling fields from intermediate items", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("pet"));
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    spec: {
+      components: {
+        pathItems: {
+          Pet: {
+            get: {
+              operationId: "getPet",
+              responses: { 200: { description: "OK" } },
+            },
+          },
+          PetById: {
+            $ref: "#/components/pathItems/Pet",
+            parameters: [
+              {
+                in: "path",
+                name: "petId",
+                required: true,
+                schema: { type: "integer" },
+              },
+            ],
+          },
+        },
+      },
+      info: { title: "Path item chains", version: "1.0.0" },
+      openapi: "3.1.0",
+      paths: {
+        "/pets/{petId}": { $ref: "#/components/pathItems/PetById" },
+      },
+      servers: [{ url: "https://api.example.com" }],
+    },
+  });
+  const client = await connect(server);
+
+  try {
+    const { tools } = await client.listTools();
+    expect(tools.map((tool) => tool.name)).toEqual(["getPet"]);
+    const result = await client.callTool({
+      arguments: { petId: 42 },
+      name: "getPet",
+    });
+    expect(result.content).toEqual([{ text: "pet", type: "text" }]);
+    expect(result.isError).toBeFalsy();
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.example.com/pets/42",
+      expect.objectContaining({ method: "GET" }),
+    );
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});
+
+test("paths sharing an external path item keep only their own sibling parameters", async () => {
+  const server = await fromOpenAPI({
+    fetch: vi.fn(async () => new Response("{}")),
+    spec: fileURLToPath(
+      new URL(
+        "./__fixtures__/shared-path-items/sibling-parameters.yaml",
+        import.meta.url,
+      ),
+    ),
+  });
+  const client = await connect(server);
+
+  try {
+    const { tools } = await client.listTools();
+    expect(
+      Object.fromEntries(
+        tools.map((tool) => [
+          tool.name,
+          Object.keys(tool.inputSchema.properties ?? {}),
+        ]),
+      ),
+    ).toEqual({
+      get_archived_pets_archivedId: ["archivedId"],
+      get_pets_petId: ["petId"],
+    });
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});
+
 test("defaults the server name to the spec's info.title, and the version to 1.0.0", async () => {
   const server = await fromOpenAPI({
     fetch: vi.fn(async () => new Response("{}")),
