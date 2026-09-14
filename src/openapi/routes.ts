@@ -49,6 +49,9 @@ export function extractRoutes(document: BundledOpenApiDocument): HttpRoute[] {
           ? resolveRef<OpenApiRequestBody>(document, operation.requestBody)
           : undefined,
         responses: resolveResponses(document, operation.responses),
+        servers: [operation.servers, pathItem.servers, document.servers].find(
+          (servers) => servers?.length,
+        ),
         summary: operation.summary,
         tags: operation.tags ?? [],
       });

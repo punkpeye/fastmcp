@@ -71,7 +71,7 @@ export async function fromOpenAPI(
       origin,
       parameterMap,
       route,
-      servers: document.servers,
+      servers: route.servers,
     };
 
     if (

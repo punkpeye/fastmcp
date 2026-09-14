@@ -31,6 +31,8 @@ await server.start({ transportType: "stdio" });
 
 Path Item `$ref`s are supported too: when multiple paths share a definition, each remains a separate tool or resource at its own path.
 
+Each operation uses the first server in its nearest non-empty `servers` array: operation, then path, then document. Server variables use their defaults, and relative URLs resolve against the spec URL. An explicit `baseUrl` overrides this selection for every generated tool or resource.
+
 ## Choosing which operations become tools
 
 Turning every operation in a large spec into a tool produces a tool list most MCP clients can't work with well. There is no way to make this fully automatic, so `fromOpenAPI` asks you to choose:
