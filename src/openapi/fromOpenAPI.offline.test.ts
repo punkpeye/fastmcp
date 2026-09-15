@@ -113,6 +113,18 @@ const WIDGETS_READ_SPEC = {
   servers: [{ url: "https://api.example.com" }],
 };
 
+const PATH_SERVERS = [
+  { url: "https://path.example.com/v2" },
+  { url: "https://unused.example.com" },
+];
+const OPERATION_SERVERS = [
+  {
+    url: "https://{region}.example.com/v3",
+    variables: { region: { default: "operation" } },
+  },
+  { url: "https://unused.example.com" },
+];
+
 async function connect(server: FastMCP) {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -125,6 +137,243 @@ async function connect(server: FastMCP) {
 
   return client;
 }
+
+test.each([
+  { expected: "https://api.example.com", label: "root fallback" },
+  {
+    expected: "https://path.example.com/v2",
+    label: "path overrides root",
+    pathServers: PATH_SERVERS,
+  },
+  {
+    expected: "https://operation.example.com/v3",
+    label: "operation overrides root",
+    operationServers: OPERATION_SERVERS,
+  },
+  {
+    expected: "https://operation.example.com/v3",
+    label: "operation overrides path and root",
+    operationServers: OPERATION_SERVERS,
+    pathServers: PATH_SERVERS,
+  },
+  {
+    expected: "https://path.example.com/v2",
+    label: "path without root servers",
+    pathServers: PATH_SERVERS,
+    withoutRootServers: true,
+  },
+  {
+    expected: "https://operation.example.com/v3",
+    label: "operation without root servers",
+    operationServers: OPERATION_SERVERS,
+    withoutRootServers: true,
+  },
+  {
+    expected: "https://path.example.com/v2",
+    label: "empty operation servers inherit path servers",
+    operationServers: [],
+    pathServers: PATH_SERVERS,
+  },
+  {
+    expected: "https://api.example.com",
+    label: "empty path servers inherit root servers",
+    pathServers: [],
+  },
+  {
+    expected: "https://api.example.com",
+    label: "empty operation and path servers inherit root servers",
+    operationServers: [],
+    pathServers: [],
+  },
+  {
+    baseUrl: "https://proxy.example.com/api/",
+    expected: "https://proxy.example.com/api",
+    label: "baseUrl overrides every server level",
+    operationServers: OPERATION_SERVERS,
+    pathServers: PATH_SERVERS,
+  },
+])(
+  "tool server selection: $label",
+  async ({
+    baseUrl,
+    expected,
+    operationServers,
+    pathServers,
+    withoutRootServers,
+  }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      baseUrl,
+      fetch: fetchImpl,
+      spec: {
+        ...WIDGETS_SPEC,
+        paths: {
+          "/widgets": {
+            post: {
+              ...WIDGETS_SPEC.paths["/widgets"].post,
+              servers: operationServers,
+            },
+            servers: pathServers,
+          },
+        },
+        servers: withoutRootServers ? undefined : WIDGETS_SPEC.servers,
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const result = await client.callTool({
+        arguments: { name: "sprocket" },
+        name: "createWidget",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+        `${expected}/widgets`,
+        expect.objectContaining({
+          body: JSON.stringify({ name: "sprocket" }),
+          method: "POST",
+        }),
+      );
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each([undefined, "https://proxy.example.com/api"])(
+  "resources keep each route's servers, including referenced path items (baseUrl: %s)",
+  async (baseUrl) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      baseUrl,
+      fetch: fetchImpl,
+      resources: true,
+      spec: {
+        components: {
+          pathItems: {
+            Widget: {
+              get: {
+                parameters:
+                  WIDGETS_READ_SPEC.paths["/widgets/{widgetId}"].get.parameters,
+                responses: { 200: { description: "OK" } },
+              },
+            },
+          },
+        },
+        info: WIDGETS_READ_SPEC.info,
+        openapi: "3.1.0",
+        paths: {
+          "/archived-widgets/{widgetId}": {
+            $ref: "#/components/pathItems/Widget",
+            servers: [{ url: "https://archive.example.com" }],
+          },
+          "/health": {
+            get: {
+              operationId: "health",
+              responses: { 200: { description: "OK" } },
+            },
+          },
+          "/widgets": {
+            get: {
+              ...WIDGETS_READ_SPEC.paths["/widgets"].get,
+              servers: OPERATION_SERVERS,
+            },
+            servers: PATH_SERVERS,
+          },
+          "/widgets/{widgetId}": {
+            $ref: "#/components/pathItems/Widget",
+            servers: PATH_SERVERS,
+          },
+        },
+        servers: WIDGETS_READ_SPEC.servers,
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      for (const [name, path, expectedBase] of [
+        ["get_widgets_widgetId", "/widgets/w1", "https://path.example.com/v2"],
+        [
+          "get_archived_widgets_widgetId",
+          "/archived-widgets/w1",
+          "https://archive.example.com",
+        ],
+        ["listWidgets", "/widgets", "https://operation.example.com/v3"],
+        ["health", "/health", "https://api.example.com"],
+      ]) {
+        const result = await client.readResource({
+          uri: `openapi://${name}${path}`,
+        });
+        expect(result.contents).toEqual([
+          expect.objectContaining({ text: "{}" }),
+        ]);
+        expect(fetchImpl).toHaveBeenLastCalledWith(
+          `${baseUrl ?? expectedBase}${path}`,
+          expect.objectContaining({ method: "GET" }),
+        );
+      }
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each(["path", "operation"])(
+  "relative %s servers resolve against the spec URL with variable defaults",
+  async (level) => {
+    const servers = [
+      { url: "../{version}", variables: { version: { default: "v2" } } },
+    ];
+    const specFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () =>
+        Response.json({
+          ...WIDGETS_SPEC,
+          paths: {
+            "/widgets": {
+              post: {
+                ...WIDGETS_SPEC.paths["/widgets"].post,
+                ...(level === "operation" ? { servers } : {}),
+              },
+              servers: level === "path" ? servers : PATH_SERVERS,
+            },
+          },
+        }),
+      );
+
+    try {
+      const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+      const server = await fromOpenAPI({
+        fetch: fetchImpl,
+        spec: "https://specs.example.com/specs/openapi.json",
+      });
+      const client = await connect(server);
+
+      try {
+        const result = await client.callTool({
+          arguments: { name: "sprocket" },
+          name: "createWidget",
+        });
+        expect(result.isError).toBeFalsy();
+        expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+          "https://specs.example.com/v2/widgets",
+          expect.objectContaining({ method: "POST" }),
+        );
+      } finally {
+        await server.sessions[0]?.close();
+        await client.close();
+        await server.stop();
+      }
+    } finally {
+      specFetch.mockRestore();
+    }
+  },
+);
 
 test.each([false, true])(
   "shared external path items stay callable at each path (resources: %s)",

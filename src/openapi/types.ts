@@ -20,9 +20,9 @@ export interface BundledOpenApiDocument {
 
 export interface FromOpenAPIOptions {
   /**
-   * Overrides the resolved `servers[0].url`. Required when the spec has no
-   * `servers` entry, or has a relative `servers[0].url` and was not loaded
-   * from an http(s) URL.
+   * Overrides the selected server URL for every operation. Required when
+   * no applicable `servers` entry exists, or the selected URL is relative
+   * and the spec was not loaded from an http(s) URL.
    */
   baseUrl?: string;
 
@@ -117,6 +117,8 @@ export interface HttpRoute {
    * equivalent to the GET-never-has-a-body rule for responses.
    */
   responses?: Record<string, OpenApiResponse>;
+  /** The first non-empty server list at operation, path, or document level. */
+  servers?: OpenApiServer[];
   summary?: string;
   tags: string[];
 }
@@ -189,6 +191,7 @@ export interface RawOperation {
   parameters?: (OpenApiParameter | OpenApiParameterRef)[];
   requestBody?: OpenApiParameterRef | OpenApiRequestBody;
   responses?: Record<string, OpenApiParameterRef | OpenApiResponse>;
+  servers?: OpenApiServer[];
   summary?: string;
   tags?: string[];
 }
@@ -196,4 +199,5 @@ export interface RawOperation {
 export type RawPathItem = {
   $ref?: string;
   parameters?: (OpenApiParameter | OpenApiParameterRef)[];
+  servers?: OpenApiServer[];
 } & Partial<Record<HttpMethod, RawOperation>>;
