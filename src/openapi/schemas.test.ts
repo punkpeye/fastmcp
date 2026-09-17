@@ -103,6 +103,78 @@ test("a non-object request body is exposed as a single `body` property", () => {
   expect(flatSchema.required).toContain("body");
 });
 
+test.each([
+  { additionalProperties: { type: "string" }, label: "typed values" },
+  { additionalProperties: true, label: "unconstrained values" },
+  { label: "implicitly allowed values" },
+])(
+  "a JSON dictionary with empty properties keeps $label",
+  ({ additionalProperties }) => {
+    const schema = {
+      ...(additionalProperties === undefined ? {} : { additionalProperties }),
+      properties: {},
+      type: "object",
+    };
+    const { bodyEncoding, flatSchema, parameterMap, wholeBodyKey } =
+      buildFlatSchema(
+        route({
+          requestBody: {
+            content: { "application/json": { schema } },
+            required: true,
+          },
+        }),
+        undefined,
+      );
+
+    expect(bodyEncoding).toBe("json");
+    expect(wholeBodyKey).toBe("body");
+    expect(flatSchema.properties).toEqual({ body: schema });
+    expect(flatSchema.required).toEqual(["body"]);
+    expect(parameterMap).toEqual({ body: { in: "body", name: "body" } });
+  },
+);
+
+test.each([
+  {
+    additionalProperties: false,
+    contentType: "application/json",
+    encoding: "json",
+    label: "a closed JSON object",
+  },
+  {
+    additionalProperties: { type: "string" },
+    contentType: "application/x-www-form-urlencoded",
+    encoding: "form",
+    label: "a form object",
+  },
+])(
+  "empty properties in $label keep their existing mapping",
+  ({ additionalProperties, contentType, encoding }) => {
+    const { bodyEncoding, flatSchema, parameterMap, wholeBodyKey } =
+      buildFlatSchema(
+        route({
+          requestBody: {
+            content: {
+              [contentType]: {
+                schema: {
+                  additionalProperties,
+                  properties: {},
+                  type: "object",
+                },
+              },
+            },
+          },
+        }),
+        undefined,
+      );
+
+    expect(bodyEncoding).toBe(encoding);
+    expect(wholeBodyKey).toBeUndefined();
+    expect(flatSchema.properties).toEqual({});
+    expect(parameterMap).toEqual({});
+  },
+);
+
 test("buildSharedDefs rewrites #/components/schemas refs to #/$defs, embedded per-tool", () => {
   const document: BundledOpenApiDocument = {
     components: {
