@@ -46,7 +46,7 @@
     }
   },
   "dependencies": {
-    "@apidevtools/swagger-parser": "^12.1.0",
+    "@apidevtools/swagger-parser": "^13.0.0",
     "@modelcontextprotocol/sdk": "^1.24.3",
     "@standard-schema/spec": "^1.0.0",
     "execa": "^9.6.1",
