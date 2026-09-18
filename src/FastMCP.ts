@@ -1900,34 +1900,6 @@ export class FastMCPSession<
     };
   }
 
-  /**
-   * `sendLoggingMessage` rejects once the client has hung up, and these four
-   * callers are synchronous, so the rejection has nowhere to go. Swallow it the
-   * way every other notification sender in this class does, or a client that
-   * disconnects mid-tool takes the server process down with it.
-   */
-  #sendLog(
-    level: LoggingLevel,
-    message: string,
-    context?: SerializableValue,
-  ): void {
-    this.#server
-      .sendLoggingMessage({
-        data: {
-          context,
-          message,
-        },
-        level,
-      })
-      .catch((error: unknown) => {
-        this.#logger.error(
-          `[FastMCP error] failed to send ${level} log notification.\n\n${
-            error instanceof Error ? error.stack : JSON.stringify(error)
-          }`,
-        );
-      });
-  }
-
   #formatSchemaIssues(issues: readonly StandardSchemaV1.Issue[]): string {
     return this.#utils?.formatInvalidParamsErrorMessage
       ? this.#utils.formatInvalidParamsErrorMessage(issues)
@@ -1956,6 +1928,34 @@ export class FastMCPSession<
       intervalMs: pingConfig.intervalMs || 5000,
       logLevel: pingConfig.logLevel || "debug",
     };
+  }
+
+  /**
+   * `sendLoggingMessage` rejects once the client has hung up, and these four
+   * callers are synchronous, so the rejection has nowhere to go. Swallow it the
+   * way every other notification sender in this class does, or a client that
+   * disconnects mid-tool takes the server process down with it.
+   */
+  #sendLog(
+    level: LoggingLevel,
+    message: string,
+    context?: SerializableValue,
+  ): void {
+    this.#server
+      .sendLoggingMessage({
+        data: {
+          context,
+          message,
+        },
+        level,
+      })
+      .catch((error: unknown) => {
+        this.#logger.error(
+          `[FastMCP error] failed to send ${level} log notification.\n\n${
+            error instanceof Error ? error.stack : JSON.stringify(error)
+          }`,
+        );
+      });
   }
 
   /**
