@@ -524,7 +524,7 @@ export class EdgeFastMCP {
       let parsed: StandardSchemaV1.Result<unknown>;
 
       try {
-        parsed = await tool.parameters["~standard"].validate(toolArgs);
+        parsed = await tool.parameters["~standard"].validate(args);
       } catch (error) {
         return this.#rpcError(
           id,

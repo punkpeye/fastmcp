@@ -2576,8 +2576,11 @@ export class FastMCPSession<
         let args: unknown = undefined;
 
         if (tool.parameters) {
+          // `arguments` is optional in the request schema, so a conformant
+          // client may omit it. A schema whose properties are all optional
+          // still rejects `undefined`, so send an empty object instead.
           const parsed = await tool.parameters["~standard"].validate(
-            request.params.arguments,
+            request.params.arguments ?? {},
           );
 
           if (parsed.issues) {
