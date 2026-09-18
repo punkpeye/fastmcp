@@ -4,3 +4,4 @@ node_modules
 .envrc
 .idea
 CLAUDE.local.md
+.claude/settings.local.json
