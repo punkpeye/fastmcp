@@ -416,7 +416,14 @@ function extractBodyProperties(
     | Record<string, OpenApiSchema>
     | undefined;
 
-  if (schema.type === "object" && schemaProperties) {
+  // An empty `properties` map is not the same as an absent one: it is how a
+  // dictionary-like body (`additionalProperties` with no fixed keys) is
+  // described, and `Object.entries` over it yields nothing to flatten. Treat
+  // it like any other non-flattenable JSON body and expose the whole body.
+  const hasFlattenableProperties =
+    schemaProperties !== undefined && Object.keys(schemaProperties).length > 0;
+
+  if (schema.type === "object" && hasFlattenableProperties) {
     const requiredNames = new Set(
       (schema.required as string[] | undefined) ?? [],
     );

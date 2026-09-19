@@ -1010,3 +1010,46 @@ test("buildOutputSchema skips wiring when the schema transitively references too
 
   expect(schema).toBeUndefined();
 });
+test("an object body with an empty properties map still exposes the body", () => {
+  // A dictionary-like body (`additionalProperties` and no fixed keys) is
+  // emitted as `properties: {}` by some generators, e.g.
+  // `zod-to-json-schema` for `z.object({}).catchall(...)`. An empty map has
+  // nothing to flatten, but it must not make the body disappear.
+  const { flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              additionalProperties: { type: "string" },
+              properties: {},
+              type: "object",
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(Object.keys(flatSchema.properties ?? {})).toContain("body");
+  expect(parameterMap.body).toBeDefined();
+});
+
+test("a required object body with an empty properties map is marked required", () => {
+  const { flatSchema } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: { properties: {}, type: "object" },
+          },
+        },
+        required: true,
+      },
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.required).toContain("body");
+});
