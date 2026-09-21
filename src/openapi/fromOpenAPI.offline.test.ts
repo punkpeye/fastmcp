@@ -139,6 +139,121 @@ async function connect(server: FastMCP) {
 }
 
 test.each([
+  { emptyProperties: false, required: false },
+  { emptyProperties: false, required: true },
+  { emptyProperties: true, required: false },
+  { emptyProperties: true, required: true },
+])(
+  "a JSON dictionary body remains callable with emptyProperties=$emptyProperties, required=$required",
+  async ({ emptyProperties, required }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        info: { title: "Labels API", version: "1.0.0" },
+        openapi: "3.0.3",
+        paths: {
+          "/labels": {
+            post: {
+              operationId: "setLabels",
+              parameters: [
+                { in: "query", name: "body", schema: { type: "string" } },
+              ],
+              requestBody: {
+                content: {
+                  "application/json": {
+                    // zod-to-json-schema's openApi3 target emits these shapes
+                    // for z.record(z.string()) and z.object({}).catchall(z.string()).
+                    schema: {
+                      additionalProperties: { type: "string" },
+                      ...(emptyProperties ? { properties: {} } : {}),
+                      type: "object",
+                    },
+                  },
+                },
+                required,
+              },
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const { tools } = await client.listTools();
+      const labels = { environment: "staging", team: "infra" };
+      const result = await client.callTool({
+        arguments: { body: labels, body__query: "preview" },
+        name: "setLabels",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+        "https://api.example.com/labels?body=preview",
+        expect.objectContaining({
+          body: JSON.stringify(labels),
+          method: "POST",
+        }),
+      );
+      expect(fetchImpl.mock.calls[0][1]?.headers).toBeInstanceOf(Headers);
+      expect(
+        (fetchImpl.mock.calls[0][1]?.headers as Headers).get("content-type"),
+      ).toBe("application/json");
+      expect(Object.keys(tools[0].inputSchema.properties!).sort()).toEqual([
+        "body",
+        "body__query",
+      ]);
+      expect(tools[0].inputSchema.required).toEqual(
+        required ? ["body"] : undefined,
+      );
+
+      fetchImpl.mockClear();
+      await expect(
+        client.callTool({
+          arguments: { body: { team: 42 } },
+          name: "setLabels",
+        }),
+      ).rejects.toThrow(/must be string/);
+      expect(fetchImpl).not.toHaveBeenCalled();
+
+      const empty = await client.callTool({
+        arguments: { body: {} },
+        name: "setLabels",
+      });
+      expect(empty.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+        "https://api.example.com/labels",
+        expect.objectContaining({ body: "{}" }),
+      );
+
+      fetchImpl.mockClear();
+      if (required) {
+        await expect(
+          client.callTool({ arguments: {}, name: "setLabels" }),
+        ).rejects.toThrow(/body.*[Rr]equired|required.*body/);
+        expect(fetchImpl).not.toHaveBeenCalled();
+      } else {
+        const omitted = await client.callTool({
+          arguments: {},
+          name: "setLabels",
+        });
+        expect(omitted.isError).toBeFalsy();
+        expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+          "https://api.example.com/labels",
+          expect.objectContaining({ body: undefined }),
+        );
+      }
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each([
   { expected: "https://api.example.com", label: "root fallback" },
   {
     expected: "https://path.example.com/v2",

@@ -72,9 +72,8 @@ export interface FlatSchemaResult {
   unsupportedBodyContentType?: string;
   /**
    * Set when the request body's schema is not a flat object (e.g. an array,
-   * or a bare non-object `$ref`) — the whole body is exposed as a single
-   * property under this key, rather than flattened into individual
-   * properties.
+   * a dictionary, or a bare `$ref`) — the whole body is exposed as a single
+   * property under this key, rather than flattened into individual properties.
    */
   wholeBodyKey?: string;
 }
@@ -416,7 +415,15 @@ function extractBodyProperties(
     | Record<string, OpenApiSchema>
     | undefined;
 
-  if (schema.type === "object" && schemaProperties) {
+  // An empty properties map doesn't close a JSON object: dictionary entries
+  // still need the whole-body path when additional properties are allowed.
+  if (
+    schema.type === "object" &&
+    schemaProperties &&
+    (bodyEncoding === "form" ||
+      schema.additionalProperties === false ||
+      Object.keys(schemaProperties).length > 0)
+  ) {
     const requiredNames = new Set(
       (schema.required as string[] | undefined) ?? [],
     );
@@ -438,8 +445,8 @@ function extractBodyProperties(
     };
   }
 
-  // Non-object JSON body (array, bare $ref to a scalar/array, etc.) — expose
-  // the whole thing as a single "body" property rather than flattening it.
+  // JSON bodies without flattenable properties (arrays, dictionaries, bare
+  // $refs, etc.) are exposed as a single "body" property.
   properties.set("body", {
     required: requestBody?.required ?? false,
     schema,
