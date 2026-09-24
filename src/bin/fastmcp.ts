@@ -8,6 +8,11 @@ import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
 import { buildDevCommand, buildDevConfig } from "./devCommand.js";
+import {
+  buildStructureCheckCommand,
+  buildTypeCheckCommand,
+  formatCommandFailure,
+} from "./validateCommand.js";
 
 await yargs(hideBin(process.argv))
   .scriptName("fastmcp")
@@ -182,48 +187,52 @@ await yargs(hideBin(process.argv))
 
         console.log(`[FastMCP] Validating server file: ${filePath}`);
 
-        const command = argv.strict
-          ? `npx tsc --noEmit --strict ${filePath}`
-          : `npx tsc --noEmit ${filePath}`;
+        const [typeCheckCommand, ...typeCheckArgs] = buildTypeCheckCommand(
+          filePath,
+          argv.strict,
+        );
 
         try {
-          await execa({
-            shell: true,
+          await execa(typeCheckCommand, typeCheckArgs, {
             stderr: "pipe",
             stdout: "pipe",
-          })`${command}`;
+          });
 
           console.log("[FastMCP] ✓ TypeScript compilation successful");
         } catch (tsError) {
           console.error("[FastMCP] ✗ TypeScript compilation failed");
 
-          if (tsError instanceof Error && "stderr" in tsError) {
-            console.error(tsError.stderr);
+          const diagnostics = formatCommandFailure(tsError);
+
+          if (diagnostics) {
+            console.error(diagnostics);
           }
 
           process.exit(1);
         }
 
+        const [structureCommand, ...structureArgs] =
+          buildStructureCheckCommand(filePath);
+
         try {
-          await execa({
-            shell: true,
+          await execa(structureCommand, structureArgs, {
             stderr: "pipe",
             stdout: "pipe",
-          })`node -e "
-            (async () => {
-              try {
-                const { FastMCP } = await import('fastmcp');
-                await import('file://${filePath}');
-                console.log('[FastMCP] ✓ Server structure validation passed');
-              } catch (error) {
-                console.error('[FastMCP] ✗ Server structure validation failed:', error.message);
-                process.exit(1);
-              }
-            })();
-          "`;
-        } catch {
-          console.error("[FastMCP] ✗ Server structure validation failed");
-          console.error("Make sure the file properly imports and uses FastMCP");
+          });
+        } catch (structureError) {
+          // The child reports the reason on stderr, which execa captures. Without
+          // replaying it the user only ever sees the generic hint below, even when
+          // the server file has an error they could act on.
+          const reason = formatCommandFailure(structureError);
+
+          if (reason) {
+            console.error(reason);
+          } else {
+            console.error("[FastMCP] ✗ Server structure validation failed");
+            console.error(
+              "Make sure the file properly imports and uses FastMCP",
+            );
+          }
 
           process.exit(1);
         }
