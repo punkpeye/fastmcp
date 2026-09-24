@@ -88,3 +88,72 @@ describe("canAccess filtering every tool out of a session (#370)", () => {
     }
   });
 });
+
+describe("canAccess and sessions without auth", () => {
+  async function connectWithoutAuth(server: FastMCP<Auth>) {
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "c", version: "0.0.0" });
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+    return client;
+  }
+
+  it("keeps showing canAccess tools after a runtime addTool() when the session has no auth", async () => {
+    const server = adminOnlyServer();
+    const client = await connectWithoutAuth(server);
+    try {
+      // Without auth, canAccess is not consulted at connect time, so the
+      // admin-only tool is visible.
+      const before = await client.listTools();
+      expect(before.tools.map((tool) => tool.name)).toEqual(["admin-only"]);
+
+      server.addTool({
+        description: "For everyone",
+        execute: async () => "hi",
+        name: "public",
+        parameters: z.object({}),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // The runtime refresh must apply the same rule, not canAccess(undefined).
+      const after = await client.listTools();
+      expect(after.tools.map((tool) => tool.name).sort()).toEqual([
+        "admin-only",
+        "public",
+      ]);
+      await expect(
+        client.callTool({ arguments: {}, name: "admin-only" }),
+      ).resolves.toMatchObject({ content: [{ text: "secret", type: "text" }] });
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  });
+
+  it("does not call a canAccess that assumes auth is present when the session has none", async () => {
+    const server = new FastMCP<Auth>({ name: "T", version: "1.0.0" });
+    server.addTool({
+      // Written without optional chaining, as the README examples are.
+      canAccess: (auth) => auth.role === "admin",
+      execute: async () => "secret",
+      name: "admin-only",
+      parameters: z.object({}),
+    });
+    const client = await connectWithoutAuth(server);
+    try {
+      expect(() =>
+        server.addTool({
+          execute: async () => "hi",
+          name: "public",
+          parameters: z.object({}),
+        }),
+      ).not.toThrow();
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  });
+});

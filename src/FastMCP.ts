@@ -1781,9 +1781,15 @@ export class FastMCPSession<
   }
 
   toolsListChanged(tools: Tool<T>[]) {
-    const allowedTools = tools.filter((tool) =>
-      tool.canAccess ? tool.canAccess(this.#auth as T) : true,
-    );
+    // Same rule as session creation: a session that has no auth (no
+    // `authenticate` configured, or none provided to `connect()`) sees every
+    // tool, so `canAccess` is only consulted when there is an auth object to
+    // pass it.
+    const allowedTools = this.#auth
+      ? tools.filter((tool) =>
+          tool.canAccess ? tool.canAccess(this.#auth as T) : true,
+        )
+      : tools;
     this.setupToolHandlers(allowedTools);
     this.triggerListChangedNotification("notifications/tools/list_changed");
   }
