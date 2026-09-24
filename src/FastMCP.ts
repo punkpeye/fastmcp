@@ -2275,7 +2275,7 @@ export class FastMCPSession<
       for (const arg of prompt.arguments ?? []) {
         if (arg.required && !(args && arg.name in args)) {
           throw new McpError(
-            ErrorCode.InvalidRequest,
+            ErrorCode.InvalidParams,
             `Prompt '${request.params.name}' requires argument '${arg.name}': ${
               arg.description || "No description provided"
             }`,
