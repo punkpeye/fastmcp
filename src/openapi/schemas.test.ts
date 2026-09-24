@@ -10,6 +10,7 @@ import {
   buildFlatSchema,
   buildOutputSchema,
   buildSharedDefs,
+  rewriteComponentRefs,
 } from "./schemas.js";
 
 function route(overrides: Partial<HttpRoute>): HttpRoute {
@@ -256,6 +257,50 @@ test("no $defs key is added when a tool's schema references nothing shared", () 
   );
 
   expect(flatSchema.$defs).toBeUndefined();
+});
+
+test.each([
+  { minLength: 1, type: "string" },
+  { minimum: 0, type: "integer" },
+  { type: "number" },
+  { type: "boolean" },
+  { items: { type: "string" }, type: "array" },
+  { properties: { name: { type: "string" } }, type: "object" },
+  { type: ["string", "null"] },
+])("`nullable: false` preserves the rest of the schema: %j", (schema) => {
+  const original = { ...schema, nullable: false };
+
+  expect(rewriteComponentRefs(original)).toEqual(schema);
+  expect(original.nullable).toBe(false);
+});
+
+test("`nullable: false` preserves types in shared definitions and nested properties", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: {
+        Tag: { nullable: false, type: "string" },
+        Widget: {
+          nullable: false,
+          properties: {
+            name: { nullable: false, type: "string" },
+            tag: { $ref: "#/components/schemas/Tag" },
+          },
+          type: "object",
+        },
+      },
+    },
+  };
+
+  expect(buildSharedDefs(document)).toEqual({
+    Tag: { type: "string" },
+    Widget: {
+      properties: {
+        name: { type: "string" },
+        tag: { $ref: "#/$defs/Tag" },
+      },
+      type: "object",
+    },
+  });
 });
 
 test("`nullable: true` alongside a `type` is folded into a type array", () => {

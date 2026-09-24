@@ -527,11 +527,13 @@ function normalizeNullable(
     return schema;
   }
 
-  const { nullable, type, ...rest } = schema;
+  const { nullable, ...rest } = schema;
 
   if (nullable !== true) {
     return rest;
   }
+
+  const { type } = rest;
 
   if (typeof type === "string") {
     return { ...rest, type: [type, "null"] };

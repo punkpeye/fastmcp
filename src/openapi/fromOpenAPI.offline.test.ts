@@ -879,6 +879,87 @@ test("a FastAPI-style form body (`$ref` to a component schema) becomes a tool wi
   expect(new URLSearchParams(init!.body as string).get("username")).toBe("ann");
 });
 
+test.each([false, true])(
+  "an explicit non-nullable input keeps its type validation (explicit=$0)",
+  async (explicit) => {
+    const spec = structuredClone(WIDGETS_SPEC);
+    if (explicit) {
+      Object.assign(
+        spec.paths["/widgets"].post.requestBody.content["application/json"]
+          .schema.properties.name,
+        { nullable: false },
+      );
+    }
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({ fetch: fetchImpl, spec });
+    const client = await connect(server);
+
+    try {
+      for (const name of [42, null]) {
+        await expect(
+          client.callTool({ arguments: { name }, name: "createWidget" }),
+        ).rejects.toThrow(/must be string/);
+      }
+      expect(fetchImpl).not.toHaveBeenCalled();
+
+      const { tools } = await client.listTools();
+      expect(tools[0].inputSchema.properties?.name).toEqual({ type: "string" });
+
+      const result = await client.callTool({
+        arguments: { name: "sprocket" },
+        name: "createWidget",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+        "https://api.example.com/widgets",
+        expect.objectContaining({ body: '{"name":"sprocket"}' }),
+      );
+    } finally {
+      await Promise.all(server.sessions.map((session) => session.close()));
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each([false, true])(
+  "an explicit non-nullable response keeps structured output (referenced=$0)",
+  async (referenced) => {
+    const spec = structuredClone(WIDGETS_TYPED_SPEC);
+    const response =
+      spec.paths["/widgets/typed"].post.responses[200].content[
+        "application/json"
+      ];
+    const schema = { ...response.schema, nullable: false };
+    Object.assign(response, {
+      schema: referenced ? { $ref: "#/components/schemas/Widget" } : schema,
+    });
+    Object.assign(spec, { components: { schemas: { Widget: schema } } });
+    const payload = { id: "w1", name: "sprocket" };
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(payload));
+    const server = await fromOpenAPI({ fetch: fetchImpl, spec });
+    const client = await connect(server);
+
+    try {
+      const { tools } = await client.listTools();
+      expect(
+        tools.find((tool) => tool.name === "createTypedWidget")?.outputSchema,
+      ).toMatchObject({ properties: schema.properties, type: "object" });
+
+      const result = await client.callTool({
+        arguments: { name: "sprocket" },
+        name: "createTypedWidget",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual(payload);
+    } finally {
+      await Promise.all(server.sessions.map((session) => session.close()));
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
 test("outputSchema: a schema-matching JSON response returns structuredContent", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () =>
