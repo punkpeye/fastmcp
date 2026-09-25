@@ -12,6 +12,7 @@ import {
   buildStructureCheckCommand,
   buildTypeCheckCommand,
   formatCommandFailure,
+  withTypeCheckProject,
 } from "./validateCommand.js";
 
 await yargs(hideBin(process.argv))
@@ -187,15 +188,17 @@ await yargs(hideBin(process.argv))
 
         console.log(`[FastMCP] Validating server file: ${filePath}`);
 
-        const [typeCheckCommand, ...typeCheckArgs] = buildTypeCheckCommand(
-          filePath,
-          argv.strict,
-        );
-
         try {
-          await execa(typeCheckCommand, typeCheckArgs, {
-            stderr: "pipe",
-            stdout: "pipe",
+          await withTypeCheckProject(filePath, (project) => {
+            const [typeCheckCommand, ...typeCheckArgs] = buildTypeCheckCommand(
+              filePath,
+              { project, strict: argv.strict },
+            );
+
+            return execa(typeCheckCommand, typeCheckArgs, {
+              stderr: "pipe",
+              stdout: "pipe",
+            });
           });
 
           console.log("[FastMCP] ✓ TypeScript compilation successful");
