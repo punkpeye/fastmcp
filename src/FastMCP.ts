@@ -1434,6 +1434,7 @@ export class FastMCPSession<
   #abortController = new AbortController();
 
   #auth: T | undefined;
+  #authRequired: boolean;
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
   #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
@@ -1486,6 +1487,7 @@ export class FastMCPSession<
 
   constructor({
     auth,
+    authRequired = false,
     hasTools,
     icons,
     instructions,
@@ -1508,6 +1510,12 @@ export class FastMCPSession<
     websiteUrl,
   }: {
     auth?: T;
+    /**
+     * Whether the server authenticates its sessions (`authenticate` is
+     * configured). A session that has no auth even so sees none of the tools
+     * gated by `canAccess` (see `toolsVisibleTo`).
+     */
+    authRequired?: boolean;
     /**
      * Whether the server has any tools at all, including ones this session's
      * `canAccess` filtering removed from `tools`. Defaults to `tools.length > 0`.
@@ -1536,6 +1544,7 @@ export class FastMCPSession<
     super();
 
     this.#auth = auth;
+    this.#authRequired = authRequired;
     this.#logger = logger;
     this.#onToolCall = onToolCall;
     this.#pingConfig = ping;
@@ -1812,7 +1821,9 @@ export class FastMCPSession<
   }
 
   toolsListChanged(tools: Tool<T>[]) {
-    this.setupToolHandlers(toolsVisibleTo(tools, this.#auth));
+    this.setupToolHandlers(
+      toolsVisibleTo(tools, this.#auth, this.#authRequired),
+    );
     this.triggerListChangedNotification("notifications/tools/list_changed");
   }
 
@@ -2985,18 +2996,27 @@ function stripBasePath(
 }
 
 /**
- * The tools a session may see. A session without auth — no `authenticate`
- * configured, or none passed to `connect()` — sees every tool; otherwise each
- * tool's `canAccess` decides. Every transport, and the refresh after a runtime
- * tool change, goes through this one rule so they cannot drift apart.
+ * The tools a session may see. With auth, each tool's `canAccess` decides.
+ * Without it, a server that does not authenticate at all — no `authenticate`
+ * configured — shows every tool, but one that does hides every tool gated by
+ * `canAccess`: a session it failed to authenticate (stdio carries on without
+ * auth when `authenticate` throws or returns nothing) must not see more than
+ * one it authenticated. `canAccess` is not called without auth, since it is
+ * written to receive an auth object. Every transport, and the refresh after a
+ * runtime tool change, goes through this one rule so they cannot drift apart.
  */
 function toolsVisibleTo<T extends FastMCPSessionAuth>(
   tools: Tool<T>[],
   auth: T | undefined,
+  authRequired: boolean,
 ): Tool<T>[] {
-  return auth
-    ? tools.filter((tool) => (tool.canAccess ? tool.canAccess(auth) : true))
-    : tools;
+  if (auth) {
+    return tools.filter((tool) =>
+      tool.canAccess ? tool.canAccess(auth) : true,
+    );
+  }
+
+  return authRequired ? tools.filter((tool) => !tool.canAccess) : tools;
 }
 
 const FastMCPEventEmitterBase: {
@@ -3482,6 +3502,7 @@ export class FastMCP<
       // For stdio transport, if authenticate function is provided, call it
       // with undefined request (since stdio doesn't have HTTP request context)
       let auth: T | undefined;
+      const authRequired = this.#authenticate !== undefined;
 
       if (this.#authenticate) {
         try {
@@ -3494,12 +3515,20 @@ export class FastMCP<
             "[FastMCP error] Authentication failed for stdio transport:",
             error instanceof Error ? error.message : String(error),
           );
-          // Continue without auth if authentication fails
+          // Continue without auth, which hides every tool gated by canAccess
+          // (see toolsVisibleTo).
+        }
+
+        if (!auth && this.#tools.some((tool) => tool.canAccess)) {
+          this.#logger.warn(
+            "[FastMCP warning] The stdio session has no auth, so tools gated by canAccess are hidden from it.",
+          );
         }
       }
 
       const session = new FastMCPSession<T>({
         auth,
+        authRequired,
         hasTools: this.#tools.length > 0,
         icons: this.#options.icons,
         instructions: this.#options.instructions,
@@ -3513,7 +3542,7 @@ export class FastMCP<
         roots: this.#options.roots,
         streamKeepalive: this.#options.streamKeepalive,
         title: this.#options.title,
-        tools: toolsVisibleTo(this.#tools, auth),
+        tools: toolsVisibleTo(this.#tools, auth, authRequired),
         transportType: "stdio",
         utils: this.#options.utils,
         version: this.#options.version,
@@ -3752,8 +3781,11 @@ export class FastMCP<
       throw this.#createUnauthorizedResponse(errorMessage);
     }
 
+    const authRequired = this.#authenticate !== undefined;
+
     return new FastMCPSession<T>({
       auth,
+      authRequired,
       hasTools: this.#tools.length > 0,
       icons: this.#options.icons,
       instructions: this.#options.instructions,
@@ -3769,7 +3801,7 @@ export class FastMCP<
       stateless,
       streamKeepalive: this.#options.streamKeepalive,
       title: this.#options.title,
-      tools: toolsVisibleTo(this.#tools, auth),
+      tools: toolsVisibleTo(this.#tools, auth, authRequired),
       transportType: "httpStream",
       utils: this.#options.utils,
       version: this.#options.version,

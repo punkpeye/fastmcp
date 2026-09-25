@@ -101,6 +101,28 @@ describe("canAccess and sessions without auth", () => {
     return client;
   }
 
+  it("hides canAccess tools from a session without auth when the server authenticates", async () => {
+    const server = new FastMCP<Auth>({
+      authenticate: async () => ({ role: "admin" }),
+      name: "T",
+      version: "1.0.0",
+    });
+    server.addTool({
+      canAccess: (auth) => auth?.role === "admin",
+      description: "Admin only",
+      execute: async () => "secret",
+      name: "admin-only",
+      parameters: z.object({}),
+    });
+    const client = await connectWithoutAuth(server);
+    try {
+      await expect(client.listTools()).resolves.toEqual({ tools: [] });
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  });
+
   it("keeps showing canAccess tools after a runtime addTool() when the session has no auth", async () => {
     const server = adminOnlyServer();
     const client = await connectWithoutAuth(server);

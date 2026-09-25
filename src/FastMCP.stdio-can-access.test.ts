@@ -106,3 +106,132 @@ describe("canAccess on a stdio session", () => {
     }
   });
 });
+
+describe("a stdio session whose authentication failed", () => {
+  beforeEach(() => {
+    vi.spyOn(process.stdin, "on").mockReturnValue(process.stdin);
+    vi.spyOn(process.stdin, "off").mockReturnValue(process.stdin);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const makeLogger = () => ({
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    log: vi.fn(),
+    warn: vi.fn(),
+  });
+
+  function serverWhoseAuthenticate(
+    authenticate: () => Promise<Auth | undefined>,
+    logger = makeLogger(),
+  ) {
+    const server = new FastMCP<Auth>({
+      authenticate,
+      logger,
+      name: "T",
+      version: "1.0.0",
+    });
+    server.addTool({
+      canAccess: (session) => session.role === "admin",
+      description: "Admin only",
+      execute: async () => "secret",
+      name: "admin-only",
+      parameters: z.object({}),
+    });
+    server.addTool({
+      description: "For everyone",
+      execute: async () => "hi",
+      name: "public",
+      parameters: z.object({}),
+    });
+    return server;
+  }
+
+  it.each([
+    [
+      "throws",
+      async () => {
+        throw new Error("invalid API key");
+      },
+    ],
+    ["returns nothing", async () => undefined],
+  ])(
+    "sees none of the tools gated by canAccess when authenticate %s",
+    async (_, authenticate) => {
+      const server = serverWhoseAuthenticate(authenticate);
+      const client = await startOverStdio(server);
+      try {
+        const { tools } = await client.listTools();
+        expect(tools.map((tool) => tool.name)).toEqual(["public"]);
+        await expect(
+          client.callTool({ arguments: {}, name: "admin-only" }),
+        ).rejects.toThrow(/Unknown tool/);
+
+        // The refresh after a runtime tool change applies the same rule.
+        server.addTool({
+          description: "Also for everyone",
+          execute: async () => "hey",
+          name: "public-2",
+          parameters: z.object({}),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const refreshed = await client.listTools();
+        expect(refreshed.tools.map((tool) => tool.name).sort()).toEqual([
+          "public",
+          "public-2",
+        ]);
+      } finally {
+        await client.close();
+        await server.stop();
+      }
+    },
+  );
+
+  it.each([
+    [
+      "throws",
+      async () => {
+        throw new Error("invalid API key");
+      },
+    ],
+    ["returns nothing", async () => undefined],
+  ])(
+    "says why the gated tools are missing when authenticate %s",
+    async (_, authenticate) => {
+      const logger = makeLogger();
+      const server = serverWhoseAuthenticate(authenticate, logger);
+      const client = await startOverStdio(server);
+      try {
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining("tools gated by canAccess are hidden"),
+        );
+      } finally {
+        await client.close();
+        await server.stop();
+      }
+    },
+  );
+
+  it("still shows every tool when the server does not authenticate at all", async () => {
+    const server = new FastMCP<Auth>({ name: "T", version: "1.0.0" });
+    server.addTool({
+      canAccess: (session) => session?.role === "admin",
+      description: "Admin only",
+      execute: async () => "secret",
+      name: "admin-only",
+      parameters: z.object({}),
+    });
+    const client = await startOverStdio(server);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.map((tool) => tool.name)).toEqual(["admin-only"]);
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  });
+});

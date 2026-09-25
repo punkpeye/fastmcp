@@ -750,6 +750,11 @@ server.addTool({
 });
 ```
 
+A server without an `authenticate` function has no auth to check, so every
+session sees every tool. With one, a session that still ends up without auth —
+on stdio, where the server carries on when `authenticate` throws or returns
+nothing — sees none of the tools that have `canAccess`.
+
 #### Returning a string
 
 `execute` can return a string:
