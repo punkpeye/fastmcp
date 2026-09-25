@@ -205,6 +205,9 @@ test.each([
         "body",
         "body__query",
       ]);
+      expect(tools[0].inputSchema.properties!.body).toMatchObject({
+        additionalProperties: { type: "string" },
+      });
       expect(tools[0].inputSchema.required).toEqual(
         required ? ["body"] : undefined,
       );
