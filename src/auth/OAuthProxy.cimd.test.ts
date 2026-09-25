@@ -147,6 +147,15 @@ describe("OAuthProxy CIMD support", () => {
     proxy.destroy();
   });
 
+  it("advertises the token endpoint auth method CIMD clients use", () => {
+    const proxy = new OAuthProxy({ ...baseConfig, enableCimd: true });
+    // A CIMD client holds no secret, so it can only use "none".
+    expect(
+      proxy.getAuthorizationServerMetadata().tokenEndpointAuthMethodsSupported,
+    ).toContain("none");
+    proxy.destroy();
+  });
+
   it("resolves a valid CIMD client_id and completes the full authorize -> callback -> token flow", async () => {
     const proxy = new OAuthProxy({ ...baseConfig, enableCimd: true });
     mockFetchRouting(clientMetadataResponse);
