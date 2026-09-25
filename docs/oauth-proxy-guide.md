@@ -267,6 +267,7 @@ interface OAuthProxyConfig {
   consentRequired?: boolean; // default: true
   consentSigningKey?: string; // auto-generated if not provided
   allowedRedirectUriPatterns?: string[];
+  authorizationResponseIss?: boolean; // default: true — RFC 9207 `iss`
   enableCimd?: boolean; // default: false — accept Client ID Metadata Documents
   extraAuthorizationParams?: Record<string, string>; // provider-specific params
   transactionTtl?: number; // seconds, default: 600
@@ -361,6 +362,17 @@ When enabled, `/.well-known/oauth-authorization-server` advertises
 `client_id_metadata_document_supported: true`.
 
 Off by default: leaving it off means only DCR-registered clients are accepted.
+
+### Issuer identification (RFC 9207)
+
+Authorization responses carry `iss` (your `baseUrl`), and the metadata
+advertises `authorization_response_iss_parameter_supported: true`, as the MCP
+authorization spec recommends. Set `authorizationResponseIss: false` to turn
+it off.
+
+ChatGPT uses its stable callback (`https://chatgpt.com/connector_platform_oauth_redirect`)
+for servers that advertise this, and a per-connector callback otherwise, so
+allow-list the stable one.
 
 ### TTL Configuration
 
