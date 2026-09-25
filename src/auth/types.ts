@@ -243,6 +243,13 @@ export interface OAuthProxyConfig {
   allowPlainPkce?: boolean;
   /** Authorization code TTL in seconds (default: 300) */
   authorizationCodeTtl?: number;
+  /**
+   * Add `iss` to authorization responses and advertise
+   * `authorization_response_iss_parameter_supported` (RFC 9207; default: true).
+   * Note that ChatGPT uses its stable callback URI only for servers that
+   * advertise it, and a per-connector one otherwise.
+   */
+  authorizationResponseIss?: boolean;
   /** Base URL of this proxy server */
   baseUrl: string;
   /** Require user consent (default: true) */

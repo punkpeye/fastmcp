@@ -92,6 +92,7 @@ export class OAuthProxy {
     this.config = {
       allowPlainPkce: true,
       authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
+      authorizationResponseIss: true,
       consentRequired: true,
       enableCimd: false,
       enableTokenSwap: true, // Enabled by default for security
@@ -432,6 +433,7 @@ export class OAuthProxy {
    */
   getAuthorizationServerMetadata(): {
     authorizationEndpoint: string;
+    authorizationResponseIssParameterSupported?: boolean;
     clientIdMetadataDocumentSupported?: boolean;
     codeChallengeMethodsSupported?: string[];
     dpopSigningAlgValuesSupported?: string[];
@@ -454,6 +456,9 @@ export class OAuthProxy {
   } {
     return {
       authorizationEndpoint: `${this.config.baseUrl}/oauth/authorize`,
+      ...(this.config.authorizationResponseIss
+        ? { authorizationResponseIssParameterSupported: true as const }
+        : {}),
       ...(this.config.enableCimd
         ? { clientIdMetadataDocumentSupported: true as const }
         : {}),
@@ -526,6 +531,9 @@ export class OAuthProxy {
     const redirectUrl = new URL(transaction.clientCallbackUrl);
     redirectUrl.searchParams.set("code", clientCode);
     redirectUrl.searchParams.set("state", transaction.state);
+    if (this.config.authorizationResponseIss) {
+      redirectUrl.searchParams.set("iss", this.config.baseUrl);
+    }
 
     return new Response(null, {
       headers: {
@@ -582,6 +590,9 @@ export class OAuthProxy {
         "User denied authorization",
       );
       redirectUrl.searchParams.set("state", transaction.state);
+      if (this.config.authorizationResponseIss) {
+        redirectUrl.searchParams.set("iss", this.config.baseUrl);
+      }
 
       return new Response(null, {
         headers: {

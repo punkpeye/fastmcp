@@ -868,6 +868,8 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
      */
     authorizationServer?: {
       authorizationEndpoint: string;
+      // RFC 9207: authorization responses carry `iss`
+      authorizationResponseIssParameterSupported?: boolean;
       // Client ID Metadata Documents (SEP-991) accepted in place of DCR
       clientIdMetadataDocumentSupported?: boolean;
       codeChallengeMethodsSupported?: string[];
