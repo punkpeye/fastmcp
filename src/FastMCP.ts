@@ -47,7 +47,7 @@ import { type CorsOptions, startHTTPServer } from "mcp-proxy";
 import { StrictEventEmitter } from "strict-event-emitter-types";
 import { setTimeout as delay } from "timers/promises";
 import parseURITemplate from "uri-templates";
-import { type JsonSchema, toJsonSchema } from "xsschema";
+import { toJsonSchema } from "xsschema";
 import { z } from "zod";
 
 import type { OAuthProxy } from "./auth/OAuthProxy.js";
@@ -57,6 +57,7 @@ import type {
 } from "./auth/providers/AuthProvider.js";
 
 import { cancelResponseBody } from "./cancelResponseBody.js";
+import { strictInputSchema } from "./strictInputSchema.js";
 
 export interface Logger {
   debug(...args: unknown[]): void;
@@ -448,35 +449,6 @@ function assertToolSchemas(tool: {
   if (tool.outputSchema) {
     assertStandardSchema(tool.name, "outputSchema", tool.outputSchema);
   }
-}
-
-/**
- * Closes tool input objects to undeclared keys, like xsschema's
- * `strictJsonSchema`, except for dictionaries. An object with no `properties`
- * whose `additionalProperties` is a schema (`z.record()`, an OpenAPI map) is
- * made only of additional properties: replacing that schema with `false`
- * advertises an object that accepts nothing but `{}`, while the tool's own
- * validation still takes any key.
- */
-function strictInputSchema(schema: JsonSchema): JsonSchema {
-  const isDictionary =
-    typeof schema.additionalProperties === "object" &&
-    Object.keys(schema.properties ?? {}).length === 0;
-
-  return {
-    ...schema,
-    additionalProperties: isDictionary ? schema.additionalProperties : false,
-    ...(schema.properties && {
-      properties: Object.fromEntries(
-        Object.entries(schema.properties).map(([key, value]) => [
-          key,
-          typeof value === "object" && value.type === "object"
-            ? strictInputSchema(value)
-            : value,
-        ]),
-      ),
-    }),
-  };
 }
 
 const STREAM_KEEPALIVE_LOGGER = "fastmcp-keepalive";

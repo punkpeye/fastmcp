@@ -77,6 +77,42 @@ describe("EdgeFastMCP", () => {
     expect(body.result.tools[0].description).toBe("Greet someone");
   });
 
+  it("keeps a record argument's value schema in tools/list, as FastMCP does", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    server.addTool({
+      description: "Set labels",
+      execute: async () => "ok",
+      name: "setLabels",
+      parameters: z.object({ labels: z.record(z.string(), z.string()) }),
+    });
+
+    const response = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify({
+          id: 2,
+          jsonrpc: "2.0",
+          method: "tools/list",
+        }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    const body: JsonResponse = await response.json();
+    const { inputSchema } = body.result.tools[0];
+    expect(inputSchema.additionalProperties).toBe(false);
+    expect(inputSchema.properties.labels.additionalProperties).toEqual({
+      type: "string",
+    });
+  });
+
   it("should call a tool", async () => {
     const server = new EdgeFastMCP({
       name: "TestServer",
