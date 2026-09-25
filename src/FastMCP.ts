@@ -2293,7 +2293,7 @@ export class FastMCPSession<
 
       if (!prompt) {
         throw new McpError(
-          ErrorCode.MethodNotFound,
+          ErrorCode.InvalidParams,
           `Unknown prompt: ${request.params.name}`,
         );
       }

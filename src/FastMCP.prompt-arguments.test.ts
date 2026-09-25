@@ -16,6 +16,28 @@ async function connect(server: FastMCP) {
   return client;
 }
 
+describe("prompts/get for a prompt the server does not have", () => {
+  it("answers -32602 Invalid params, as the spec requires", async () => {
+    const server = new FastMCP({ name: "T", version: "1.0.0" });
+    server.addPrompt({
+      load: async () => "Hello",
+      name: "greeting",
+    });
+    const client = await connect(server);
+    try {
+      await expect(client.getPrompt({ name: "farewell" })).rejects.toEqual(
+        expect.objectContaining({
+          code: ErrorCode.InvalidParams,
+          message: expect.stringContaining("Unknown prompt: farewell"),
+        }),
+      );
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  });
+});
+
 describe("prompts/get with a missing required argument", () => {
   it("answers -32602 Invalid params, as the spec requires", async () => {
     const server = new FastMCP({ name: "T", version: "1.0.0" });
