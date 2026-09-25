@@ -2169,9 +2169,10 @@ export class FastMCPSession<
         const prompt = "name" in ref && this.#prompts.get(ref.name);
 
         if (!prompt) {
-          throw new UnexpectedStateError("Unknown prompt", {
-            request,
-          });
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            `Unknown prompt: ${ref.name}`,
+          );
         }
 
         if (!prompt.complete) {
@@ -2205,9 +2206,10 @@ export class FastMCPSession<
           );
 
         if (!resource) {
-          throw new UnexpectedStateError("Unknown resource", {
-            request,
-          });
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            `Unknown resource template: ${ref.uri}`,
+          );
         }
 
         if (!("uriTemplate" in resource)) {

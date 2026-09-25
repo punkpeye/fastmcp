@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { setTimeout as delay } from "timers/promises";
 import { describe, expect, it } from "vitest";
 
@@ -233,7 +234,7 @@ describe("FastMCP Completions", () => {
     });
   });
 
-  it("throws error for unknown prompt", async () => {
+  it("answers -32602 Invalid params for an unknown prompt, as the spec requires", async () => {
     await runWithTestServer({
       run: async ({ client }) => {
         await expect(
@@ -247,12 +248,17 @@ describe("FastMCP Completions", () => {
               type: "ref/prompt",
             },
           }),
-        ).rejects.toThrow();
+        ).rejects.toEqual(
+          expect.objectContaining({
+            code: ErrorCode.InvalidParams,
+            message: expect.stringContaining("Unknown prompt: unknown-prompt"),
+          }),
+        );
       },
     });
   });
 
-  it("throws error for unknown resource", async () => {
+  it("answers -32602 Invalid params for an unknown resource template", async () => {
     await runWithTestServer({
       run: async ({ client }) => {
         await expect(
@@ -266,7 +272,14 @@ describe("FastMCP Completions", () => {
               uri: "unknown://uri",
             },
           }),
-        ).rejects.toThrow();
+        ).rejects.toEqual(
+          expect.objectContaining({
+            code: ErrorCode.InvalidParams,
+            message: expect.stringContaining(
+              "Unknown resource template: unknown://uri",
+            ),
+          }),
+        );
       },
     });
   });
