@@ -26,6 +26,7 @@ export class OAuthProvider<
 
   protected createProxy(): OAuthProxy {
     return new OAuthProxy({
+      ...this.forwardedProxyOptions,
       // No fallback default: framework users must explicitly list the URIs
       // they trust. A previous default of ["http://localhost:*", "https://*"]
       // enabled CWE-601 open-redirect / code-theft via /oauth/authorize.

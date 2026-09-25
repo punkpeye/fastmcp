@@ -5,14 +5,18 @@
 
 import type { IncomingMessage } from "node:http";
 
-import type { TokenStorage, UpstreamTokenSet } from "../types.js";
+import type {
+  OAuthProxyConfig,
+  TokenStorage,
+  UpstreamTokenSet,
+} from "../types.js";
 
 import { OAuthProxy } from "../OAuthProxy.js";
 
 /**
  * Configuration common to all OAuth providers.
  */
-export interface AuthProviderConfig {
+export interface AuthProviderConfig extends ForwardedProxyOptions {
   /**
    * Allow-list of redirect URI patterns accepted by Dynamic Client
    * Registration. Required for any deployment that exposes /oauth/register
@@ -74,6 +78,12 @@ export interface OAuthSession {
   scopes?: string[];
 }
 
+/** OAuthProxy options that providers pass through unchanged. */
+type ForwardedProxyOptions = Pick<
+  OAuthProxyConfig,
+  "allowPlainPkce" | "authorizationResponseIss" | "enableCimd"
+>;
+
 /**
  * Abstract base class for OAuth providers.
  * Encapsulates OAuthProxy creation, authenticate function, and oauth config.
@@ -84,6 +94,22 @@ export abstract class AuthProvider<
   TSession extends OAuthSession = OAuthSession,
 > {
   protected config: AuthProviderConfig;
+  /**
+   * The forwarded proxy options that are set. Unset ones are left out so the
+   * proxy's own defaults apply.
+   */
+  protected get forwardedProxyOptions(): ForwardedProxyOptions {
+    const { allowPlainPkce, authorizationResponseIss, enableCimd } =
+      this.config;
+    return Object.fromEntries(
+      Object.entries({
+        allowPlainPkce,
+        authorizationResponseIss,
+        enableCimd,
+      }).filter(([, value]) => value !== undefined),
+    );
+  }
+
   /**
    * Get the proxy, creating it lazily if needed.
    */
