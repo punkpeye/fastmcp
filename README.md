@@ -633,10 +633,12 @@ server.addTool({
 
 Works for `outputSchema` too. Note that FastMCP advertises input schemas with
 `additionalProperties: false`, whatever your schema said — the same treatment
-Zod and Valibot schemas get. The exception is a dictionary (an object with no
-`properties` and an `additionalProperties` schema, like `z.record()`), which
-keeps its value schema. Output schemas keep whatever additional-properties
-rule your schema declared.
+Zod and Valibot schemas get. The exception is an object made only of
+additional properties: a dictionary (no `properties` and an
+`additionalProperties` schema, like `z.record()`) keeps its value schema, and a
+free-form argument (`{ type: "object" }`, or `additionalProperties: true`)
+stays open. Output schemas keep whatever additional-properties rule your schema
+declared.
 
 Unlike the schema libraries above, a plain JSON Schema carries no TypeScript
 types, so `execute` receives `unknown` arguments. Cast or narrow them yourself.

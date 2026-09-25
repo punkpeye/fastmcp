@@ -1,12 +1,15 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Ajv } from "ajv";
+import { type } from "arktype";
 import { expect, test } from "vitest";
 import { z } from "zod";
 
-import { FastMCP } from "./FastMCP.js";
+import { FastMCP, jsonSchemaAdapter } from "./FastMCP.js";
 
-const listInputSchema = async (parameters: z.ZodType) => {
+const listInputSchema = async (parameters: StandardSchemaV1) => {
   const server = new FastMCP({ name: "Labels", version: "1.0.0" });
   server.addTool({
     execute: async (args) => JSON.stringify(args),
@@ -72,3 +75,54 @@ test("keeps objects with declared properties closed", async () => {
     additionalProperties: false,
   });
 });
+
+test.each([
+  { metadata: { type: "object" }, name: "a bare object" },
+  {
+    metadata: { additionalProperties: true, type: "object" },
+    name: "an object with additionalProperties: true",
+  },
+])(
+  "advertises a free-form argument written as $name that accepts any keys",
+  async ({ metadata }) => {
+    const schema = await listInputSchema(
+      jsonSchemaAdapter({
+        properties: { metadata, name: { type: "string" } },
+        required: ["name"],
+        type: "object",
+      }),
+    );
+
+    expect(
+      acceptsArguments(schema, { metadata: { team: "infra" }, name: "a" }),
+    ).toBe(true);
+    expect(acceptsArguments(schema, { extra: true, name: "a" })).toBe(false);
+  },
+);
+
+test("keeps an object that declares no keys closed", async () => {
+  const schema = await listInputSchema(
+    jsonSchemaAdapter({
+      properties: { options: { properties: {}, type: "object" } },
+      type: "object",
+    }),
+  );
+
+  expect(acceptsArguments(schema, { options: {} })).toBe(true);
+  expect(acceptsArguments(schema, { options: { team: "infra" } })).toBe(false);
+});
+
+test.each([
+  { name: "ArkType's", parameters: type({}) },
+  {
+    name: "a plain JSON Schema",
+    parameters: jsonSchemaAdapter({ type: "object" }),
+  },
+])(
+  "keeps $name bare top-level object closed, as a tool without arguments",
+  async ({ parameters }) => {
+    const schema = await listInputSchema(parameters);
+
+    expect(schema.additionalProperties).toBe(false);
+  },
+);
