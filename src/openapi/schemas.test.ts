@@ -342,6 +342,70 @@ test("`nullable` with no sibling `type` (e.g. next to `oneOf`) is dropped rather
   });
 });
 
+test.each([
+  [
+    { exclusiveMinimum: true, minimum: 0, type: "number" },
+    { exclusiveMinimum: 0, type: "number" },
+  ],
+  [
+    { exclusiveMaximum: true, maximum: 100, type: "integer" },
+    { exclusiveMaximum: 100, type: "integer" },
+  ],
+  [
+    { exclusiveMinimum: false, minimum: 0, type: "number" },
+    { minimum: 0, type: "number" },
+  ],
+  [{ exclusiveMaximum: true, type: "number" }, { type: "number" }],
+  [
+    { exclusiveMinimum: 0, maximum: 1, minimum: -1, type: "number" },
+    { exclusiveMinimum: 0, maximum: 1, minimum: -1, type: "number" },
+  ],
+])(
+  "OpenAPI 3.0's boolean exclusive bounds become JSON Schema's numeric form: %j",
+  (schema, expected) => {
+    expect(rewriteComponentRefs(schema)).toEqual(expected);
+  },
+);
+
+test("boolean exclusive bounds are converted in nested and shared schemas, but not in property names", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: {
+        Price: {
+          exclusiveMinimum: true,
+          minimum: 0,
+          nullable: true,
+          type: "number",
+        },
+        Range: {
+          properties: {
+            exclusiveMinimum: { type: "boolean" },
+            upper: {
+              items: { exclusiveMaximum: true, maximum: 10, type: "number" },
+              type: "array",
+            },
+          },
+          type: "object",
+        },
+      },
+    },
+  };
+
+  expect(buildSharedDefs(document)).toEqual({
+    Price: { exclusiveMinimum: 0, type: ["number", "null"] },
+    Range: {
+      properties: {
+        exclusiveMinimum: { type: "boolean" },
+        upper: {
+          items: { exclusiveMaximum: 10, type: "number" },
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+  });
+});
+
 test("GET never contributes a request body — fetch rejects a body on GET, so it would be permanently broken", () => {
   const { flatSchema, parameterMap, wholeBodyKey } = buildFlatSchema(
     route({

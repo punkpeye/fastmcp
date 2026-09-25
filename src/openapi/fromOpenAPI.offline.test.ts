@@ -963,6 +963,57 @@ test.each([false, true])(
   },
 );
 
+test("OpenAPI 3.0's boolean exclusive bounds validate input and keep tools/list and structured output working", async () => {
+  const spec = structuredClone(WIDGETS_TYPED_SPEC);
+  const operation = spec.paths["/widgets/typed"].post;
+  Object.assign(
+    operation.requestBody.content["application/json"].schema.properties,
+    { price: { exclusiveMinimum: true, minimum: 0, type: "number" } },
+  );
+  Object.assign(
+    operation.responses[200].content["application/json"].schema.properties,
+    { price: { exclusiveMaximum: true, maximum: 100, type: "number" } },
+  );
+  const payload = { id: "w1", name: "sprocket", price: 5 };
+  const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(payload));
+  const server = await fromOpenAPI({ fetch: fetchImpl, spec });
+  const client = await connect(server);
+
+  try {
+    // The SDK client compiles every advertised output schema here, so a
+    // boolean bound in any one of them used to make this call throw.
+    const { tools } = await client.listTools();
+    const tool = tools.find(({ name }) => name === "createTypedWidget");
+    expect(tool?.inputSchema.properties?.price).toEqual({
+      exclusiveMinimum: 0,
+      type: "number",
+    });
+    expect(tool?.outputSchema?.properties?.price).toEqual({
+      exclusiveMaximum: 100,
+      type: "number",
+    });
+
+    await expect(
+      client.callTool({
+        arguments: { name: "sprocket", price: 0 },
+        name: "createTypedWidget",
+      }),
+    ).rejects.toThrow(/must be > 0/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    const result = await client.callTool({
+      arguments: { name: "sprocket", price: 5 },
+      name: "createTypedWidget",
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual(payload);
+  } finally {
+    await Promise.all(server.sessions.map((session) => session.close()));
+    await client.close();
+    await server.stop();
+  }
+});
+
 test("outputSchema: a schema-matching JSON response returns structuredContent", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () =>

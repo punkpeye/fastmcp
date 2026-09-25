@@ -56,6 +56,16 @@ const SPECS = [
 ];
 
 /**
+ * A safety net against a hang, not a performance budget. Converting a spec
+ * compiles every tool's schema through AJV, so the time grows with the spec:
+ * PostHog's ~2,200 operations already took 42s of a 60s limit in CI, and the
+ * spec is fetched fresh on every run, so the next upstream growth — or a slow
+ * runner — would fail the job for a reason that has nothing to do with the
+ * converter.
+ */
+const SPEC_TIMEOUT = 180_000;
+
+/**
  * Whether `fromOpenAPI` skips this route entirely rather than turning it
  * into a tool — reuses `buildFlatSchema` itself (the actual production
  * logic) instead of re-deriving "which content types are unsupported" as a
@@ -79,7 +89,7 @@ function isSkipped(
 describe.each(SPECS)("fromOpenAPI benchmark: $name", ({ file }) => {
   test(
     "converts every non-deprecated, encodable operation into a uniquely-named tool with a well-formed JSON Schema — and a body-bearing one actually carries its body",
-    { timeout: 60_000 },
+    { timeout: SPEC_TIMEOUT },
     async () => {
       const specPath = path.join(FIXTURES_DIR, file);
 
@@ -179,7 +189,7 @@ describe.each(SPECS)("fromOpenAPI benchmark: $name", ({ file }) => {
 
   test(
     "with resources: true, every eligible operation lands in exactly one of tools/resources/resourceTemplates",
-    { timeout: 60_000 },
+    { timeout: SPEC_TIMEOUT },
     async () => {
       const specPath = path.join(FIXTURES_DIR, file);
       const { document } = await loadSpec(specPath);
