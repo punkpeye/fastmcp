@@ -267,6 +267,35 @@ describe("the structure check script", () => {
     expect(result.stdout).toContain("Server structure validation passed");
   });
 
+  it(
+    "finishes once a server file that keeps running has been imported",
+    {
+      timeout: 30_000,
+    },
+    async () => {
+      const project = await makeProject();
+      const file = join(project, "server.mjs");
+      // What a started server leaves behind: a stdio transport reading stdin,
+      // and a timer or listener that keeps the event loop busy.
+      await writeFile(
+        file,
+        "process.stdin.resume();\nsetInterval(() => {}, 60_000);\n",
+        "utf8",
+      );
+
+      const [command, ...args] = buildStructureCheckCommand(file);
+      const result = await execa(command, args, {
+        cwd: project,
+        reject: false,
+        timeout: 15_000,
+      });
+
+      expect(result.timedOut).toBe(false);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Server structure validation passed");
+    },
+  );
+
   it("reports the reason on stderr when the server file cannot be imported", async () => {
     const project = await makeProject();
     const file = join(project, "broken.mjs");

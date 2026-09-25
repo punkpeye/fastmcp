@@ -33,6 +33,11 @@ export const DEFAULT_TYPE_CHECK_OPTIONS = [
  * reaches the import as `C:Usersdevserver.ts`, which throws `ERR_INVALID_URL`
  * and is reported to the user as "does not import FastMCP" even though the file
  * is fine.
+ *
+ * The script exits explicitly once the import settles. Importing a server file
+ * normally starts the server, and a running server — a stdio transport waiting
+ * on stdin, an HTTP listener — keeps the process alive indefinitely, so
+ * validating a server that calls `start()` would otherwise never finish.
  */
 export const STRUCTURE_CHECK_SCRIPT = `
 (async () => {
@@ -42,8 +47,10 @@ export const STRUCTURE_CHECK_SCRIPT = `
     console.log("[FastMCP] ✓ Server structure validation passed");
   } catch (error) {
     console.error("[FastMCP] ✗ Server structure validation failed:", error.message);
-    process.exit(1);
+    process.exitCode = 1;
   }
+
+  process.exit();
 })();
 `;
 
