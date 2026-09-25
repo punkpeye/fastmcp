@@ -14,7 +14,7 @@
       "url": "https://raw.githubusercontent.com/slackapi/slack-api-specs/master/web-api/slack_web_openapi_v2.json"
     },
     "stripe.json": {
-      "sha256": "6b4680299e7b7743811c41537e828b0eae363a11cea44441511013b55e52f7ad",
+      "sha256": "8b5c2f03d4cd67f51b719b48963b9d47927296fc17eecb49005fc7228f1c077d",
       "url": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json"
     },
     "twilio.json": {

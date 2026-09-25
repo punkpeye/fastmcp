@@ -303,8 +303,9 @@ export function buildOutputSchema(
  * (see `buildSharedDefs`). Ports the equivalent rewrite from the Python
  * implementation (`utilities/openapi/schemas.py:_replace_ref_with_defs`).
  *
- * Also normalizes OpenAPI 3.0's `nullable` keyword (see `normalizeNullable`),
- * since real specs carry both.
+ * Also normalizes OpenAPI 3.0's `nullable` keyword (see `normalizeNullable`)
+ * and its boolean exclusive bounds (see `normalizeExclusiveBounds`), since
+ * real specs carry both.
  */
 export function rewriteComponentRefs<TValue>(
   value: TValue,
@@ -510,6 +511,49 @@ function filterReferencedDefs(
   );
 }
 
+function normalizeExclusiveBound(
+  schema: Record<string, unknown>,
+  exclusiveKey: "exclusiveMaximum" | "exclusiveMinimum",
+  boundKey: "maximum" | "minimum",
+): Record<string, unknown> {
+  const { [exclusiveKey]: exclusive, ...rest } = schema;
+
+  if (typeof exclusive !== "boolean") {
+    return schema;
+  }
+
+  if (!exclusive || typeof rest[boundKey] !== "number") {
+    return rest;
+  }
+
+  const { [boundKey]: bound, ...unbounded } = rest;
+
+  return { ...unbounded, [exclusiveKey]: bound };
+}
+
+/**
+ * OpenAPI 3.0 inherits JSON Schema draft 4's boolean `exclusiveMinimum` /
+ * `exclusiveMaximum`, which only mark the sibling `minimum` / `maximum` as
+ * exclusive. From draft 6 on — and so in OpenAPI 3.1, and in the AJV that
+ * validates tool arguments and that the MCP SDK client compiles output
+ * schemas with — they are numbers carrying the bound themselves, and a
+ * boolean is rejected outright: in an input schema it fails every call to
+ * the tool, and in an output schema it makes the client's `tools/list`
+ * throw for every tool. Real specs mix the two forms (PostHog's declares
+ * `openapi: 3.1.0` yet emits the boolean one), so a boolean is converted
+ * wherever it appears: `true` moves the bound into the keyword, while
+ * `false` — or `true` with no numeric bound to qualify — is dropped.
+ */
+function normalizeExclusiveBounds(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  return normalizeExclusiveBound(
+    normalizeExclusiveBound(schema, "exclusiveMinimum", "minimum"),
+    "exclusiveMaximum",
+    "maximum",
+  );
+}
+
 /**
  * OpenAPI 3.0's `nullable` keyword only makes sense alongside a sibling
  * `type`, which it widens (`nullable: true` + `type: "string"` means
@@ -631,5 +675,7 @@ function rewriteNode(
 
   const rewritten = Object.fromEntries(entries) as Record<string, unknown>;
 
-  return mode === "schemaMap" ? rewritten : normalizeNullable(rewritten);
+  return mode === "schemaMap"
+    ? rewritten
+    : normalizeExclusiveBounds(normalizeNullable(rewritten));
 }
