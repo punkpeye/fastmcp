@@ -1812,16 +1812,7 @@ export class FastMCPSession<
   }
 
   toolsListChanged(tools: Tool<T>[]) {
-    // Same rule as session creation: a session that has no auth (no
-    // `authenticate` configured, or none provided to `connect()`) sees every
-    // tool, so `canAccess` is only consulted when there is an auth object to
-    // pass it.
-    const allowedTools = this.#auth
-      ? tools.filter((tool) =>
-          tool.canAccess ? tool.canAccess(this.#auth as T) : true,
-        )
-      : tools;
-    this.setupToolHandlers(allowedTools);
+    this.setupToolHandlers(toolsVisibleTo(tools, this.#auth));
     this.triggerListChangedNotification("notifications/tools/list_changed");
   }
 
@@ -2991,6 +2982,21 @@ function stripBasePath(
   return null;
 }
 
+/**
+ * The tools a session may see. A session without auth — no `authenticate`
+ * configured, or none passed to `connect()` — sees every tool; otherwise each
+ * tool's `canAccess` decides. Every transport, and the refresh after a runtime
+ * tool change, goes through this one rule so they cannot drift apart.
+ */
+function toolsVisibleTo<T extends FastMCPSessionAuth>(
+  tools: Tool<T>[],
+  auth: T | undefined,
+): Tool<T>[] {
+  return auth
+    ? tools.filter((tool) => (tool.canAccess ? tool.canAccess(auth) : true))
+    : tools;
+}
+
 const FastMCPEventEmitterBase: {
   new (): StrictEventEmitter<EventEmitter, FastMCPEvents<FastMCPSessionAuth>>;
 } = EventEmitter;
@@ -3492,6 +3498,7 @@ export class FastMCP<
 
       const session = new FastMCPSession<T>({
         auth,
+        hasTools: this.#tools.length > 0,
         icons: this.#options.icons,
         instructions: this.#options.instructions,
         logger: this.#logger,
@@ -3504,7 +3511,7 @@ export class FastMCP<
         roots: this.#options.roots,
         streamKeepalive: this.#options.streamKeepalive,
         title: this.#options.title,
-        tools: this.#tools,
+        tools: toolsVisibleTo(this.#tools, auth),
         transportType: "stdio",
         utils: this.#options.utils,
         version: this.#options.version,
@@ -3743,11 +3750,6 @@ export class FastMCP<
       throw this.#createUnauthorizedResponse(errorMessage);
     }
 
-    const allowedTools = auth
-      ? this.#tools.filter((tool) =>
-          tool.canAccess ? tool.canAccess(auth) : true,
-        )
-      : this.#tools;
     return new FastMCPSession<T>({
       auth,
       hasTools: this.#tools.length > 0,
@@ -3765,7 +3767,7 @@ export class FastMCP<
       stateless,
       streamKeepalive: this.#options.streamKeepalive,
       title: this.#options.title,
-      tools: allowedTools,
+      tools: toolsVisibleTo(this.#tools, auth),
       transportType: "httpStream",
       utils: this.#options.utils,
       version: this.#options.version,
