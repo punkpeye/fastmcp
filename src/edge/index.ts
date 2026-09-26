@@ -29,6 +29,7 @@ import {
   ErrorCode,
   JSONRPCMessage,
   LATEST_PROTOCOL_VERSION,
+  SUPPORTED_PROTOCOL_VERSIONS,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
@@ -207,7 +208,20 @@ export class EdgeFastMCP {
   /**
    * Handle initialize request
    */
-  #handleInitialize(id: number | string): JSONRPCMessage {
+  #handleInitialize(
+    id: number | string,
+    params?: Record<string, unknown>,
+  ): JSONRPCMessage {
+    // Answer with the client's version when we support it, as the SDK's
+    // Server does. A client refuses any version it does not know, so always
+    // answering with the latest one locks out every older client.
+    const requestedVersion = params?.protocolVersion;
+    const protocolVersion =
+      typeof requestedVersion === "string" &&
+      SUPPORTED_PROTOCOL_VERSIONS.includes(requestedVersion)
+        ? requestedVersion
+        : LATEST_PROTOCOL_VERSION;
+
     return {
       id,
       jsonrpc: "2.0",
@@ -217,7 +231,7 @@ export class EdgeFastMCP {
           resources: this.#resources.length > 0 ? {} : undefined,
           tools: this.#tools.length > 0 ? {} : undefined,
         },
-        protocolVersion: LATEST_PROTOCOL_VERSION,
+        protocolVersion,
         serverInfo: {
           name: this.#name,
           version: this.#version,
@@ -352,7 +366,7 @@ export class EdgeFastMCP {
     try {
       switch (method) {
         case "initialize":
-          return this.#handleInitialize(id);
+          return this.#handleInitialize(id, params);
 
         case "ping":
           return { id, jsonrpc: "2.0", result: {} } as JSONRPCMessage;
