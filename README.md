@@ -1280,6 +1280,12 @@ The `log` object has the following methods:
 - `info(message: string, data?: SerializableValue)`
 - `warn(message: string, data?: SerializableValue)`
 
+A client can raise the minimum level it wants with the `logging/setLevel`
+request, and FastMCP then drops anything less severe instead of sending it — so
+after `logging/setLevel` with `error`, `log.debug` and `log.info` reach nobody.
+Until a client asks, every level is sent. The level in force is readable as
+[`session.loggingLevel`](#logginglevel).
+
 #### Errors
 
 The errors that are meant to be shown to the user should be thrown as `UserError` instances:
@@ -2632,7 +2638,9 @@ session.clientCapabilities;
 
 ### `loggingLevel`
 
-The `loggingLevel` property describes the logging level as set by the client.
+The `loggingLevel` property describes the logging level as set by the client. It
+reads `info` until the client sends `logging/setLevel`; messages less severe than
+the level the client did set are dropped rather than sent.
 
 ```ts
 session.loggingLevel;
