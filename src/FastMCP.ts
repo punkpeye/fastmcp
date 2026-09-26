@@ -2987,6 +2987,27 @@ function parseBasicAuthHeader(
 }
 
 /**
+ * RFC 9728 §3.1: the well-known path goes between the host and the resource's
+ * path, so `https://host/mcp` is described at
+ * `https://host/.well-known/oauth-protected-resource/mcp`.
+ *
+ * Matches mcp-proxy's challenge link, which answers most 401s: the scheme is
+ * kept for non-http resources such as `mcp://my-server`, whose `origin` is
+ * `"null"`, and an unparseable resource falls back instead of throwing.
+ */
+function protectedResourceMetadataUrl(resource: string): string {
+  let url: URL;
+  try {
+    url = new URL(resource);
+  } catch {
+    return `${resource}/.well-known/oauth-protected-resource`;
+  }
+  const path = url.pathname === "/" ? "" : url.pathname;
+  url.pathname = `/.well-known/oauth-protected-resource${path}`;
+  return url.toString();
+}
+
+/**
  * Maximum request body size (in bytes) accepted by the OAuth proxy endpoints
  * (registration, consent and token). These endpoints receive small JSON or
  * form-urlencoded payloads, so 1 MiB is a generous bound that prevents
@@ -3072,6 +3093,8 @@ export class FastMCP<
   #logger: Logger;
   #options: ServerOptions<T>;
   #prompts: InputPrompt<T>[] = [];
+  /** The auth provider's base URL, when it supplied the OAuth config. */
+  #providerResourceBase: string | undefined;
   #resources: Resource<T>[] = [];
   #resourcesTemplates: InputResourceTemplate<T>[] = [];
   #serverState: ServerState = ServerState.Stopped;
@@ -3097,10 +3120,9 @@ export class FastMCP<
 
       // Use auth provider's oauth config if not explicitly overridden
       if (!options.oauth) {
-        this.#options = {
-          ...options,
-          oauth: options.auth.getOAuthConfig(),
-        };
+        const oauth = options.auth.getOAuthConfig();
+        this.#providerResourceBase = oauth.protectedResource.resource;
+        this.#options = { ...options, oauth };
       }
     } else {
       this.#authenticate = options.authenticate;
@@ -3636,6 +3658,7 @@ export class FastMCP<
         httpConfig.basePath,
         httpConfig.endpoint,
       );
+      this.#useEndpointAsResource(httpConfig.endpoint);
 
       if (httpConfig.stateless) {
         // Stateless mode - create new server instance for each request
@@ -3869,7 +3892,7 @@ export class FastMCP<
 
     if (resource) {
       wwwAuthenticateParts.push(
-        `resource_metadata="${resource}/.well-known/oauth-protected-resource"`,
+        `resource_metadata="${protectedResourceMetadataUrl(resource)}"`,
       );
     }
 
@@ -4763,6 +4786,29 @@ export class FastMCP<
     for (const session of this.#sessions) {
       session.toolsListChanged(tools);
     }
+  }
+
+  /**
+   * RFC 9728: the protected resource is the MCP endpoint clients connect to,
+   * and the metadata served at `/.well-known/oauth-protected-resource<endpoint>`
+   * must name it. An auth provider only knows its base URL, so the endpoint is
+   * appended once the server knows it. An explicit `oauth` config is left as
+   * it is.
+   */
+  #useEndpointAsResource(endpoint: string): void {
+    const oauth = this.#options.oauth;
+    if (this.#providerResourceBase === undefined || !oauth?.protectedResource)
+      return;
+    this.#options = {
+      ...this.#options,
+      oauth: {
+        ...oauth,
+        protectedResource: {
+          ...oauth.protectedResource,
+          resource: `${this.#providerResourceBase.replace(/\/+$/, "")}${normalizePath(endpoint)}`,
+        },
+      },
+    };
   }
 }
 

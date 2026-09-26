@@ -33,8 +33,8 @@ importers:
         specifier: ^5.0.0 || ^6.0.0
         version: 6.1.3
       mcp-proxy:
-        specifier: ^6.7.13
-        version: 6.7.13
+        specifier: ^6.7.19
+        version: 6.7.19
       strict-event-emitter-types:
         specifier: ^2.0.0
         version: 2.0.0
@@ -2845,8 +2845,8 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
-  mcp-proxy@6.7.13:
-    resolution: {integrity: sha512-C7Ijy3hIHCaja7HJNf0ltwsGZMGvCm2hzJjyoN7ETM3gY7Js76r1Kfrzqhkb5dn6Y9TwJo4k4lElkujZUIEEFw==}
+  mcp-proxy@6.7.19:
+    resolution: {integrity: sha512-Nbfjj4VwVka1yAR/0fdD2G8borGOfjHEmfUzPFCH2nfQUNjWIij6s3gXMUhi2GUYE3FpUu8iFKE75ZQe/g1n8Q==}
     hasBin: true
 
   media-typer@1.1.0:
@@ -6839,7 +6839,7 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
-  mcp-proxy@6.7.13:
+  mcp-proxy@6.7.19:
     dependencies:
       '@modelcontextprotocol/client': 2.0.0
       '@modelcontextprotocol/server': 2.0.0
