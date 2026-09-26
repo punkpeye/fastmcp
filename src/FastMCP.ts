@@ -1455,6 +1455,13 @@ export class FastMCPSession<
 
   #transportType?: "httpStream" | "stdio";
 
+  /**
+   * Capabilities this session has already warned about in `#canRefresh`, so a
+   * server that registers a hundred resources at runtime logs one line rather
+   * than a hundred.
+   */
+  #unnegotiatedWarnings: Set<string> = new Set();
+
   #utils?: ServerOptions<T>["utils"];
 
   constructor({
@@ -1729,6 +1736,10 @@ export class FastMCPSession<
   }
 
   promptsListChanged(prompts: Prompt<T>[]) {
+    if (!this.#canRefresh("prompts")) {
+      return;
+    }
+
     this.#prompts.clear();
     for (const prompt of prompts) {
       this.addPrompt(prompt);
@@ -1752,6 +1763,10 @@ export class FastMCPSession<
   }
 
   resourcesListChanged(resources: Resource<T>[]) {
+    if (!this.#canRefresh("resources")) {
+      return;
+    }
+
     this.#resources.clear();
     for (const resource of resources) {
       this.addResource(resource);
@@ -1761,6 +1776,12 @@ export class FastMCPSession<
   }
 
   resourceTemplatesListChanged(resourceTemplates: ResourceTemplate<T>[]) {
+    // Templates live under the `resources` capability, and
+    // `resources/templates/list` is the handler this would register.
+    if (!this.#canRefresh("resources")) {
+      return;
+    }
+
     this.#resourceTemplates.clear();
     for (const resourceTemplate of resourceTemplates) {
       this.addResourceTemplate(resourceTemplate);
@@ -1793,6 +1814,10 @@ export class FastMCPSession<
   }
 
   toolsListChanged(tools: Tool<T>[]) {
+    if (!this.#canRefresh("tools")) {
+      return;
+    }
+
     this.setupToolHandlers(
       toolsVisibleTo(tools, this.#auth, this.#authRequired),
     );
@@ -1865,6 +1890,33 @@ export class FastMCPSession<
     if (!this.#abortController.signal.aborted) {
       this.#abortController.abort(new SessionError("Session closed"));
     }
+  }
+
+  /**
+   * Whether this session can be told about a primitive added at runtime.
+   *
+   * A session that connected before the server had any tool, resource or prompt
+   * of its own never advertised that capability, and MCP fixes capabilities
+   * during `initialize` for the life of the session. Registering the handler
+   * anyway makes the SDK throw `Server does not support <capability>` — out of
+   * `addTool()`, `addResource()`, `addResourceTemplate()` or `addPrompt()`,
+   * which are the public builder methods, and out of the middle of the loop
+   * over sessions, so the sessions after this one never heard about the change
+   * either. Warn once instead and let the rest of the loop run.
+   */
+  #canRefresh(capability: "prompts" | "resources" | "tools"): boolean {
+    if (this.#capabilities[capability]) {
+      return true;
+    }
+
+    if (!this.#unnegotiatedWarnings.has(capability)) {
+      this.#unnegotiatedWarnings.add(capability);
+      this.#logger.warn(
+        `[FastMCP warning] This session advertised no '${capability}' capability, because the server had none when the client connected, so it cannot be shown the ones registered since. Register one before start(), or reconnect the client; sessions that connect from now on do see them.`,
+      );
+    }
+
+    return false;
   }
 
   /**
