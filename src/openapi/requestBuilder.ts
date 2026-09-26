@@ -71,7 +71,13 @@ export async function executeRequest(
         pathParams[mapping.name] = String(value);
         break;
       case "query":
-        appendQueryValue(query, mapping.name, mapping.style, value);
+        appendQueryValue(
+          query,
+          mapping.name,
+          mapping.style,
+          value,
+          mapping.explode,
+        );
         break;
     }
   }
@@ -229,15 +235,16 @@ function appendBracketPairs(
  * Appends a query parameter's value using the serialization its declared
  * `style` requires. `deepObject` and `spaceDelimited`/`pipeDelimited` are
  * real, if less common, OpenAPI styles — Stripe alone uses `deepObject` 354
- * times across its filter/expand-style query params. Anything else (no
- * style, or the OpenAPI default `style: "form"`) keeps the existing
- * repeated-key serialization.
+ * times across its filter/expand-style query params. The default `form`
+ * style uses repeated keys unless `explode: false` requests a single
+ * comma-separated array value. Empty form-style arrays remain omitted.
  */
 function appendQueryValue(
   query: URLSearchParams,
   name: string,
   style: string | undefined,
   value: unknown,
+  explode: boolean | undefined,
 ): void {
   if (style === "deepObject") {
     appendBracketPairs(query, name, value);
@@ -248,6 +255,16 @@ function appendQueryValue(
     const items = Array.isArray(value) ? value : [value];
     const separator = style === "spaceDelimited" ? " " : "|";
     query.append(name, items.map(String).join(separator));
+    return;
+  }
+
+  if (
+    (style === undefined || style === "form") &&
+    explode === false &&
+    Array.isArray(value) &&
+    value.length > 0
+  ) {
+    query.append(name, value.map(String).join(","));
     return;
   }
 

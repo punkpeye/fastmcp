@@ -126,6 +126,8 @@ export interface HttpRoute {
 export interface OpenApiParameter {
   deprecated?: boolean;
   description?: string;
+  /** Whether a form-style query array uses repeated keys (default: true). */
+  explode?: boolean;
   in: ParameterLocation;
   name: string;
   required?: boolean;
@@ -133,8 +135,8 @@ export interface OpenApiParameter {
   /**
    * Only meaningful for `in: "query"`. `"deepObject"`, `"spaceDelimited"`,
    * and `"pipeDelimited"` get dedicated serialization in requestBuilder.ts;
-   * anything else (including unset, which defaults to `"form"` per the
-   * OpenAPI spec) uses the default repeated-key serialization.
+   * `"form"` (the default when unset) uses repeated keys unless
+   * `explode: false` requests a comma-separated query array.
    */
   style?: string;
 }
