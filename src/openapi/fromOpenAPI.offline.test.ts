@@ -139,6 +139,77 @@ async function connect(server: FastMCP) {
 }
 
 test.each([
+  { expected: ["id,name"], explode: false, style: undefined },
+  { expected: ["id,name"], explode: false, style: "form" },
+  { expected: ["id", "name"], explode: true, style: undefined },
+  { expected: ["id", "name"], explode: true, style: "form" },
+  { expected: ["id", "name"], explode: undefined, style: undefined },
+  { expected: ["id", "name"], explode: undefined, style: "form" },
+])(
+  "a referenced query array respects style=$style, explode=$explode",
+  async ({ expected, explode, style }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        components: {
+          parameters: {
+            Fields: {
+              explode,
+              in: "query",
+              name: "fields",
+              schema: { items: { type: "string" }, type: "array" },
+              style,
+            },
+          },
+        },
+        info: { title: "Files API", version: "1.0.0" },
+        openapi: "3.0.3",
+        paths: {
+          "/files/{file_id}": {
+            get: {
+              operationId: "getFile",
+              parameters: [
+                {
+                  in: "path",
+                  name: "file_id",
+                  required: true,
+                  schema: { type: "string" },
+                },
+                { $ref: "#/components/parameters/Fields" },
+              ],
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const result = await client.callTool({
+        arguments: { fields: ["id", "name"], file_id: "123" },
+        name: "getFile",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      const [calledUrl] = fetchImpl.mock.calls[0]!;
+      const url = new URL(calledUrl);
+      expect(url.pathname).toBe("/files/123");
+      expect(url.search).toBe(
+        explode === false ? "?fields=id%2Cname" : "?fields=id&fields=name",
+      );
+      expect(url.searchParams.getAll("fields")).toEqual(expected);
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each([
   { emptyProperties: false, required: false },
   { emptyProperties: false, required: true },
   { emptyProperties: true, required: false },

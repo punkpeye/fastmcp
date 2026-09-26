@@ -79,6 +79,7 @@ export interface FlatSchemaResult {
 }
 
 export interface ParameterMapping {
+  explode?: boolean;
   in: "body" | ParameterLocation;
   name: string;
   /** Only meaningful for `in: "query"` — see `OpenApiParameter.style`. */
@@ -138,7 +139,12 @@ export function buildFlatSchema(
       properties[key] = rewriteComponentRefs(
         param.schema ?? { type: "string" },
       );
-      parameterMap[key] = { in: param.in, name, style: param.style };
+      parameterMap[key] = {
+        explode: param.explode,
+        in: param.in,
+        name,
+        style: param.style,
+      };
 
       if (param.in === "path" || param.required) {
         required.push(key);
