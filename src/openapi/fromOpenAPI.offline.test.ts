@@ -197,6 +197,9 @@ test.each([
       const [calledUrl] = fetchImpl.mock.calls[0]!;
       const url = new URL(calledUrl);
       expect(url.pathname).toBe("/files/123");
+      expect(url.search).toBe(
+        explode === false ? "?fields=id%2Cname" : "?fields=id&fields=name",
+      );
       expect(url.searchParams.getAll("fields")).toEqual(expected);
     } finally {
       await server.sessions[0]?.close();

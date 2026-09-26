@@ -324,6 +324,27 @@ test.each([
   expect([...query.keys()]).toEqual(expected.map(() => "fields"));
 });
 
+test("a form query array with explode: false encodes member commas like separators", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+  await executeRequest({
+    args: { fields: ["x,y", "z"] },
+    fetchImpl,
+    parameterMap: {
+      fields: { explode: false, in: "query", name: "fields", style: "form" },
+    },
+    route: route({ path: "/files" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [calledUrl] = fetchImpl.mock.calls[0]!;
+  const url = new URL(calledUrl);
+  expect(url.search).toBe("?fields=x%2Cy%2Cz");
+  // Decoding produces one value; splitting it on commas cannot recover
+  // the original array items. No item-level escaping is implemented.
+  expect(url.searchParams.getAll("fields")).toEqual(["x,y,z"]);
+});
+
 test("a spaceDelimited query parameter tolerates a caller passing a scalar instead of an array", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () => new Response("{}", { status: 200 }),
