@@ -1535,7 +1535,13 @@ export class FastMCPSession<
     const supportsTools = hasTools ?? tools.length > 0;
 
     if (supportsTools) {
-      this.#capabilities.tools = {};
+      // `listChanged` is how a client learns that
+      // `notifications/tools/list_changed` is worth listening for, and
+      // `addTool()` / `removeTool()` on a running server send it. Declaring it
+      // is what the specification asks of a server that emits the
+      // notification, and it matches the `resources` and `prompts`
+      // capabilities below, which have advertised theirs since #296.
+      this.#capabilities.tools = { listChanged: true };
     }
 
     if (resources.length || resourcesTemplates.length) {
