@@ -674,6 +674,30 @@ type LoggingLevel =
   | "notice"
   | "warning";
 
+/**
+ * The RFC 5424 severities the MCP `logging` utility uses, as ordinals. A higher
+ * number is more severe, so a message is sent only when its ordinal is at least
+ * the one the client asked for with `logging/setLevel`.
+ */
+/**
+ * What `session.loggingLevel` reads before the client has sent
+ * `logging/setLevel`. Nothing is filtered until then: the specification sets no
+ * default minimum, and a server that dropped its own `debug` messages until a
+ * client asked for them would be surprising.
+ */
+const DEFAULT_LOGGING_LEVEL: LoggingLevel = "info";
+
+const LOGGING_LEVEL_SEVERITY: Record<LoggingLevel, number> = {
+  alert: 6,
+  critical: 5,
+  debug: 0,
+  emergency: 7,
+  error: 4,
+  info: 1,
+  notice: 2,
+  warning: 3,
+};
+
 type Prompt<
   T extends FastMCPSessionAuth = FastMCPSessionAuth,
   Arguments extends PromptArgument<T>[] = PromptArgument<T>[],
@@ -1354,7 +1378,7 @@ export class FastMCPSession<
   }
 
   public get loggingLevel(): LoggingLevel {
-    return this.#loggingLevel;
+    return this.#loggingLevel ?? DEFAULT_LOGGING_LEVEL;
   }
 
   public get roots(): Root[] {
@@ -1411,7 +1435,11 @@ export class FastMCPSession<
   #clientCapabilities?: ClientCapabilities;
   #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
   #logger: Logger;
-  #loggingLevel: LoggingLevel = "info";
+  /**
+   * The minimum level the client asked for with `logging/setLevel`, or
+   * `undefined` while it has not asked. See {@link DEFAULT_LOGGING_LEVEL}.
+   */
+  #loggingLevel?: LoggingLevel;
   #needsEventLoopFlush: boolean = false;
   #onToolCall?: ServerOptions<T>["onToolCall"];
   #pingConfig?: ServerOptions<T>["ping"];
@@ -1952,6 +1980,18 @@ export class FastMCPSession<
     message: string,
     context?: SerializableValue,
   ): void {
+    // A client that sent `logging/setLevel` asked for that level and above, so
+    // anything less severe is dropped here rather than put on the wire. The
+    // SDK's own filter cannot do it: registering our `logging/setLevel` handler
+    // replaces the SDK's, which is what populates the map its
+    // `isMessageIgnored` reads, so that map stays empty for the session's life.
+    if (
+      this.#loggingLevel &&
+      LOGGING_LEVEL_SEVERITY[level] < LOGGING_LEVEL_SEVERITY[this.#loggingLevel]
+    ) {
+      return;
+    }
+
     this.#server
       .sendLoggingMessage({
         data: {
@@ -1977,6 +2017,12 @@ export class FastMCPSession<
    * The notification is related to the tool call, so it travels on that
    * request's own stream, which is the only server-to-client route that exists
    * when running stateless.
+   *
+   * It is deliberately not filtered against the level the client set with
+   * `logging/setLevel`, unlike the `log` object a tool is handed: its job is to
+   * put bytes on the stream, and a client that asked for `error` only would
+   * otherwise switch off a feature the server opted into. Raise
+   * `streamKeepalive.logLevel` if the level it uses matters to you.
    *
    * @returns a function that stops the keepalive.
    */
