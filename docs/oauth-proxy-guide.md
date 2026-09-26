@@ -285,6 +285,10 @@ interface OAuthProxyConfig {
 }
 ```
 
+The built-in providers (`OAuthProvider`, `GoogleProvider`, `GitHubProvider`,
+`AzureProvider`) also accept `allowPlainPkce`, `authorizationResponseIss` and
+`enableCimd`, and pass them to their proxy.
+
 ### Extra Authorization Parameters
 
 Some providers require non-standard parameters on the authorization request.

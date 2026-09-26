@@ -2,6 +2,8 @@ import type { IncomingMessage } from "node:http";
 
 import { describe, expect, it } from "vitest";
 
+import type { AuthProviderConfig } from "./AuthProvider.js";
+
 import { AzureProvider } from "./AzureProvider.js";
 import { GitHubProvider } from "./GitHubProvider.js";
 import { GoogleProvider } from "./GoogleProvider.js";
@@ -323,6 +325,50 @@ describe("AuthProvider common behavior", () => {
       const proxy = provider.getProxy();
       expect(proxy).toBeDefined();
       expect(typeof proxy.loadUpstreamTokens).toBe("function");
+    }
+  });
+});
+
+describe("forwarded proxy options", () => {
+  const common = {
+    baseUrl: "http://localhost:8000",
+    clientId: "test",
+    clientSecret: "test",
+  };
+  const generic = {
+    authorizationEndpoint: "https://auth.example.com/authorize",
+    tokenEndpoint: "https://auth.example.com/token",
+  };
+  const create = (options: Partial<AuthProviderConfig> = {}) => [
+    new OAuthProvider({ ...common, ...generic, ...options }),
+    new GitHubProvider({ ...common, ...options }),
+    new GoogleProvider({ ...common, ...options }),
+    new AzureProvider({ ...common, ...options }),
+  ];
+
+  it("reach the proxy from every provider", () => {
+    for (const provider of create({
+      allowPlainPkce: false,
+      authorizationResponseIss: false,
+      enableCimd: true,
+    })) {
+      const metadata = provider.getProxy().getAuthorizationServerMetadata();
+      expect(metadata.clientIdMetadataDocumentSupported).toBe(true);
+      expect(metadata.codeChallengeMethodsSupported).toEqual(["S256"]);
+      expect(metadata).not.toHaveProperty(
+        "authorizationResponseIssParameterSupported",
+      );
+      provider.getProxy().destroy();
+    }
+  });
+
+  it("leave the proxy's defaults in place when not set", () => {
+    for (const provider of create()) {
+      const metadata = provider.getProxy().getAuthorizationServerMetadata();
+      expect(metadata).not.toHaveProperty("clientIdMetadataDocumentSupported");
+      expect(metadata.codeChallengeMethodsSupported).toEqual(["S256", "plain"]);
+      expect(metadata.authorizationResponseIssParameterSupported).toBe(true);
+      provider.getProxy().destroy();
     }
   });
 });
