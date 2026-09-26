@@ -88,9 +88,9 @@ Query parameters are serialized according to their declared `style`:
 
 - `deepObject` (e.g. Stripe's `created[gte]=...`, `expand[]=...` filters) expands as bracket-notation pairs.
 - `spaceDelimited` / `pipeDelimited` array values join into a single space- or pipe-separated value.
-- Anything else (no style, or the OpenAPI default `style: form`) uses repeated keys — `tag=a&tag=b`.
+- `form` (the default when no style is declared) uses repeated keys — `tag=a&tag=b` — unless `explode: false` requests a single comma-separated array value instead, such as `fields=id,name`. Values are URL-encoded; empty form-style arrays are omitted.
 
-`explode: false` is not implemented — an array-typed query parameter is always sent exploded (repeated keys), even if the spec declares `explode: false` (which OpenAPI defines as a single comma-joined value instead).
+The `explode` flag currently only affects form-style query arrays. Other parameter locations and form-body encoding are unchanged.
 
 An **object**-valued query, header, or cookie parameter with no `deepObject` style has no defined serialization here — it's sent as the literal string `"[object Object]"`, which is very unlikely to be what the target API expects. This only affects a non-`deepObject` parameter whose own schema is `type: object`, which is uncommon in practice; `deepObject` is what real specs (Stripe) actually use for this case.
 

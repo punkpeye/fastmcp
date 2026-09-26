@@ -275,6 +275,55 @@ test.each(["spaceDelimited", "pipeDelimited"] as const)(
   },
 );
 
+test.each([
+  { expected: ["0,7"], label: "numbers", style: "form", value: [0, 7] },
+  {
+    expected: ["true,false"],
+    label: "booleans",
+    style: "form",
+    value: [true, false],
+  },
+  { expected: ["id"], label: "one item", style: "form", value: ["id"] },
+  { expected: [], label: "an empty array", style: "form", value: [] },
+  { expected: ["id"], label: "a scalar", style: "form", value: "id" },
+  { expected: [], label: "an omitted value", style: "form", value: undefined },
+  {
+    expected: ["a&b,c=d,x+y,文 字"],
+    label: "reserved and non-ASCII characters",
+    style: "form",
+    value: ["a&b", "c=d", "x+y", "文 字"],
+  },
+  {
+    expected: ["a b"],
+    label: "spaceDelimited values",
+    style: "spaceDelimited",
+    value: ["a", "b"],
+  },
+  {
+    expected: ["a|b"],
+    label: "pipeDelimited values",
+    style: "pipeDelimited",
+    value: ["a", "b"],
+  },
+])("explode: false preserves $label", async ({ expected, style, value }) => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+  await executeRequest({
+    args: { fields: value },
+    fetchImpl,
+    parameterMap: {
+      fields: { explode: false, in: "query", name: "fields", style },
+    },
+    route: route({ path: "/files" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [calledUrl] = fetchImpl.mock.calls[0]!;
+  const query = new URL(calledUrl).searchParams;
+  expect(query.getAll("fields")).toEqual(expected);
+  expect([...query.keys()]).toEqual(expected.map(() => "fields"));
+});
+
 test("a spaceDelimited query parameter tolerates a caller passing a scalar instead of an array", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () => new Response("{}", { status: 200 }),
