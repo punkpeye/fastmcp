@@ -471,7 +471,10 @@ export class OAuthProxy {
       responseTypesSupported: ["code"],
       scopesSupported: this.config.scopes || [],
       tokenEndpoint: `${this.config.baseUrl}/oauth/token`,
+      // Public clients use PKCE instead of a secret: CIMD clients never
+      // receive one, and DCR clients may register with "none".
       tokenEndpointAuthMethodsSupported: [
+        "none",
         "client_secret_basic",
         "client_secret_post",
       ],
