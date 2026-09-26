@@ -675,11 +675,6 @@ type LoggingLevel =
   | "warning";
 
 /**
- * The RFC 5424 severities the MCP `logging` utility uses, as ordinals. A higher
- * number is more severe, so a message is sent only when its ordinal is at least
- * the one the client asked for with `logging/setLevel`.
- */
-/**
  * What `session.loggingLevel` reads before the client has sent
  * `logging/setLevel`. Nothing is filtered until then: the specification sets no
  * default minimum, and a server that dropped its own `debug` messages until a
@@ -687,6 +682,11 @@ type LoggingLevel =
  */
 const DEFAULT_LOGGING_LEVEL: LoggingLevel = "info";
 
+/**
+ * The RFC 5424 severities the MCP `logging` utility uses, as ordinals. A higher
+ * number is more severe, so a message is sent only when its ordinal is at least
+ * the one the client asked for with `logging/setLevel`.
+ */
 const LOGGING_LEVEL_SEVERITY: Record<LoggingLevel, number> = {
   alert: 6,
   critical: 5,
