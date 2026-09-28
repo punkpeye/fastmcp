@@ -611,28 +611,35 @@ test("handles UserError errors with extras", async () => {
   });
 });
 
-test("calling an unknown tool throws McpError with MethodNotFound code", async () => {
+test("calling an unknown tool answers -32602 (Invalid params), as the specification's example does", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
-      try {
-        await client.callTool({
+      await expect(
+        client.callTool({
           arguments: {
             a: 1,
             b: 2,
           },
           name: "add",
-        });
-      } catch (error) {
-        expect(error).toBeInstanceOf(McpError);
-
-        // @ts-expect-error - we know that error is an McpError
-        expect(error.code).toBe(ErrorCode.MethodNotFound);
-      }
+        }),
+      ).rejects.toMatchObject({
+        code: ErrorCode.InvalidParams,
+        message: expect.stringContaining("Unknown tool: add"),
+      });
     },
     server: async () => {
       const server = new FastMCP({
         name: "Test",
         version: "1.0.0",
+      });
+
+      // A server with a tool registers `tools/call`; the method exists, only
+      // the tool named in the request does not.
+      server.addTool({
+        description: "Echo",
+        execute: async (args) => String(args.value),
+        name: "echo",
+        parameters: z.object({ value: z.string() }),
       });
 
       return server;
@@ -6570,6 +6577,37 @@ test("offers all enum values when the completion value is empty", async () => {
         load: async ({ name }) => `Hello, ${name}!`,
         name: "countryPoem",
       });
+      return server;
+    },
+  });
+});
+
+test("reading an unknown resource answers -32602 with the requested uri in data (SEP-2164)", async () => {
+  await runWithTestServer({
+    run: async ({ client }) => {
+      await expect(
+        client.readResource({ uri: "file:///does-not-exist.txt" }),
+      ).rejects.toMatchObject({
+        code: ErrorCode.InvalidParams,
+        data: { uri: "file:///does-not-exist.txt" },
+        message: expect.stringContaining(
+          "Resource not found: 'file:///does-not-exist.txt'",
+        ),
+      });
+    },
+    server: async () => {
+      const server = new FastMCP({
+        name: "Test",
+        version: "1.0.0",
+      });
+
+      server.addResource({
+        load: async () => ({ text: "known" }),
+        mimeType: "text/plain",
+        name: "Known",
+        uri: "file:///known.txt",
+      });
+
       return server;
     },
   });
