@@ -2,11 +2,11 @@
   "_comment": "Large real-world specs for fromOpenAPI.benchmark.test.ts. Not vendored (~20MB combined); fetched on demand by the benchmark and pinned by sha256 so a run is still reproducible. Re-pin with `pnpm test:openapi:refresh` when a spec legitimately changes upstream.",
   "specs": {
     "box.json": {
-      "sha256": "0f8794edec1caf44761777f791b36388ec997f4220233a1a0166712e0d3b0a06",
+      "sha256": "13cc601e01a7b82133975aaf7aeffb1850159a10ac6365fae00d5af94406d9d4",
       "url": "https://raw.githubusercontent.com/box/box-openapi/main/openapi.json"
     },
     "posthog.yaml": {
-      "sha256": "31da599e52c62f667029437d227dbf81a7f2e33eeb6effe4b7498d4b0fd3a0f3",
+      "sha256": "e6001c1a8897ee76a37cf11f39e856f9d574295f1e56ec1842a03709ea2b2c88",
       "url": "https://app.posthog.com/api/schema/"
     },
     "slack.json": {
@@ -18,7 +18,7 @@
       "url": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json"
     },
     "twilio.json": {
-      "sha256": "170b3ccd0f891416840083d72f1795b1499b14a18d4873fd2b39f47ef84642d6",
+      "sha256": "78e76cc93c355a259e241866c241663eddb6ce0ed528f066c6cf0958648f5637",
       "url": "https://raw.githubusercontent.com/twilio/twilio-oai/main/spec/json/twilio_api_v2010.json"
     }
   }
