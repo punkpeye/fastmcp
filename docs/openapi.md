@@ -66,7 +66,7 @@ const server = await fromOpenAPI({
 A `GET` stays a tool instead — even with `resources: true` — when:
 
 - it has any `header` or `cookie` parameter (these can't be expressed in a resource URI, and resource reads have no per-call side channel for them), or
-- any of its path/query parameters is array-typed (OpenAPI's array query serialization and RFC 6570's don't match).
+- any of its path/query parameters is array-typed, including component schema references and nullable arrays (OpenAPI's array query serialization and RFC 6570's don't match).
 
 This means a "get by ID" style endpoint typically becomes a resource template, while a "search/filter" endpoint with array-valued query parameters typically stays a tool — which tends to match how each is actually used.
 

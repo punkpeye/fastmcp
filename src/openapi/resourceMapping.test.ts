@@ -60,21 +60,46 @@ test("a cookie parameter makes a route ineligible", () => {
   ).toBe(false);
 });
 
-test("an array-typed query parameter makes a route ineligible", () => {
-  expect(
-    isEligibleForResource(
-      route({
-        parameters: [
-          {
-            in: "query",
-            name: "tags",
-            schema: { items: { type: "string" }, type: "array" },
-          },
-        ],
-      }),
-    ),
-  ).toBe(false);
-});
+test.each(["path", "query"] as const)(
+  "array and nullable array %s parameters make a route ineligible",
+  (location) => {
+    for (const type of ["array", ["array", "null"]]) {
+      expect(
+        isEligibleForResource(
+          route({
+            parameters: [
+              {
+                in: location,
+                name: "tags",
+                schema: { items: { type: "string" }, type },
+              },
+            ],
+          }),
+        ),
+      ).toBe(false);
+    }
+  },
+);
+
+test.each(["path", "query"] as const)(
+  "a referenced array %s parameter makes a route ineligible",
+  (location) => {
+    expect(
+      isEligibleForResource(
+        route({
+          parameters: [
+            {
+              in: location,
+              name: "tags",
+              schema: { $ref: "#/components/schemas/Tags" },
+            },
+          ],
+        }),
+        { Tags: { items: { type: "string" }, type: "array" } },
+      ),
+    ).toBe(false);
+  },
+);
 
 test("an empty parameterMap produces a static resource", () => {
   const mapping = buildResourceMapping(
