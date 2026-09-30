@@ -6,7 +6,7 @@
       "url": "https://raw.githubusercontent.com/box/box-openapi/main/openapi.json"
     },
     "posthog.yaml": {
-      "sha256": "e6001c1a8897ee76a37cf11f39e856f9d574295f1e56ec1842a03709ea2b2c88",
+      "sha256": "49bd5cb8e64b3eb69f70c741bbe78f15f84336dfc997c22110f671bca8da9ba3",
       "url": "https://app.posthog.com/api/schema/"
     },
     "slack.json": {
@@ -14,7 +14,7 @@
       "url": "https://raw.githubusercontent.com/slackapi/slack-api-specs/master/web-api/slack_web_openapi_v2.json"
     },
     "stripe.json": {
-      "sha256": "8b5c2f03d4cd67f51b719b48963b9d47927296fc17eecb49005fc7228f1c077d",
+      "sha256": "7cff4cc46d0654101a36a3302f7544640f5f73e4f3cad6f264f0e23c19fa1776",
       "url": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json"
     },
     "twilio.json": {
