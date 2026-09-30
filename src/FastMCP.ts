@@ -2498,13 +2498,17 @@ export class FastMCPSession<
               };
             }
 
+            // SEP-2164: a resource that does not exist is -32602 (Invalid
+            // params) with the requested URI in `data`, which is what the
+            // conformance suite checks for.
             throw new McpError(
-              ErrorCode.MethodNotFound,
+              ErrorCode.InvalidParams,
               `Resource not found: '${request.params.uri}'. Available resources: ${
                 Array.from(this.#resources.values())
                   .map((r) => r.uri)
                   .join(", ") || "none"
               }`,
+              { uri: request.params.uri },
             );
           }
 
@@ -2688,8 +2692,11 @@ export class FastMCPSession<
         const tool = toolsMap.get(request.params.name);
 
         if (!tool) {
+          // The method exists; the tool named in its params does not. The
+          // specification's example for this case is a -32602 (Invalid params)
+          // protocol error.
           throw new McpError(
-            ErrorCode.MethodNotFound,
+            ErrorCode.InvalidParams,
             `Unknown tool: ${request.params.name}`,
           );
         }
