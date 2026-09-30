@@ -583,11 +583,22 @@ export class EdgeFastMCP {
         result: { content },
       } as JSONRPCMessage;
     } catch (error) {
-      return this.#rpcError(
+      // A tool that throws is a tool execution error: the MCP specification
+      // reports it in the result with `isError`, so the model can read it,
+      // as the Node FastMCP path does.
+      return {
         id,
-        ErrorCode.InternalError,
-        `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+        jsonrpc: "2.0",
+        result: {
+          content: [
+            {
+              text: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
+              type: "text",
+            },
+          ],
+          isError: true,
+        },
+      } as JSONRPCMessage;
     }
   }
 

@@ -280,6 +280,53 @@ describe("EdgeFastMCP", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("reports a tool that throws as a tool execution error", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    server.addTool({
+      description: "Fail while running",
+      execute: async () => {
+        throw new Error("upstream API returned 503");
+      },
+      name: "flaky",
+    });
+
+    const response = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify({
+          id: 12,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: {}, name: "flaky" },
+        }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body: JsonResponse = await response.json();
+    expect(body).toEqual({
+      id: 12,
+      jsonrpc: "2.0",
+      result: {
+        content: [
+          {
+            text: "Tool execution failed: upstream API returned 503",
+            type: "text",
+          },
+        ],
+        isError: true,
+      },
+    });
+  });
+
   it("should pass transformed tool arguments to execute", async () => {
     const server = new EdgeFastMCP({
       name: "TestServer",
