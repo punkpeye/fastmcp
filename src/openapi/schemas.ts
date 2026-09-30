@@ -303,6 +303,36 @@ export function buildOutputSchema(
 }
 
 /**
+ * Follows a bare `$ref` into `components.schemas` — or its rewritten
+ * `#/$defs/` form, which is what `sharedDefs` entries themselves carry —
+ * until it reaches a concrete schema. A dangling or cyclic reference is
+ * returned as-is rather than failing the whole conversion.
+ */
+export function resolveComponentRef(
+  schema: OpenApiSchema,
+  sharedDefs: Record<string, OpenApiSchema> | undefined,
+): OpenApiSchema {
+  const seen = new Set<string>();
+  let current = schema;
+  let ref = current.$ref;
+
+  while (typeof ref === "string") {
+    const name = componentSchemaName(ref);
+    const target = name === undefined ? undefined : sharedDefs?.[name];
+
+    if (name === undefined || target === undefined || seen.has(name)) {
+      break;
+    }
+
+    seen.add(name);
+    current = target;
+    ref = current.$ref;
+  }
+
+  return current;
+}
+
+/**
  * Rewrites `$ref`s pointing at `#/components/schemas/...` to `#/$defs/...`,
  * so a per-tool schema that contains one can be handed to AJV standalone,
  * alongside a `$defs` object built from the document's `components.schemas`
@@ -594,36 +624,6 @@ function normalizeNullable(
   }
 
   return rest;
-}
-
-/**
- * Follows a bare `$ref` into `components.schemas` — or its rewritten
- * `#/$defs/` form, which is what `sharedDefs` entries themselves carry —
- * until it reaches a concrete schema. A dangling or cyclic reference is
- * returned as-is rather than failing the whole conversion.
- */
-function resolveComponentRef(
-  schema: OpenApiSchema,
-  sharedDefs: Record<string, OpenApiSchema> | undefined,
-): OpenApiSchema {
-  const seen = new Set<string>();
-  let current = schema;
-  let ref = current.$ref;
-
-  while (typeof ref === "string") {
-    const name = componentSchemaName(ref);
-    const target = name === undefined ? undefined : sharedDefs?.[name];
-
-    if (name === undefined || target === undefined || seen.has(name)) {
-      break;
-    }
-
-    seen.add(name);
-    current = target;
-    ref = current.$ref;
-  }
-
-  return current;
 }
 
 /**

@@ -1,5 +1,7 @@
 import type { ParameterMapping } from "./schemas.js";
-import type { HttpRoute } from "./types.js";
+import type { HttpRoute, OpenApiSchema } from "./types.js";
+
+import { resolveComponentRef } from "./schemas.js";
 
 export type ResourceMapping =
   | {
@@ -74,12 +76,18 @@ export function buildResourceMapping(
  * this only ever *removes* operations from the tool list in favor of a
  * resource, never breaks one.
  */
-export function isEligibleForResource(route: HttpRoute): boolean {
+export function isEligibleForResource(
+  route: HttpRoute,
+  sharedDefs?: Record<string, OpenApiSchema>,
+): boolean {
   return route.parameters.every((param) => {
     if (param.in === "header" || param.in === "cookie") {
       return false;
     }
 
-    return param.schema?.type !== "array";
+    const type = resolveComponentRef(param.schema ?? {}, sharedDefs).type;
+    return (
+      type !== "array" && (!Array.isArray(type) || !type.includes("array"))
+    );
   });
 }

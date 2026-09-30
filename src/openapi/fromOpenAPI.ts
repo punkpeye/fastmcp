@@ -77,7 +77,7 @@ export async function fromOpenAPI(
     if (
       options.resources &&
       route.method === "get" &&
-      isEligibleForResource(route)
+      isEligibleForResource(route, sharedDefs)
     ) {
       registerResource(
         server,

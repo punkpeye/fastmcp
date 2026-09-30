@@ -890,6 +890,109 @@ test("resources: true — a GET with a path parameter becomes a resource templat
   });
 });
 
+test.each([
+  {
+    label: "array",
+    openapi: "3.0.3",
+    schema: { items: { type: "string" }, type: "array" },
+  },
+  {
+    label: "nullable array (3.0)",
+    openapi: "3.0.3",
+    schema: { items: { type: "string" }, nullable: true, type: "array" },
+  },
+  {
+    label: "nullable array (3.1)",
+    openapi: "3.1.0",
+    schema: { items: { type: "string" }, type: ["array", "null"] },
+  },
+  {
+    label: "chained array reference",
+    openapi: "3.0.3",
+    schema: { $ref: "#/components/schemas/TagList" },
+  },
+])(
+  "resources: true — a referenced $label stays a callable tool alongside scalar resource templates",
+  async ({ openapi, schema }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      resources: true,
+      spec: {
+        components: {
+          schemas: {
+            TagList: { items: { type: "string" }, type: "array" },
+            Tags: schema,
+            WidgetId: { type: "string" },
+          },
+        },
+        info: { title: "Widgets API", version: "1.0.0" },
+        openapi,
+        paths: {
+          "/widgets": {
+            get: {
+              operationId: "listWidgets",
+              parameters: [
+                {
+                  in: "query",
+                  name: "tags",
+                  schema: { $ref: "#/components/schemas/Tags" },
+                },
+              ],
+              responses: { 200: { description: "OK" } },
+            },
+          },
+          "/widgets/{widgetId}": {
+            get: {
+              operationId: "getWidget",
+              parameters: [
+                {
+                  in: "path",
+                  name: "widgetId",
+                  required: true,
+                  schema: { $ref: "#/components/schemas/WidgetId" },
+                },
+              ],
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const { resourceTemplates } = await client.listResourceTemplates();
+      expect(resourceTemplates.map((template) => template.name)).toEqual([
+        "getWidget",
+      ]);
+      const { tools } = await client.listTools();
+      expect(tools.map((tool) => tool.name)).toEqual(["listWidgets"]);
+      const result = await client.callTool({
+        arguments: { tags: ["red", "blue"] },
+        name: "listWidgets",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenNthCalledWith(
+        1,
+        "https://api.example.com/widgets?tags=red&tags=blue",
+        expect.objectContaining({ method: "GET" }),
+      );
+      await client.readResource({ uri: "openapi://getWidget/widgets/w1" });
+      expect(fetchImpl).toHaveBeenNthCalledWith(
+        2,
+        "https://api.example.com/widgets/w1",
+        expect.objectContaining({ method: "GET" }),
+      );
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
 test("a FastAPI-style form body (`$ref` to a component schema) becomes a tool with flattened parameters that posts form-encoded", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () => new Response(JSON.stringify({ access_token: "t" })),
