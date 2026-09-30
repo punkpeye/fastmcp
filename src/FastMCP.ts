@@ -2693,8 +2693,8 @@ export class FastMCPSession<
 
         if (!tool) {
           // The method exists; the tool named in its params does not. The
-          // specification's example for this case is -32602 (Invalid params),
-          // which is also what the reference SDK answers.
+          // specification's example for this case is a -32602 (Invalid params)
+          // protocol error.
           throw new McpError(
             ErrorCode.InvalidParams,
             `Unknown tool: ${request.params.name}`,
