@@ -1,4 +1,7 @@
-import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import {
+  LATEST_PROTOCOL_VERSION,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -40,6 +43,45 @@ describe("EdgeFastMCP", () => {
     expect(body.id).toBe(1);
     expect(body.result.serverInfo.name).toBe("TestServer");
     expect(body.result.serverInfo.version).toBe("1.0.0");
+  });
+
+  it("answers initialize with the protocol version the client asked for", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    const initialize = async (protocolVersion: string) => {
+      const response = await server.fetch(
+        new Request("http://localhost/mcp", {
+          body: JSON.stringify({
+            id: 1,
+            jsonrpc: "2.0",
+            method: "initialize",
+            params: {
+              capabilities: {},
+              clientInfo: { name: "test-client", version: "1.0.0" },
+              protocolVersion,
+            },
+          }),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+      const body: JsonResponse = await response.json();
+      return body.result.protocolVersion;
+    };
+
+    // An older client only accepts a version it knows, so it must get its own back.
+    for (const version of SUPPORTED_PROTOCOL_VERSIONS) {
+      expect(await initialize(version)).toBe(version);
+    }
+
+    // A version the server does not support is answered with the latest one.
+    expect(await initialize("1999-01-01")).toBe(LATEST_PROTOCOL_VERSION);
   });
 
   it("should list tools", async () => {
