@@ -159,7 +159,7 @@ async function compileSchema(
 function toIssue(error: AjvErrorObject): StandardSchemaV1.Issue {
   const path = error.instancePath
     .split("/")
-    .filter(Boolean)
+    .slice(1)
     // JSON Pointer escapes, per RFC 6901.
     .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"))
     .map((segment): number | string => {
