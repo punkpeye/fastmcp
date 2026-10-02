@@ -94,6 +94,39 @@ test("preserves non-canonical numeric object keys in issue paths", async () => {
   );
 });
 
+test.each([
+  { input: null, name: "the document root", path: [] },
+  { input: { "": 42 }, name: "an empty property name", path: [""] },
+  {
+    input: { "": [{ "a/b": "not a number" }] },
+    name: "an array item under an empty property name",
+    path: ["", 0, "a/b"],
+  },
+  {
+    input: { "": [{}] },
+    name: "a missing property under an empty property name",
+    path: ["", 0, "a/b"],
+  },
+])("preserves issue paths for $name", async ({ input, path }) => {
+  const schema = jsonSchemaAdapter({
+    properties: {
+      "": {
+        items: {
+          properties: { "a/b": { type: "number" } },
+          required: ["a/b"],
+          type: "object",
+        },
+        type: "array",
+      },
+    },
+    type: "object",
+  });
+
+  const result = await schema["~standard"].validate(input);
+
+  expect(result.issues?.map((issue) => issue.path)).toEqual([path]);
+});
+
 test("validates nested objects", async () => {
   const schema = jsonSchemaAdapter({
     properties: {
