@@ -600,6 +600,84 @@ describe("EdgeFastMCP", () => {
     expect(response.status).toBe(406);
   });
 
+  it("should return 400 for an unsupported MCP-Protocol-Version header", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    const post = (headers: Record<string, string>) =>
+      server.fetch(
+        new Request("http://localhost/mcp", {
+          body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "ping" }),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...headers,
+          },
+          method: "POST",
+        }),
+      );
+
+    const unsupported = await post({ "MCP-Protocol-Version": "1999-01-01" });
+
+    expect(unsupported.status).toBe(400);
+    const body: JsonResponse = await unsupported.json();
+    expect(body.error.code).toBe(-32000);
+    expect(body.error.message).toContain(
+      "Unsupported protocol version: 1999-01-01",
+    );
+
+    // A supported version, or none at all, is still served.
+    expect(
+      (await post({ "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION })).status,
+    ).toBe(200);
+    expect((await post({})).status).toBe(200);
+
+    // initialize negotiates the version in its body, so the header is not
+    // checked there, as in the SDK's transport.
+    const initialize = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify({
+          id: 2,
+          jsonrpc: "2.0",
+          method: "initialize",
+          params: {
+            capabilities: {},
+            clientInfo: { name: "test-client", version: "1.0.0" },
+            protocolVersion: "1999-01-01",
+          },
+        }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "MCP-Protocol-Version": "1999-01-01",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(initialize.status).toBe(200);
+
+    const get = await server.fetch(
+      new Request("http://localhost/mcp", {
+        headers: {
+          Accept: "text/event-stream",
+          "MCP-Protocol-Version": "1999-01-01",
+        },
+      }),
+    );
+    expect(get.status).toBe(400);
+
+    const deleted = await server.fetch(
+      new Request("http://localhost/mcp", {
+        headers: { "MCP-Protocol-Version": "1999-01-01" },
+        method: "DELETE",
+      }),
+    );
+    expect(deleted.status).toBe(400);
+  });
+
   it("should allow custom MCP path", async () => {
     const server = new EdgeFastMCP({
       mcpPath: "/api/mcp",

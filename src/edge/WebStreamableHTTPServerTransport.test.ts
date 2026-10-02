@@ -223,6 +223,55 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(body.result.serverInfo.name).toBe("TestServer");
   });
 
+  it("answers 400 for an unsupported MCP-Protocol-Version header", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    await createServer().connect(transport);
+
+    const initialized = await transport.handleRequest(
+      createInitializeRequest("application/json"),
+    );
+    expect(initialized.status).toBe(200);
+    await initialized.json();
+
+    const withVersion = (request: Request, version: string) => {
+      request.headers.set("mcp-protocol-version", version);
+      return request;
+    };
+    const ping = (version: string) =>
+      transport.handleRequest(
+        withVersion(
+          createPostRequest(
+            { id: 2, jsonrpc: "2.0", method: "ping" },
+            "application/json",
+            "test-session",
+          ),
+          version,
+        ),
+      );
+
+    const rejected = await ping("1999-01-01");
+    expect(rejected.status).toBe(400);
+    const error: JsonResponse = await rejected.json();
+    expect(error.error.code).toBe(-32000);
+    expect(error.error.message).toContain(
+      "Unsupported protocol version: 1999-01-01",
+    );
+    expect((await ping(LATEST_PROTOCOL_VERSION)).status).toBe(200);
+
+    const get = await transport.handleRequest(
+      withVersion(createGetRequest(), "1999-01-01"),
+    );
+    expect(get.status).toBe(400);
+    const deleted = await transport.handleRequest(
+      withVersion(createDeleteRequest(), "1999-01-01"),
+    );
+    expect(deleted.status).toBe(400);
+    expect(transport.sessionId).toBe("test-session");
+  });
+
   it("rejects reinitializing an active session", async () => {
     const sessionIdGenerator = vi
       .fn<() => string>()

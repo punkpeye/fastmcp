@@ -27,6 +27,7 @@ import type { JsonSchema } from "xsschema";
 
 import {
   ErrorCode,
+  isInitializeRequest,
   JSONRPCMessage,
   LATEST_PROTOCOL_VERSION,
   SUPPORTED_PROTOCOL_VERSIONS,
@@ -37,6 +38,7 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 import { strictInputSchema } from "../strictInputSchema.js";
+import { unsupportedProtocolVersion } from "./WebStreamableHTTPServerTransport.js";
 
 export { WebStreamableHTTPServerTransport } from "./WebStreamableHTTPServerTransport.js";
 export type {
@@ -286,6 +288,14 @@ export class EdgeFastMCP {
       );
     }
 
+    // initialize negotiates the version in its body, as in the SDK's transport.
+    const unsupported = messages.some((message) => isInitializeRequest(message))
+      ? undefined
+      : unsupportedProtocolVersion(request);
+    if (unsupported) {
+      return this.#errorResponse(400, -32000, unsupported);
+    }
+
     const responses: JSONRPCMessage[] = [];
 
     for (const message of messages) {
@@ -321,6 +331,11 @@ export class EdgeFastMCP {
         -32000,
         "Not Acceptable: Client must accept text/event-stream",
       );
+    }
+
+    const unsupported = unsupportedProtocolVersion(request);
+    if (unsupported) {
+      return this.#errorResponse(400, -32000, unsupported);
     }
 
     // In stateless mode, GET requests are not supported (no server-initiated messages)
@@ -673,7 +688,12 @@ export class EdgeFastMCP {
     });
 
     // MCP DELETE endpoint for session termination
-    this.#honoApp.delete(this.#mcpPath, async () => {
+    this.#honoApp.delete(this.#mcpPath, async (c) => {
+      const unsupported = unsupportedProtocolVersion(c.req.raw);
+      if (unsupported) {
+        return this.#errorResponse(400, -32000, unsupported);
+      }
+
       return new Response(null, { status: 204 });
     });
   }
