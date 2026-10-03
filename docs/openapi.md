@@ -90,6 +90,8 @@ Query parameters are serialized according to their declared `style`:
 - `spaceDelimited` / `pipeDelimited` array values join into a single space- or pipe-separated value.
 - `form` (the default when no style is declared) uses repeated keys — `tag=a&tag=b` — unless `explode: false` requests a single comma-separated array value instead, such as `fields=id%2Cname` (decoded value: `id,name`). Values are URL-encoded; empty form-style arrays are omitted.
 
+Query parameters with `allowReserved: true` preserve query-safe reserved characters such as `/`, `:`, `?`, and `,`, plus existing percent-encoded triples (`%2F` stays `%2F`). Raw `[]#&=+` remain encoded to preserve the query structure and values; HTTP(S) URL serialization also encodes apostrophes. Other unsafe characters and Unicode are percent-encoded. Parameter names and query parameters with `allowReserved: false` or no flag keep their existing encoding.
+
 The `explode` flag currently only affects form-style query arrays. Other parameter locations and form-body encoding are unchanged.
 
 With `explode: false`, commas inside individual array items are not escaped separately from the separators. For example, `["x,y", "z"]` is sent as `fields=x%2Cy%2Cz`; a server that URL-decodes and then splits on commas cannot distinguish the comma inside the first item from a separator.

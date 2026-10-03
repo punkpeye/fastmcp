@@ -124,6 +124,8 @@ export interface HttpRoute {
 }
 
 export interface OpenApiParameter {
+  /** Preserve query-safe reserved characters and percent-encoded triples. */
+  allowReserved?: boolean;
   deprecated?: boolean;
   description?: string;
   /** Whether a form-style query array uses repeated keys (default: true). */

@@ -34,7 +34,7 @@ export async function executeRequest(
   );
 
   const pathParams: Record<string, string> = {};
-  const query = new URLSearchParams();
+  const queryParts: string[] = [];
   // A plain object keys headers case-sensitively, so a caller-supplied
   // header (e.g. "Content-Type") wouldn't be recognized as the same header
   // as one this function sets internally (e.g. "content-type") — `Headers`
@@ -70,7 +70,8 @@ export async function executeRequest(
       case "path":
         pathParams[mapping.name] = String(value);
         break;
-      case "query":
+      case "query": {
+        const query = new URLSearchParams();
         appendQueryValue(
           query,
           mapping.name,
@@ -78,7 +79,11 @@ export async function executeRequest(
           value,
           mapping.explode,
         );
+        if (query.size > 0) {
+          queryParts.push(serializeQuery(query, mapping.allowReserved));
+        }
         break;
+      }
     }
   }
 
@@ -89,7 +94,7 @@ export async function executeRequest(
   }
 
   const url = new URL(baseUrl.replace(/\/$/, "") + path);
-  url.search = query.toString();
+  url.search = queryParts.join("&");
 
   let body: string | undefined;
 
@@ -308,4 +313,37 @@ async function resolveHeaders(
   }
 
   return typeof headers === "function" ? await headers() : { ...headers };
+}
+
+/**
+ * Reserved expansion applies only to values. Keep query/form delimiters and
+ * RFC3986-illegal query characters encoded, while preserving existing percent
+ * triples. URL serialization may still encode the apostrophe in HTTP(S) URLs.
+ */
+function serializeQuery(
+  query: URLSearchParams,
+  allowReserved: boolean | undefined,
+): string {
+  const encoded = query.toString();
+
+  if (!allowReserved) {
+    return encoded;
+  }
+
+  return encoded
+    .split("&")
+    .map((pair) => {
+      const [name, value] = pair.split("=");
+      const expanded = value.replace(
+        /\+|%25([\da-f]{2})|%(21|24|27|28|29|2c|2f|3a|3b|3f|40|7e)/gi,
+        (match, triple: string | undefined) =>
+          triple
+            ? `%${triple}`
+            : match === "+"
+              ? "%20"
+              : decodeURIComponent(match),
+      );
+      return `${name}=${expanded}`;
+    })
+    .join("&");
 }

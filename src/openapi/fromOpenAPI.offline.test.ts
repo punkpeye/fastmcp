@@ -138,6 +138,62 @@ async function connect(server: FastMCP) {
   return client;
 }
 
+test.each(
+  ["3.0.3", "3.1.0"].flatMap((openapi) => [
+    { allowReserved: true, expected: "?formula=x/y", openapi },
+    { allowReserved: false, expected: "?formula=x%2Fy", openapi },
+    { allowReserved: undefined, expected: "?formula=x%2Fy", openapi },
+  ]),
+)(
+  "a referenced query parameter respects allowReserved=$allowReserved in OpenAPI $openapi",
+  async ({ allowReserved, expected, openapi }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        components: {
+          parameters: {
+            Formula: {
+              allowReserved,
+              in: "query",
+              name: "formula",
+              schema: { type: "string" },
+            },
+          },
+        },
+        info: { title: "Formulas API", version: "1.0.0" },
+        openapi,
+        paths: {
+          "/formulas": {
+            get: {
+              operationId: "getFormula",
+              parameters: [{ $ref: "#/components/parameters/Formula" }],
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const result = await client.callTool({
+        arguments: { formula: "x/y" },
+        name: "getFormula",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      const [calledUrl] = fetchImpl.mock.calls[0]!;
+      expect(new URL(calledUrl).search).toBe(expected);
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
 test.each([
   { expected: ["id,name"], explode: false, style: undefined },
   { expected: ["id,name"], explode: false, style: "form" },
