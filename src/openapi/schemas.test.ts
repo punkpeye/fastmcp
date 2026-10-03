@@ -109,6 +109,29 @@ test.each([false, true])(
   },
 );
 
+test("repeated parameter name/location pairs keep distinct generated aliases", () => {
+  // OpenAPI forbids these duplicates, but route normalization retains them.
+  const { flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      parameters: [
+        { in: "query", name: "x", required: true },
+        { in: "query", name: "x", schema: { type: "integer" } },
+      ],
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties).toEqual({
+    x__query: { type: "string" },
+    x__query_2: { type: "integer" },
+  });
+  expect(flatSchema.required).toEqual(["x__query"]);
+  expect(parameterMap).toEqual({
+    x__query: { in: "query", name: "x" },
+    x__query_2: { in: "query", name: "x" },
+  });
+});
+
 test.each(["path", "query", "header", "cookie"] as const)(
   "generated parameter aliases do not overwrite a body property ending in __%s",
   (location) => {
