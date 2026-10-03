@@ -138,6 +138,185 @@ async function connect(server: FastMCP) {
   return client;
 }
 
+test.each(["application/json", "application/x-www-form-urlencoded"])(
+  "secondary parameter collisions preserve the HTTP request with %s bodies",
+  async (contentType) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("ok"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        info: { title: "Items API", version: "1.0.0" },
+        openapi: "3.0.3",
+        paths: {
+          "/items/{id}": {
+            post: {
+              operationId: "updateItem",
+              parameters: [
+                {
+                  in: "path",
+                  name: "id",
+                  required: true,
+                  schema: { type: "string" },
+                },
+                {
+                  explode: false,
+                  in: "query",
+                  name: "id",
+                  schema: { items: { type: "string" }, type: "array" },
+                  style: "form",
+                },
+                { in: "header", name: "id", schema: { type: "string" } },
+                { in: "cookie", name: "id", schema: { type: "string" } },
+                {
+                  in: "query",
+                  name: "id__query",
+                  required: true,
+                  schema: { type: "integer" },
+                },
+                {
+                  in: "query",
+                  name: "id__query_2",
+                  schema: { type: "integer" },
+                },
+              ],
+              requestBody: {
+                content: {
+                  [contentType]: {
+                    schema: {
+                      properties: { id__path: { type: "integer" } },
+                      required: ["id__path"],
+                      type: "object",
+                    },
+                  },
+                },
+                required: true,
+              },
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+    const args = {
+      id__cookie: "cookie-value",
+      id__header: "header-value",
+      id__path: 31,
+      id__path_2: "path/value",
+      id__query: 17,
+      id__query_2: 29,
+      id__query_3: ["first", "second"],
+    };
+
+    try {
+      const { tools } = await client.listTools();
+      expect(tools[0].inputSchema.required?.toSorted()).toEqual([
+        "id__path",
+        "id__path_2",
+        "id__query",
+      ]);
+      const result = await client.callTool({
+        arguments: args,
+        name: "updateItem",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      const [calledUrl, init] = fetchImpl.mock.calls[0]!;
+      const url = new URL(calledUrl);
+      expect(url.pathname).toBe("/items/path%2Fvalue");
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        id: "first,second",
+        id__query: "17",
+        id__query_2: "29",
+      });
+      const headers = new Headers(init?.headers);
+      expect(headers.get("id")).toBe("header-value");
+      expect(headers.get("cookie")).toBe("id=cookie-value");
+      expect(headers.get("content-type")).toBe(contentType);
+      expect(init?.body).toBe(
+        contentType === "application/json" ? '{"id__path":31}' : "id__path=31",
+      );
+
+      fetchImpl.mockClear();
+      await expect(
+        client.callTool({
+          arguments: { ...args, id__path_2: 42 },
+          name: "updateItem",
+        }),
+      ).rejects.toThrow(/must be string/);
+      await expect(
+        client.callTool({
+          arguments: { id__path: 31, id__query: 17 },
+          name: "updateItem",
+        }),
+      ).rejects.toThrow(/id__path_2/);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      await Promise.all(server.sessions.map((session) => session.close()));
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test("resource templates preserve parameters whose literal names collide with generated aliases", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("ok"));
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    resources: true,
+    spec: {
+      info: { title: "Items API", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/items/{id}": {
+          get: {
+            operationId: "getItem",
+            parameters: [
+              {
+                in: "path",
+                name: "id",
+                required: true,
+                schema: { type: "string" },
+              },
+              { in: "query", name: "id", schema: { type: "string" } },
+              { in: "query", name: "id__query", schema: { type: "string" } },
+              { in: "query", name: "id__path", schema: { type: "string" } },
+            ],
+            responses: { 200: { description: "OK" } },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.com" }],
+    },
+  });
+  const client = await connect(server);
+
+  try {
+    const { resourceTemplates } = await client.listResourceTemplates();
+    expect(resourceTemplates.map((template) => template.uriTemplate)).toEqual([
+      "openapi://getItem/items/{id__path_2}{?id__query_2,id__query,id__path}",
+    ]);
+    const result = await client.readResource({
+      uri: "openapi://getItem/items/path-value?id__query_2=query-value&id__query=literal-query&id__path=literal-path",
+    });
+    expect(result.contents).toEqual([expect.objectContaining({ text: "ok" })]);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    const url = new URL(calledUrl);
+    expect(url.pathname).toBe("/items/path-value");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      id: "query-value",
+      id__path: "literal-path",
+      id__query: "literal-query",
+    });
+  } finally {
+    await Promise.all(server.sessions.map((session) => session.close()));
+    await client.close();
+    await server.stop();
+  }
+});
+
 test.each([
   { expected: ["id,name"], explode: false, style: undefined },
   { expected: ["id,name"], explode: false, style: "form" },

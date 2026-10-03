@@ -96,7 +96,8 @@ type WalkMode = "data" | "schema" | "schemaMap";
  * (`utilities/openapi/schemas.py:_combine_schemas_and_map_params`): a name
  * that collides across path/query/header/cookie gets suffixed
  * `{name}__{location}`; a request body property with a colliding name always
- * keeps its bare name.
+ * keeps its bare name. Generated aliases that still collide get `_2`, `_3`,
+ * ... appended without displacing any bare parameter or body property.
  *
  * `GET` never contributes a request body: `fetch` (and the Fetch spec in
  * general) rejects a body on a GET request, so a tool built from a spec's
@@ -129,12 +130,30 @@ export function buildFlatSchema(
   const properties: Record<string, OpenApiSchema> = {};
   const required: string[] = [];
   const parameterMap: Record<string, ParameterMapping> = {};
+  const used = new Set(bodyProperties.keys());
+
+  // Reserve names that will stay bare before assigning any generated aliases,
+  // including parameters that appear later in the operation.
+  for (const [name, occurrences] of byName) {
+    if (occurrences.length === 1 && !bodyProperties.has(name)) {
+      used.add(name);
+    }
+  }
 
   for (const [name, occurrences] of byName) {
     const collides = occurrences.length > 1 || bodyProperties.has(name);
 
     for (const param of occurrences) {
-      const key = collides ? `${name}__${param.in}` : name;
+      const base = collides ? `${name}__${param.in}` : name;
+      let key = base;
+      let suffix = 1;
+
+      while (collides && used.has(key)) {
+        suffix += 1;
+        key = `${base}_${suffix}`;
+      }
+
+      used.add(key);
 
       properties[key] = rewriteComponentRefs(
         param.schema ?? { type: "string" },
