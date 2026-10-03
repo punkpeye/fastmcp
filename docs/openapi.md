@@ -88,13 +88,13 @@ Query parameters are serialized according to their declared `style`:
 
 - `deepObject` (e.g. Stripe's `created[gte]=...`, `expand[]=...` filters) expands as bracket-notation pairs.
 - `spaceDelimited` / `pipeDelimited` array values join into a single space- or pipe-separated value.
-- `form` (the default when no style is declared) uses repeated keys — `tag=a&tag=b` — unless `explode: false` requests a single comma-separated array value instead, such as `fields=id%2Cname` (decoded value: `id,name`). Values are URL-encoded; empty form-style arrays are omitted.
+- `form` (the default when no style is declared) uses repeated keys for arrays — `tag=a&tag=b` — and property pairs for objects — `R=100&G=200`. With `explode: false`, arrays use a single comma-separated value, such as `fields=id%2Cname` (decoded value: `id,name`), and objects use alternating keys and values, such as `color=R%2C100%2CG%2C200` (decoded value: `R,100,G,200`). Values are URL-encoded; empty form-style arrays and objects are omitted.
 
-The `explode` flag currently only affects form-style query arrays. Other parameter locations and form-body encoding are unchanged.
+The `explode` flag currently only affects form-style query arrays and objects. Other parameter locations and form-body encoding are unchanged.
 
-With `explode: false`, commas inside individual array items are not escaped separately from the separators. For example, `["x,y", "z"]` is sent as `fields=x%2Cy%2Cz`; a server that URL-decodes and then splits on commas cannot distinguish the comma inside the first item from a separator.
+With `explode: false`, commas inside individual array items or object keys/values are not escaped separately from the separators. For example, `["x,y", "z"]` is sent as `fields=x%2Cy%2Cz`; a server that URL-decodes and then splits on commas cannot distinguish the comma inside the first item from a separator.
 
-An **object**-valued query, header, or cookie parameter with no `deepObject` style has no defined serialization here — it's sent as the literal string `"[object Object]"`, which is very unlikely to be what the target API expects. This only affects a non-`deepObject` parameter whose own schema is `type: object`, which is uncommon in practice; `deepObject` is what real specs (Stripe) actually use for this case.
+Object-valued header and cookie parameters still serialize as the literal string `"[object Object]"`. Form-style query objects support scalar property values; nested objects/arrays require `deepObject` serialization.
 
 Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded.
 
