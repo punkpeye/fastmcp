@@ -94,7 +94,7 @@ The `explode` flag currently only affects form-style query arrays and objects. O
 
 With `explode: false`, commas inside individual array items or object keys/values are not escaped separately from the separators. For example, `["x,y", "z"]` is sent as `fields=x%2Cy%2Cz`; a server that URL-decodes and then splits on commas cannot distinguish the comma inside the first item from a separator.
 
-Object-valued header and cookie parameters still serialize as the literal string `"[object Object]"`. Form-style query objects support scalar property values; nested objects/arrays require `deepObject` serialization.
+Form-style query objects support scalar property values; nested objects/arrays require `deepObject` serialization. Any other object-valued parameter — a `spaceDelimited`/`pipeDelimited` query, path, header, or cookie parameter — is still sent as the literal string `"[object Object]"`.
 
 Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded.
 
