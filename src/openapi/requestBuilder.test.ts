@@ -212,6 +212,121 @@ test("an array-valued form body property is sent as repeated keys", async () => 
   expect(body.getAll("tag")).toEqual(["a", "b"]);
 });
 
+test.each([
+  { expected: "x/y", value: "x/y" },
+  { expected: ":/?@!$%27()*,;~", value: ":/?@!$'()*,;~" },
+  { expected: "%5B%5D%23%26%3D%2B%7C", value: "[]#&=+|" },
+  { expected: "%2F%2b%26%23%25%252F", value: "%2F%2b%26%23%25%252F" },
+  { expected: "100%25%20%25zz%20%252%20%25", value: "100% %zz %2 %" },
+  { expected: "%E4%B8%AD%E6%96%87%20%F0%9F%98%80/a", value: "中文 😀/a" },
+  { expected: "", value: "" },
+])(
+  "allowReserved preserves safe query characters: $value",
+  async ({ expected, value }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    await executeRequest({
+      args: { formula: value, ordinary: "x/y + %2F", trailing: "ok" },
+      fetchImpl,
+      parameterMap: {
+        formula: { allowReserved: true, in: "query", name: "formula/&" },
+        ordinary: { in: "query", name: "ordinary" },
+        trailing: { in: "query", name: "trailing" },
+      },
+      route: route({ path: "/formulas" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    const url = new URL(calledUrl);
+    expect(url.search).toBe(
+      `?formula%2F%26=${expected}&ordinary=x%2Fy+%2B+%252F&trailing=ok`,
+    );
+    expect(url.hash).toBe("");
+    expect([...url.searchParams.keys()]).toEqual([
+      "formula/&",
+      "ordinary",
+      "trailing",
+    ]);
+    expect(url.searchParams.get("ordinary")).toBe("x/y + %2F");
+    expect(url.searchParams.get("trailing")).toBe("ok");
+  },
+);
+
+test.each([false, undefined])(
+  "allowReserved=%s keeps the existing query encoding",
+  async (allowReserved) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    await executeRequest({
+      args: { formula: ":/?@!$'()*,;~ []#&=+|%2F 中文" },
+      fetchImpl,
+      parameterMap: {
+        formula: { allowReserved, in: "query", name: "formula" },
+      },
+      route: route({ path: "/formulas" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    expect(new URL(calledUrl).search).toBe(
+      "?formula=%3A%2F%3F%40%21%24%27%28%29*%2C%3B%7E+%5B%5D%23%26%3D%2B%7C%252F+%E4%B8%AD%E6%96%87",
+    );
+  },
+);
+
+test.each([
+  { expected: "?formula=x/y&formula=z%2Bw", explode: true, style: "form" },
+  { expected: "?formula=x/y,z%2Bw", explode: false, style: "form" },
+  { expected: "?formula=x/y%20z%2Bw", explode: false, style: "spaceDelimited" },
+  { expected: "?formula=x/y%7Cz%2Bw", explode: false, style: "pipeDelimited" },
+])(
+  "allowReserved respects style=$style, explode=$explode",
+  async ({ expected, explode, style }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    await executeRequest({
+      args: { formula: ["x/y", "z+w"] },
+      fetchImpl,
+      parameterMap: {
+        formula: {
+          allowReserved: true,
+          explode,
+          in: "query",
+          name: "formula",
+          style,
+        },
+      },
+      route: route({ path: "/formulas" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    expect(new URL(calledUrl).search).toBe(expected);
+  },
+);
+
+test("allowReserved applies to deepObject values while keeping property names encoded", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+  await executeRequest({
+    args: { formula: { "a&b": "x+y", "x/y": "a/b" } },
+    fetchImpl,
+    parameterMap: {
+      formula: {
+        allowReserved: true,
+        in: "query",
+        name: "formula",
+        style: "deepObject",
+      },
+    },
+    route: route({ path: "/formulas" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [calledUrl] = fetchImpl.mock.calls[0]!;
+  const url = new URL(calledUrl);
+  expect(url.search).toBe("?formula%5Ba%26b%5D=x%2By&formula%5Bx%2Fy%5D=a/b");
+  expect(url.searchParams.get("formula[x/y]")).toBe("a/b");
+  expect(url.searchParams.get("formula[a&b]")).toBe("x+y");
+});
+
 test("a deepObject query parameter serializes as bracket-notation pairs", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () => new Response("{}", { status: 200 }),

@@ -79,6 +79,8 @@ export interface FlatSchemaResult {
 }
 
 export interface ParameterMapping {
+  /** Only meaningful for `in: "query"` — see `OpenApiParameter.allowReserved`. */
+  allowReserved?: boolean;
   explode?: boolean;
   in: "body" | ParameterLocation;
   name: string;
@@ -159,6 +161,7 @@ export function buildFlatSchema(
         param.schema ?? { type: "string" },
       );
       parameterMap[key] = {
+        allowReserved: param.allowReserved,
         explode: param.explode,
         in: param.in,
         name,
