@@ -33,6 +33,8 @@ Path Item `$ref`s are supported too: when multiple paths share a definition, eac
 
 Each operation uses the first server in its nearest non-empty `servers` array: operation, then path, then document. Server variables use their defaults, and relative URLs resolve against the spec URL. An explicit `baseUrl` overrides this selection for every generated tool or resource.
 
+Tool inputs combine path, query, header, cookie, and body fields. If a parameter name is shared across locations or with a body property, it becomes `{name}__{location}`; body properties keep their names. If that generated alias is already occupied, `_2`, `_3`, and so on are appended until it is unique. These aliases only affect MCP input names; HTTP requests still use the original parameter and body names.
+
 ## Choosing which operations become tools
 
 Turning every operation in a large spec into a tool produces a tool list most MCP clients can't work with well. There is no way to make this fully automatic, so `fromOpenAPI` asks you to choose:
@@ -88,15 +90,15 @@ Query parameters are serialized according to their declared `style`:
 
 - `deepObject` (e.g. Stripe's `created[gte]=...`, `expand[]=...` filters) expands as bracket-notation pairs.
 - `spaceDelimited` / `pipeDelimited` array values join into a single space- or pipe-separated value.
-- `form` (the default when no style is declared) uses repeated keys — `tag=a&tag=b` — unless `explode: false` requests a single comma-separated array value instead, such as `fields=id%2Cname` (decoded value: `id,name`). Values are URL-encoded; empty form-style arrays are omitted.
+- `form` (the default when no style is declared) uses repeated keys for arrays — `tag=a&tag=b` — and property pairs for objects — `R=100&G=200`. With `explode: false`, arrays use a single comma-separated value, such as `fields=id%2Cname` (decoded value: `id,name`), and objects use alternating keys and values, such as `color=R%2C100%2CG%2C200` (decoded value: `R,100,G,200`). Values are URL-encoded; empty form-style arrays and objects are omitted.
 
 Query parameters with `allowReserved: true` preserve query-safe reserved characters such as `/`, `:`, `?`, and `,`, plus existing percent-encoded triples (`%2F` stays `%2F`). Raw `[]#&=+` remain encoded to preserve the query structure and values; HTTP(S) URL serialization also encodes apostrophes. Other unsafe characters and Unicode are percent-encoded. Parameter names and query parameters with `allowReserved: false` or no flag keep their existing encoding.
 
-The `explode` flag currently only affects form-style query arrays. Other parameter locations and form-body encoding are unchanged.
+The `explode` flag currently only affects form-style query arrays and objects. Other parameter locations and form-body encoding are unchanged.
 
-With `explode: false`, commas inside individual array items are not escaped separately from the separators. For example, `["x,y", "z"]` is sent as `fields=x%2Cy%2Cz`; a server that URL-decodes and then splits on commas cannot distinguish the comma inside the first item from a separator.
+With `explode: false`, commas inside individual array items or object keys/values are not escaped separately from the separators. For example, `["x,y", "z"]` is sent as `fields=x%2Cy%2Cz`; a server that URL-decodes and then splits on commas cannot distinguish the comma inside the first item from a separator.
 
-An **object**-valued query, header, or cookie parameter with no `deepObject` style has no defined serialization here — it's sent as the literal string `"[object Object]"`, which is very unlikely to be what the target API expects. This only affects a non-`deepObject` parameter whose own schema is `type: object`, which is uncommon in practice; `deepObject` is what real specs (Stripe) actually use for this case.
+Form-style query objects support scalar property values; nested objects/arrays require `deepObject` serialization. Any other object-valued parameter — a `spaceDelimited`/`pipeDelimited` query, path, header, or cookie parameter — is still sent as the literal string `"[object Object]"`.
 
 Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded.
 

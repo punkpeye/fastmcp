@@ -128,7 +128,7 @@ export interface OpenApiParameter {
   allowReserved?: boolean;
   deprecated?: boolean;
   description?: string;
-  /** Whether a form-style query array uses repeated keys (default: true). */
+  /** Whether form-style query arrays/objects use separate parameters (default: true). */
   explode?: boolean;
   in: ParameterLocation;
   name: string;
@@ -137,8 +137,9 @@ export interface OpenApiParameter {
   /**
    * Only meaningful for `in: "query"`. `"deepObject"`, `"spaceDelimited"`,
    * and `"pipeDelimited"` get dedicated serialization in requestBuilder.ts;
-   * `"form"` (the default when unset) uses repeated keys unless
-   * `explode: false` requests a comma-separated query array.
+   * `"form"` (the default when unset) uses repeated keys for arrays and
+   * property pairs for objects unless `explode: false` requests a single
+   * comma-separated value.
    */
   style?: string;
 }
