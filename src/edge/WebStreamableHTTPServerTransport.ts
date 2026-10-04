@@ -18,7 +18,27 @@ import {
   JSONRPCMessageSchema,
   MessageExtraInfo,
   RequestId,
+  SUPPORTED_PROTOCOL_VERSIONS,
 } from "@modelcontextprotocol/sdk/types.js";
+
+/**
+ * The error message for a request whose `MCP-Protocol-Version` header names a
+ * version this server does not support, which the specification answers with
+ * 400 Bad Request. A request without the header is accepted.
+ */
+export const unsupportedProtocolVersion = (
+  request: Request,
+): string | undefined => {
+  const protocolVersion = request.headers.get("mcp-protocol-version");
+  if (
+    protocolVersion === null ||
+    SUPPORTED_PROTOCOL_VERSIONS.includes(protocolVersion)
+  ) {
+    return undefined;
+  }
+
+  return `Bad Request: Unsupported protocol version: ${protocolVersion} (supported versions: ${SUPPORTED_PROTOCOL_VERSIONS.join(", ")})`;
+};
 
 export type EventId = string;
 /**
@@ -367,6 +387,11 @@ export class WebStreamableHTTPServerTransport implements Transport {
       }
     }
 
+    const unsupported = unsupportedProtocolVersion(request);
+    if (unsupported) {
+      return this.createErrorResponse(400, -32000, unsupported);
+    }
+
     this._sessionClosing = true;
     this._sessionGeneration += 1;
     const closedSessionId = this.sessionId ?? "";
@@ -409,6 +434,11 @@ export class WebStreamableHTTPServerTransport implements Transport {
 
     if (this.sessionIdGenerator && this.activeSessionId !== sessionId) {
       return this.createErrorResponse(404, -32001, "Session not found");
+    }
+
+    const unsupported = unsupportedProtocolVersion(request);
+    if (unsupported) {
+      return this.createErrorResponse(400, -32000, unsupported);
     }
 
     // Check for existing standalone stream
@@ -621,6 +651,14 @@ export class WebStreamableHTTPServerTransport implements Transport {
       ) {
         return this.createErrorResponse(404, -32001, "Session not found");
       }
+    }
+
+    // initialize negotiates the version in its body, as in the SDK's transport.
+    const unsupported = hasInitRequest
+      ? undefined
+      : unsupportedProtocolVersion(request);
+    if (unsupported) {
+      return this.createErrorResponse(400, -32000, unsupported);
     }
 
     const requestIds = messages
