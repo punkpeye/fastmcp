@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import type {
   BundledOpenApiDocument,
   HttpRoute,
+  OpenApiParameter,
   OpenApiSchema,
 } from "./types.js";
 
@@ -65,6 +66,176 @@ test("no collision: names are left bare", () => {
   );
 
   expect(parameterMap.status).toEqual({ in: "query", name: "status" });
+});
+
+test.each([false, true])(
+  "generated parameter aliases reserve literal names, reversed=%s",
+  (reversed) => {
+    const parameters: OpenApiParameter[] = [
+      { in: "path", name: "id", required: true, schema: { type: "string" } },
+      {
+        explode: false,
+        in: "query",
+        name: "id",
+        schema: { items: { type: "string" }, type: "array" },
+        style: "form",
+      },
+      {
+        in: "query",
+        name: "id__query",
+        required: true,
+        schema: { type: "integer" },
+      },
+      { in: "header", name: "id__query_2", schema: { type: "boolean" } },
+    ];
+    const { flatSchema, parameterMap } = buildFlatSchema(
+      route({ parameters: reversed ? parameters.toReversed() : parameters }),
+      undefined,
+    );
+
+    expect(flatSchema.properties).toEqual({
+      id__path: { type: "string" },
+      id__query: { type: "integer" },
+      id__query_2: { type: "boolean" },
+      id__query_3: { items: { type: "string" }, type: "array" },
+    });
+    expect(flatSchema.required?.toSorted()).toEqual(["id__path", "id__query"]);
+    expect(parameterMap).toEqual({
+      id__path: { in: "path", name: "id" },
+      id__query: { in: "query", name: "id__query" },
+      id__query_2: { in: "header", name: "id__query_2" },
+      id__query_3: { explode: false, in: "query", name: "id", style: "form" },
+    });
+  },
+);
+
+test("repeated parameter name/location pairs keep distinct generated aliases", () => {
+  // OpenAPI forbids these duplicates, but route normalization retains them.
+  const { flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      parameters: [
+        { in: "query", name: "x", required: true },
+        { in: "query", name: "x", schema: { type: "integer" } },
+      ],
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties).toEqual({
+    x__query: { type: "string" },
+    x__query_2: { type: "integer" },
+  });
+  expect(flatSchema.required).toEqual(["x__query"]);
+  expect(parameterMap).toEqual({
+    x__query: { in: "query", name: "x" },
+    x__query_2: { in: "query", name: "x" },
+  });
+});
+
+test.each(["path", "query", "header", "cookie"] as const)(
+  "generated parameter aliases do not overwrite a body property ending in __%s",
+  (location) => {
+    const bodyKey = `id__${location}`;
+    const otherLocation = location === "query" ? "path" : "query";
+    const otherKey = `id__${otherLocation}`;
+    const { flatSchema, parameterMap } = buildFlatSchema(
+      route({
+        parameters: [
+          {
+            in: location,
+            name: "id",
+            required: true,
+            schema: { type: "string" },
+          },
+          {
+            in: otherLocation,
+            name: "id",
+            required: true,
+            schema: { type: "boolean" },
+          },
+        ],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { [bodyKey]: { type: "integer" } },
+                type: "object",
+              },
+            },
+          },
+        },
+      }),
+      undefined,
+    );
+
+    expect(flatSchema.properties).toEqual({
+      [`${bodyKey}_2`]: { type: "string" },
+      [bodyKey]: { type: "integer" },
+      [otherKey]: { type: "boolean" },
+    });
+    expect(flatSchema.required?.toSorted()).toEqual(
+      [`${bodyKey}_2`, otherKey].toSorted(),
+    );
+    expect(parameterMap).toEqual({
+      [`${bodyKey}_2`]: { in: location, name: "id" },
+      [bodyKey]: { in: "body", name: bodyKey },
+      [otherKey]: { in: otherLocation, name: "id" },
+    });
+  },
+);
+
+test("an unused bare parameter name does not displace an existing generated alias", () => {
+  const { parameterMap } = buildFlatSchema(
+    route({
+      parameters: [
+        { in: "path", name: "id", required: true },
+        { in: "query", name: "id" },
+        { in: "query", name: "id__path" },
+        { in: "header", name: "id__path" },
+      ],
+    }),
+    undefined,
+  );
+
+  expect(parameterMap).toEqual({
+    id__path: { in: "path", name: "id" },
+    id__path__header: { in: "header", name: "id__path" },
+    id__path__query: { in: "query", name: "id__path" },
+    id__query: { in: "query", name: "id" },
+  });
+});
+
+test("generated parameter aliases preserve whole-body mappings", () => {
+  const { flatSchema, parameterMap, wholeBodyKey } = buildFlatSchema(
+    route({
+      parameters: [
+        { in: "query", name: "body", schema: { type: "string" } },
+        { in: "header", name: "body__query", schema: { type: "integer" } },
+      ],
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: { items: { type: "string" }, type: "array" },
+          },
+        },
+        required: true,
+      },
+    }),
+    undefined,
+  );
+
+  expect(wholeBodyKey).toBe("body");
+  expect(flatSchema.properties).toEqual({
+    body: { items: { type: "string" }, type: "array" },
+    body__query: { type: "integer" },
+    body__query_2: { type: "string" },
+  });
+  expect(flatSchema.required).toEqual(["body"]);
+  expect(parameterMap).toEqual({
+    body: { in: "body", name: "body" },
+    body__query: { in: "header", name: "body__query" },
+    body__query_2: { in: "query", name: "body" },
+  });
 });
 
 test("path parameters are always required, regardless of the `required` flag", () => {
