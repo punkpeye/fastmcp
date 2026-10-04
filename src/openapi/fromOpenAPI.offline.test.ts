@@ -389,6 +389,88 @@ test.each([
 );
 
 test.each([
+  { explode: false, style: undefined },
+  { explode: false, style: "form" },
+  { explode: true, style: undefined },
+  { explode: true, style: "form" },
+  { explode: undefined, style: undefined },
+  { explode: undefined, style: "form" },
+])(
+  "a form query object preserves its properties with style=$style, explode=$explode",
+  async ({ explode, style }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        components: {
+          parameters: {
+            Filter: {
+              explode,
+              in: "query",
+              name: "filter",
+              schema: {
+                properties: {
+                  active: { type: "boolean" },
+                  count: { type: "integer" },
+                  "display name": { type: "string" },
+                },
+                type: "object",
+              },
+              style,
+            },
+          },
+        },
+        info: { title: "Widgets API", version: "1.0.0" },
+        openapi: "3.0.3",
+        paths: {
+          "/widgets": {
+            get: {
+              operationId: "findWidgets",
+              parameters: [{ $ref: "#/components/parameters/Filter" }],
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const result = await client.callTool({
+        arguments: {
+          filter: { active: false, count: 0, "display name": "a&b=c+文 字" },
+        },
+        name: "findWidgets",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      const [calledUrl] = fetchImpl.mock.calls[0]!;
+      const url = new URL(calledUrl);
+      expect(url.pathname).toBe("/widgets");
+      expect([...url.searchParams]).toEqual(
+        explode === false
+          ? [["filter", "active,false,count,0,display name,a&b=c+文 字"]]
+          : [
+              ["active", "false"],
+              ["count", "0"],
+              ["display name", "a&b=c+文 字"],
+            ],
+      );
+      expect(url.search).toBe(
+        explode === false
+          ? "?filter=active%2Cfalse%2Ccount%2C0%2Cdisplay+name%2Ca%26b%3Dc%2B%E6%96%87+%E5%AD%97"
+          : "?active=false&count=0&display+name=a%26b%3Dc%2B%E6%96%87+%E5%AD%97",
+      );
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each([
   { emptyProperties: false, required: false },
   { emptyProperties: false, required: true },
   { emptyProperties: true, required: false },

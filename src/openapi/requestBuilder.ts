@@ -236,8 +236,9 @@ function appendBracketPairs(
  * `style` requires. `deepObject` and `spaceDelimited`/`pipeDelimited` are
  * real, if less common, OpenAPI styles — Stripe alone uses `deepObject` 354
  * times across its filter/expand-style query params. The default `form`
- * style uses repeated keys unless `explode: false` requests a single
- * comma-separated array value. Empty form-style arrays remain omitted.
+ * style uses repeated keys for arrays and property pairs for objects unless
+ * `explode: false` requests a single comma-separated value. Empty form-style
+ * arrays and objects remain omitted.
  */
 function appendQueryValue(
   query: URLSearchParams,
@@ -255,6 +256,30 @@ function appendQueryValue(
     const items = Array.isArray(value) ? value : [value];
     const separator = style === "spaceDelimited" ? " " : "|";
     query.append(name, items.map(String).join(separator));
+    return;
+  }
+
+  if (
+    (style === undefined || style === "form") &&
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    const entries = Object.entries(value as Record<string, unknown>);
+
+    if (explode === false) {
+      if (entries.length > 0) {
+        query.append(
+          name,
+          entries.flatMap(([key, item]) => [key, String(item)]).join(","),
+        );
+      }
+    } else {
+      for (const [key, item] of entries) {
+        query.append(key, String(item));
+      }
+    }
+
     return;
   }
 
