@@ -194,6 +194,60 @@ test.each(
   },
 );
 
+test("a path parameter that is a dot segment is rejected instead of rewriting the request path", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    spec: {
+      info: { title: "Users API", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/v1/users/{id}/profile": {
+          get: {
+            operationId: "getProfile",
+            parameters: [
+              {
+                in: "path",
+                name: "id",
+                required: true,
+                schema: { type: "string" },
+              },
+            ],
+            responses: { 200: { description: "OK" } },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.com" }],
+    },
+  });
+  const client = await connect(server);
+
+  try {
+    for (const id of ["..", "."]) {
+      const result = await client.callTool({
+        arguments: { id },
+        name: "getProfile",
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toMatch(/path segment/);
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    const ok = await client.callTool({
+      arguments: { id: "42" },
+      name: "getProfile",
+    });
+    expect(ok.isError).toBeFalsy();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    expect(new URL(calledUrl).pathname).toBe("/v1/users/42/profile");
+  } finally {
+    await Promise.all(server.sessions.map((session) => session.close()));
+    await client.close();
+    await server.stop();
+  }
+});
+
 test.each(["application/json", "application/x-www-form-urlencoded"])(
   "secondary parameter collisions preserve the HTTP request with %s bodies",
   async (contentType) => {
