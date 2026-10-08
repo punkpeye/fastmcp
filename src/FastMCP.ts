@@ -1664,101 +1664,19 @@ export class FastMCPSession<
 
     this.#connectionState = "connecting";
 
+    // mcp-proxy hands a Streamable HTTP session the client's initialize
+    // request only after connect() resolves, so on that transport the setup
+    // below, which waits for the capabilities initialize carries, has to run
+    // in the background. Everywhere else it finishes before connect() returns.
+    const streamableHttp =
+      !this.#stateless && isStreamableHttpTransport(transport);
+
     try {
       await this.#server.connect(transport);
 
-      // Skipped in stateless mode: a session there serves one request, and the
-      // initialize that carried the client's capabilities was handled by a
-      // different session, so polling can only ever time out and warn — once
-      // per request.
-      if (!this.#stateless) {
-        let attempt = 0;
-        const maxAttempts = 10;
-        const retryDelay = 100;
-
-        while (attempt++ < maxAttempts) {
-          const capabilities = this.#server.getClientCapabilities();
-
-          if (capabilities) {
-            this.#clientCapabilities = capabilities;
-            break;
-          }
-
-          await delay(retryDelay);
-        }
-
-        if (!this.#clientCapabilities) {
-          this.#logger.warn(
-            `[FastMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`,
-          );
-        }
+      if (!streamableHttp) {
+        await this.#setUpSession(false);
       }
-
-      if (
-        this.#rootsConfig?.enabled !== false &&
-        this.#clientCapabilities?.roots?.listChanged &&
-        typeof this.#server.listRoots === "function"
-      ) {
-        try {
-          const roots = await this.#server.listRoots();
-          this.#roots = roots?.roots || [];
-        } catch (e) {
-          if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
-            this.#logger.debug(
-              "[FastMCP debug] listRoots method not supported by client",
-            );
-          } else {
-            this.#logger.error(
-              `[FastMCP error] received error listing roots.\n\n${
-                e instanceof Error ? e.stack : JSON.stringify(e)
-              }`,
-            );
-          }
-        }
-      }
-
-      if (this.#clientCapabilities) {
-        const pingConfig = this.#getPingConfig();
-
-        if (pingConfig.enabled) {
-          this.#pingInterval = setInterval(async () => {
-            if (this.#pingInFlight) {
-              return;
-            }
-
-            this.#pingInFlight = true;
-
-            try {
-              await this.#server.ping();
-            } catch {
-              // The reason we are not emitting an error here is because some clients
-              // seem to not respond to the ping request, and we don't want to crash the server,
-              // e.g., https://github.com/punkpeye/fastmcp/issues/38.
-              const logLevel = pingConfig.logLevel;
-
-              if (logLevel === "debug") {
-                this.#logger.debug("[FastMCP debug] server ping failed");
-              } else if (logLevel === "warning") {
-                this.#logger.warn(
-                  "[FastMCP warning] server is not responding to ping",
-                );
-              } else if (logLevel === "error") {
-                this.#logger.error(
-                  "[FastMCP error] server is not responding to ping",
-                );
-              } else {
-                this.#logger.info("[FastMCP info] server ping failed");
-              }
-            } finally {
-              this.#pingInFlight = false;
-            }
-          }, pingConfig.intervalMs);
-        }
-      }
-
-      // Mark connection as ready and emit event
-      this.#connectionState = "ready";
-      this.emit("ready");
     } catch (error) {
       this.#connectionState = "error";
       const errorEvent = {
@@ -1766,6 +1684,22 @@ export class FastMCPSession<
       };
       this.emit("error", errorEvent);
       throw error;
+    }
+
+    if (streamableHttp) {
+      this.#setUpSession(true).catch((error) => {
+        this.#connectionState = "error";
+
+        // connect() has already resolved, so nobody may be listening, and an
+        // "error" event without a listener throws.
+        if (this.listenerCount("error") > 0) {
+          this.emit("error", {
+            error: error instanceof Error ? error : new Error(String(error)),
+          });
+        } else {
+          this.#logger.error("[FastMCP error] session setup failed", error);
+        }
+      });
     }
   }
 
@@ -2028,6 +1962,65 @@ export class FastMCPSession<
   }
 
   /**
+   * Fetches the client's roots if it advertised `roots.listChanged`.
+   *
+   * Over Streamable HTTP a server-initiated request travels on the client's
+   * standalone GET stream, which the client opens only after initialization,
+   * and the transport drops a request sent before that. So there each attempt
+   * is bounded and retried, and the result is announced with `rootsChanged`.
+   */
+  async #loadRoots(streamableHttp: boolean) {
+    if (
+      this.#rootsConfig?.enabled === false ||
+      !this.#clientCapabilities?.roots?.listChanged ||
+      typeof this.#server.listRoots !== "function"
+    ) {
+      return;
+    }
+
+    const maxAttempts = streamableHttp ? 5 : 1;
+
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const roots = await this.#server.listRoots(
+          undefined,
+          streamableHttp ? { timeout: 1000 } : undefined,
+        );
+        this.#roots = roots?.roots || [];
+
+        if (streamableHttp) {
+          this.emit("rootsChanged", { roots: this.#roots });
+        }
+
+        return;
+      } catch (e) {
+        if (
+          attempt < maxAttempts &&
+          e instanceof McpError &&
+          e.code === ErrorCode.RequestTimeout &&
+          this.#connectionState !== "closed"
+        ) {
+          continue;
+        }
+
+        if (e instanceof McpError && e.code === ErrorCode.MethodNotFound) {
+          this.#logger.debug(
+            "[FastMCP debug] listRoots method not supported by client",
+          );
+        } else {
+          this.#logger.error(
+            `[FastMCP error] received error listing roots.\n\n${
+              e instanceof Error ? e.stack : JSON.stringify(e)
+            }`,
+          );
+        }
+
+        return;
+      }
+    }
+  }
+
+  /**
    * `sendLoggingMessage` rejects once the client has hung up, and these four
    * callers are synchronous, so the rejection has nowhere to go. Swallow it the
    * way every other notification sender in this class does, or a client that
@@ -2065,6 +2058,90 @@ export class FastMCPSession<
           }`,
         );
       });
+  }
+
+  async #setUpSession(streamableHttp: boolean) {
+    // Skipped in stateless mode: a session there serves one request, and the
+    // initialize that carried the client's capabilities was handled by a
+    // different session, so polling can only ever time out and warn — once
+    // per request.
+    if (!this.#stateless) {
+      let attempt = 0;
+      const maxAttempts = 10;
+      const retryDelay = 100;
+
+      while (attempt++ < maxAttempts) {
+        const capabilities = this.#server.getClientCapabilities();
+
+        if (capabilities) {
+          this.#clientCapabilities = capabilities;
+          break;
+        }
+
+        await delay(retryDelay);
+      }
+
+      if (!this.#clientCapabilities) {
+        this.#logger.warn(
+          `[FastMCP warning] could not infer client capabilities after ${maxAttempts} attempts. Connection may be unstable.`,
+        );
+      }
+    }
+
+    // The session may have been closed while it waited.
+    if (this.#connectionState === "closed") {
+      return;
+    }
+
+    if (streamableHttp) {
+      // Not awaited, so `ready` does not depend on it: see #loadRoots.
+      void this.#loadRoots(true);
+    } else {
+      await this.#loadRoots(false);
+    }
+
+    if (this.#clientCapabilities) {
+      const pingConfig = this.#getPingConfig();
+
+      if (pingConfig.enabled) {
+        this.#pingInterval = setInterval(async () => {
+          if (this.#pingInFlight) {
+            return;
+          }
+
+          this.#pingInFlight = true;
+
+          try {
+            await this.#server.ping();
+          } catch {
+            // The reason we are not emitting an error here is because some clients
+            // seem to not respond to the ping request, and we don't want to crash the server,
+            // e.g., https://github.com/punkpeye/fastmcp/issues/38.
+            const logLevel = pingConfig.logLevel;
+
+            if (logLevel === "debug") {
+              this.#logger.debug("[FastMCP debug] server ping failed");
+            } else if (logLevel === "warning") {
+              this.#logger.warn(
+                "[FastMCP warning] server is not responding to ping",
+              );
+            } else if (logLevel === "error") {
+              this.#logger.error(
+                "[FastMCP error] server is not responding to ping",
+              );
+            } else {
+              this.#logger.info("[FastMCP info] server ping failed");
+            }
+          } finally {
+            this.#pingInFlight = false;
+          }
+        }, pingConfig.intervalMs);
+      }
+    }
+
+    // Mark connection as ready and emit event
+    this.#connectionState = "ready";
+    this.emit("ready");
   }
 
   /**
@@ -2998,6 +3075,17 @@ function convertObjectToSnakeCase(
   }
 
   return result;
+}
+
+/**
+ * Whether `transport` is a Streamable HTTP server transport. Duck-typed because
+ * mcp-proxy bundles its own copy of the SDK, so `instanceof` would not match.
+ */
+function isStreamableHttpTransport(transport: Transport): boolean {
+  return (
+    "handleRequest" in transport &&
+    typeof transport.handleRequest === "function"
+  );
 }
 
 function joinPaths(basePath: "" | `/${string}`, path: string): `/${string}` {

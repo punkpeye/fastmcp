@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -194,5 +195,36 @@ describe("FastMCP in-memory transport", () => {
 
     await first.client.close();
     await second.client.close();
+  });
+
+  it("knows the client's capabilities and roots once connect resolves", async () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+
+    const client = new Client(
+      { name: "test-client", version: "0.0.0" },
+      { capabilities: { roots: { listChanged: true } } },
+    );
+
+    client.setRequestHandler(ListRootsRequestSchema, () => ({
+      roots: [{ name: "Frontend", uri: "file:///frontend" }],
+    }));
+
+    const [session] = await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    expect(session.clientCapabilities).toEqual({
+      roots: { listChanged: true },
+    });
+    expect(session.roots).toEqual([
+      { name: "Frontend", uri: "file:///frontend" },
+    ]);
+    expect(session.isReady).toBe(true);
+
+    await client.close();
   });
 });

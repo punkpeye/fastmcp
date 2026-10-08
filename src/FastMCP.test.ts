@@ -2332,6 +2332,195 @@ test("session enables pings by default over httpStream", async () => {
   });
 });
 
+test("stateful httpStream session knows about client capabilities and roots", async () => {
+  const port = await getTestPort();
+  const logger = {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    log: vi.fn(),
+    warn: vi.fn(),
+  };
+
+  const server = new FastMCP({
+    logger,
+    name: "Test",
+    ping: {
+      intervalMs: 50,
+    },
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {
+        roots: {
+          listChanged: true,
+        },
+      },
+    },
+  );
+
+  client.setRequestHandler(ListRootsRequestSchema, () => {
+    return {
+      roots: [
+        {
+          name: "Frontend Repository",
+          uri: "file:///home/user/projects/frontend",
+        },
+      ],
+    };
+  });
+
+  const onPing = vi.fn().mockReturnValue({});
+
+  client.setRequestHandler(PingRequestSchema, onPing);
+
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(
+        new URL(`http://localhost:${port}/mcp`),
+      ),
+    );
+
+    const [session] = server.sessions;
+
+    await session.waitForReady();
+
+    expect(session.clientCapabilities).toEqual({
+      roots: {
+        listChanged: true,
+      },
+    });
+    await vi.waitFor(() => {
+      expect(session.roots).toEqual([
+        {
+          name: "Frontend Repository",
+          uri: "file:///home/user/projects/frontend",
+        },
+      ]);
+    });
+    await vi.waitFor(() => {
+      expect(onPing).toHaveBeenCalled();
+    });
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("could not infer client capabilities"),
+    );
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});
+
+test("stateful httpStream session gets ready and learns roots when the client opens its GET stream late", async () => {
+  const port = await getTestPort();
+
+  const server = new FastMCP({
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {
+        roots: {
+          listChanged: true,
+        },
+      },
+    },
+  );
+
+  client.setRequestHandler(ListRootsRequestSchema, () => {
+    return {
+      roots: [
+        {
+          name: "Frontend Repository",
+          uri: "file:///home/user/projects/frontend",
+        },
+      ],
+    };
+  });
+
+  // The client opens its standalone GET stream, the only way the server can
+  // send it requests, 300 ms after initialization.
+  const lateGetFetch: typeof fetch = async (input, init) => {
+    if ((init?.method ?? "GET") === "GET") {
+      await delay(300);
+    }
+
+    return fetch(input, init);
+  };
+
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(
+        new URL(`http://localhost:${port}/mcp`),
+        { fetch: lateGetFetch },
+      ),
+    );
+
+    const [session] = server.sessions;
+    const onRootsChanged = vi.fn();
+
+    session.on("rootsChanged", onRootsChanged);
+
+    const started = Date.now();
+
+    await session.waitForReady();
+
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(session.clientCapabilities).toEqual({
+      roots: {
+        listChanged: true,
+      },
+    });
+    await vi.waitFor(
+      () => {
+        expect(session.roots).toEqual([
+          {
+            name: "Frontend Repository",
+            uri: "file:///home/user/projects/frontend",
+          },
+        ]);
+      },
+      { timeout: 4000 },
+    );
+    expect(onRootsChanged).toHaveBeenCalledWith({
+      roots: [
+        {
+          name: "Frontend Repository",
+          uri: "file:///home/user/projects/frontend",
+        },
+      ],
+    });
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});
+
 test("completes prompt arguments", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
