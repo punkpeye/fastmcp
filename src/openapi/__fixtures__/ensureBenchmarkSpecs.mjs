@@ -6,7 +6,9 @@
 // growth on every clone of this repo for files nobody reads in review. The
 // hash pin is what keeps a benchmark run reproducible without committing
 // them — a spec that drifts upstream fails loudly rather than silently
-// changing what the suite tests. One exception: see UNSTABLE_SPECS below.
+// changing what the suite tests. GitHub-hosted specs are fetched from a
+// pinned commit, so they only change when the pin is moved on purpose (see
+// parseGitHubRawUrl). One exception: see UNSTABLE_SPECS below.
 //
 // Shared by fromOpenAPI.benchmark.test.ts (fetch if missing) and
 // scripts/refresh-openapi-benchmark-specs.mjs (re-fetch and re-pin).
@@ -61,6 +63,60 @@ export function normalizeSpec(file, text) {
     /xox[abpr]-\d{5,}-\d{5,}-[A-Za-z0-9]{10,}/g,
     "xoxb-EXAMPLE-REDACTED-TOKEN",
   );
+}
+
+const GITHUB_RAW =
+  /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/;
+
+/**
+ * GitHub-hosted specs are fetched from a commit, not a branch: a branch URL
+ * serves whatever was pushed last, so the pin broke every time upstream
+ * touched the file. `track` names the branch that
+ * `pnpm test:openapi:refresh` follows when it moves the pin forward.
+ */
+export function parseGitHubRawUrl(url) {
+  const match = GITHUB_RAW.exec(url);
+
+  return match
+    ? { owner: match[1], path: match[4], ref: match[3], repo: match[2] }
+    : undefined;
+}
+
+export function githubRawUrl({ owner, path: filePath, repo }, commit) {
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${commit}/${filePath}`;
+}
+
+/**
+ * The newest commit on `branch` that touched the spec file, so re-pinning to
+ * it changes nothing unless the file itself changed.
+ */
+export async function latestCommitFor(source, branch) {
+  const api = new URL(
+    `https://api.github.com/repos/${source.owner}/${source.repo}/commits`,
+  );
+  api.searchParams.set("sha", branch);
+  api.searchParams.set("path", source.path);
+  api.searchParams.set("per_page", "1");
+
+  const headers = { Accept: "application/vnd.github+json" };
+
+  if (process.env.GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  }
+
+  const response = await fetch(api, { headers });
+
+  if (!response.ok) {
+    throw new Error(`${api} responded with ${response.status}`);
+  }
+
+  const [latest] = await response.json();
+
+  if (!latest?.sha) {
+    throw new Error(`no commit on ${branch} touches ${source.path}`);
+  }
+
+  return latest.sha;
 }
 
 export async function download(file, url) {
