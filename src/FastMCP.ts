@@ -2472,7 +2472,7 @@ export class FastMCPSession<
                 resourceTemplate.uriTemplate,
               );
 
-              const match = uriTemplate.fromUri(request.params.uri);
+              const match = matchUriTemplate(uriTemplate, request.params.uri);
 
               if (!match) {
                 continue;
@@ -3004,6 +3004,39 @@ function joinPaths(basePath: "" | `/${string}`, path: string): `/${string}` {
   return `${basePath}${normalizePath(path)}` as `/${string}`;
 }
 
+/**
+ * Matches `uri` against a parsed resource template. `uri-templates` matches
+ * greedily, so `{id}` in `docs://{id}` also takes `x/history`, `x?a=1` or
+ * `x#f`: values that simple expansion would percent-encode and so can never
+ * produce that URI. Accept a match only if expanding it back yields the same
+ * shape as `uri`: as many path segments, and a query and a fragment only where
+ * `uri` has them. A template with a query (`{?q}`, `{&q}`) or fragment
+ * (`{#f}`) expression may still meet one it doesn't fill, such as extra query
+ * parameters, so that part is only compared when the template has none.
+ * Query order and percent-encoding may differ.
+ */
+function matchUriTemplate(
+  template: ReturnType<typeof parseURITemplate>,
+  uri: string,
+): Record<string, string> | undefined {
+  const match = template.fromUri(uri);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const checksQuery = !/\{[?&]/.test(template.template);
+  const checksFragment = !template.template.includes("{#");
+  const shape = (value: string) =>
+    [
+      value.split(/[?#]/, 1)[0].split("/").length,
+      checksQuery && value.includes("?"),
+      checksFragment && value.includes("#"),
+    ].join();
+
+  return shape(template.fill(match)) === shape(uri) ? match : undefined;
+}
+
 function normalizeBasePath(path: string | undefined): "" | `/${string}` {
   if (!path || path === "/") {
     return "";
@@ -3406,7 +3439,7 @@ export class FastMCP<
     // Try to match against resource templates
     for (const template of this.#resourcesTemplates) {
       const parsedTemplate = parseURITemplate(template.uriTemplate);
-      const params = parsedTemplate.fromUri(uri);
+      const params = matchUriTemplate(parsedTemplate, uri);
       if (!params) {
         continue;
       }
