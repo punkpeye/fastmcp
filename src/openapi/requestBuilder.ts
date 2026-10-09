@@ -132,7 +132,9 @@ export async function executeRequest(
     );
   }
 
-  if (response.headers.get("content-type")?.includes("json")) {
+  const mediaType = response.headers.get("content-type")?.split(";")[0];
+
+  if (mediaType?.toLowerCase().includes("json")) {
     try {
       const json: unknown = JSON.parse(text);
       return { json, text: JSON.stringify(json, null, 2) };

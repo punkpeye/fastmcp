@@ -1533,6 +1533,38 @@ test("outputSchema: a schema-matching JSON response returns structuredContent", 
   expect(result.structuredContent).toEqual({ id: "w1", name: "sprocket" });
 });
 
+test.each(["Application/JSON", "APPLICATION/JSON; charset=utf-8"])(
+  "outputSchema: a mixed-case JSON media type preserves structuredContent: %s",
+  async (contentType) => {
+    const payload = { id: "w1", name: "sprocket" };
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify(payload), {
+          headers: { "content-type": contentType },
+        }),
+    );
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: WIDGETS_TYPED_SPEC,
+    });
+    const client = await connect(server);
+
+    try {
+      const result = await client.callTool({
+        arguments: { name: "sprocket" },
+        name: "createTypedWidget",
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual(payload);
+    } finally {
+      await Promise.all(server.sessions.map((session) => session.close()));
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
 test("outputSchema: a real response that doesn't match the wired schema falls back to plain text, not an error", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () =>
