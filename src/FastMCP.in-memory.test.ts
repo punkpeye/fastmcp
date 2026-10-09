@@ -95,6 +95,104 @@ describe("FastMCP in-memory transport", () => {
     await client.close();
   });
 
+  it("completes enum arguments whose names match Object.prototype properties", async () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    server.addPrompt({
+      arguments: ["toString", "constructor"].map((name) => ({
+        enum: ["Germany"],
+        name,
+      })),
+      load: async () => "Test",
+      name: "countries",
+    });
+
+    const { client, session } = await connectInMemory(server);
+    try {
+      for (const name of ["toString", "constructor"]) {
+        for (const value of ["", "Germ"]) {
+          expect(
+            await client.complete({
+              argument: { name, value },
+              ref: { name: "countries", type: "ref/prompt" },
+            }),
+          ).toEqual({ completion: { total: 1, values: ["Germany"] } });
+        }
+      }
+    } finally {
+      await client.close();
+      await session.close();
+    }
+  });
+
+  it("uses prompt-level completion for prototype property argument names", async () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    server.addPrompt({
+      arguments: [{ name: "toString" }],
+      complete: async (name, value) => ({ values: [`${name}:${value}`] }),
+      load: async () => "Test",
+      name: "fallback",
+    });
+
+    const { client, session } = await connectInMemory(server);
+    try {
+      expect(
+        await client.complete({
+          argument: { name: "toString", value: "test" },
+          ref: { name: "fallback", type: "ref/prompt" },
+        }),
+      ).toEqual({ completion: { values: ["toString:test"] } });
+    } finally {
+      await client.close();
+      await session.close();
+    }
+  });
+
+  it("uses resource-level completion for prototype property argument names", async () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    server.addResourceTemplate({
+      arguments: [{ name: "constructor" }],
+      complete: async (name, value) => ({ values: [`${name}:${value}`] }),
+      load: async () => ({ text: "Test" }),
+      name: "fallback",
+      uriTemplate: "test:///{constructor}",
+    });
+
+    const { client, session } = await connectInMemory(server);
+    try {
+      expect(
+        await client.complete({
+          argument: { name: "constructor", value: "test" },
+          ref: { type: "ref/resource", uri: "test:///{constructor}" },
+        }),
+      ).toEqual({ completion: { values: ["constructor:test"] } });
+    } finally {
+      await client.close();
+      await session.close();
+    }
+  });
+
+  it("returns no completions for a prototype property without a completer", async () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    server.addPrompt({
+      arguments: [{ name: "hasOwnProperty" }],
+      load: async () => "Test",
+      name: "empty",
+    });
+
+    const { client, session } = await connectInMemory(server);
+    try {
+      expect(
+        await client.complete({
+          argument: { name: "hasOwnProperty", value: "test" },
+          ref: { name: "empty", type: "ref/prompt" },
+        }),
+      ).toEqual({ completion: { values: [] } });
+    } finally {
+      await client.close();
+      await session.close();
+    }
+  });
+
   it("tracks the session and emits connect", async () => {
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
 
