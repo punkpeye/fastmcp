@@ -2390,7 +2390,7 @@ export class FastMCPSession<
       const args = request.params.arguments;
 
       for (const arg of prompt.arguments ?? []) {
-        if (arg.required && !(args && arg.name in args)) {
+        if (arg.required && !(args && Object.hasOwn(args, arg.name))) {
           throw new McpError(
             ErrorCode.InvalidParams,
             `Prompt '${request.params.name}' requires argument '${arg.name}': ${
