@@ -518,10 +518,10 @@ You can also enable stateless mode using CLI arguments or environment variables:
 
 ```bash
 # Via CLI argument
-npx fastmcp dev src/server.ts --transport http-stream --port 8080 --stateless true
+npx tsx src/server.ts --transport http-stream --port 8080 --stateless true
 
 # Via environment variable
-FASTMCP_STATELESS=true npx fastmcp dev src/server.ts
+FASTMCP_TRANSPORT=httpStream FASTMCP_STATELESS=true npx tsx src/server.ts
 ```
 
 The `/ready` health check endpoint will indicate when the server is running in stateless mode:
