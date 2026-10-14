@@ -75,3 +75,28 @@ describe("prompts/get with a missing required argument", () => {
     }
   });
 });
+
+describe("prompts/get with a missing required argument named like an Object.prototype property", () => {
+  it("still answers -32602 Invalid params", async () => {
+    const server = new FastMCP({ name: "T", version: "1.0.0" });
+    server.addPrompt({
+      arguments: [{ name: "constructor", required: true }],
+      load: async (args) => `Loaded with ${JSON.stringify(args)}`,
+      name: "build",
+    });
+    const client = await connect(server);
+    try {
+      await expect(
+        client.getPrompt({ arguments: {}, name: "build" }),
+      ).rejects.toEqual(
+        expect.objectContaining({
+          code: ErrorCode.InvalidParams,
+          message: expect.stringContaining("requires argument 'constructor'"),
+        }),
+      );
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  });
+});
