@@ -1653,6 +1653,8 @@ server.addResourceTemplate({
 
 Like plain resources, `load` also receives `auth` and `context` as its second and third arguments (see [Resources](#resources)).
 
+A `{name}` expression matches within one path segment, as in RFC 6570, so `file:///logs/a/b.log` does not match the template above. Use `{+name}` for a value that spans segments, e.g. `file:///{+path}`. Values arrive percent-decoded (`file:///logs/..%2Fsecret.log` gives `name: "../secret"`), so validate them before using them as paths.
+
 #### Resource template argument auto-completion
 
 Provide `complete` functions for resource template arguments to enable automatic completion:
