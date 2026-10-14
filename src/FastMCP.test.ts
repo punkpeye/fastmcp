@@ -2521,6 +2521,89 @@ test("stateful httpStream session gets ready and learns roots when the client op
   }
 });
 
+test("stateful httpStream session does not log the roots request its close cuts short", async () => {
+  const port = await getTestPort();
+  const logger = {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    log: vi.fn(),
+    warn: vi.fn(),
+  };
+
+  const server = new FastMCP({
+    logger,
+    name: "Test",
+    version: "1.0.0",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+    },
+    transportType: "httpStream",
+  });
+
+  const client = new Client(
+    {
+      name: "example-client",
+      version: "1.0.0",
+    },
+    {
+      capabilities: {
+        roots: {
+          listChanged: true,
+        },
+      },
+    },
+  );
+
+  client.setRequestHandler(ListRootsRequestSchema, () => {
+    return {
+      roots: [],
+    };
+  });
+
+  // Without a GET stream the roots request is never delivered, so it is still
+  // waiting when the client ends the session.
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://localhost:${port}/mcp`),
+    {
+      fetch: async (input, init) => {
+        if ((init?.method ?? "GET") === "GET") {
+          return new Response(null, { status: 405 });
+        }
+
+        return fetch(input, init);
+      },
+    },
+  );
+
+  try {
+    await client.connect(transport);
+
+    const [session] = server.sessions;
+
+    await session.waitForReady();
+
+    const onDisconnect = vi.fn();
+
+    server.on("disconnect", onDisconnect);
+
+    await transport.terminateSession();
+
+    await vi.waitFor(() => {
+      expect(onDisconnect).toHaveBeenCalled();
+    });
+    await delay(100);
+
+    expect(logger.error).not.toHaveBeenCalled();
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});
+
 test("completes prompt arguments", async () => {
   await runWithTestServer({
     run: async ({ client }) => {

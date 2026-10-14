@@ -1994,11 +1994,16 @@ export class FastMCPSession<
 
         return;
       } catch (e) {
+        // Closing the session rejects the request still in flight, which is
+        // not worth reporting.
+        if (this.#connectionState === "closed") {
+          return;
+        }
+
         if (
           attempt < maxAttempts &&
           e instanceof McpError &&
-          e.code === ErrorCode.RequestTimeout &&
-          this.#connectionState !== "closed"
+          e.code === ErrorCode.RequestTimeout
         ) {
           continue;
         }
