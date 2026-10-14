@@ -5140,6 +5140,130 @@ test("a session closed before the client initializes does not warn about its cap
   );
 });
 
+/**
+ * Connects a pinging session to a client that advertises roots but never
+ * answers `roots/list`, and resolves once the session is waiting on that
+ * answer.
+ */
+const connectWithUnansweredRoots = async () => {
+  const logger = {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    log: vi.fn(),
+    warn: vi.fn(),
+  };
+  const session = new FastMCPSession({
+    logger,
+    name: "Test",
+    ping: { enabled: true, intervalMs: 10 },
+    prompts: [],
+    resources: [],
+    resourcesTemplates: [],
+    tools: [],
+    version: "1.0.0",
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const client = new Client(
+    { name: "Test client", version: "1.0.0" },
+    { capabilities: { roots: { listChanged: true } } },
+  );
+  let rootsRequested!: () => void;
+  const rootsAsked = new Promise<void>((resolve) => {
+    rootsRequested = resolve;
+  });
+
+  client.setRequestHandler(ListRootsRequestSchema, () => {
+    rootsRequested();
+
+    return new Promise(() => {});
+  });
+
+  const connecting = session.connect(serverTransport);
+
+  await client.connect(clientTransport);
+  await rootsAsked;
+
+  return { client, connecting, logger, session };
+};
+
+test("a session closed while it asks for roots neither becomes ready nor pings", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+
+  try {
+    const { connecting, session } = await connectWithUnansweredRoots();
+
+    await session.close();
+    await connecting;
+
+    expect(session.isReady).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a session whose client hangs up while asked for roots neither becomes ready nor pings", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+
+  try {
+    const { client, connecting, logger, session } =
+      await connectWithUnansweredRoots();
+
+    await client.close();
+    await connecting;
+
+    expect(session.isReady).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(logger.error).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a session stops pinging once its client hangs up", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+
+  try {
+    const session = new FastMCPSession({
+      logger: {
+        debug: vi.fn(),
+        error: vi.fn(),
+        info: vi.fn(),
+        log: vi.fn(),
+        warn: vi.fn(),
+      },
+      name: "Test",
+      ping: { enabled: true, intervalMs: 10 },
+      prompts: [],
+      resources: [],
+      resourcesTemplates: [],
+      tools: [],
+      version: "1.0.0",
+    });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "Test client", version: "1.0.0" });
+
+    await Promise.all([
+      session.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    expect(session.isReady).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+
+    // close() never runs on the session, as when a stdio client exits.
+    await client.close();
+
+    expect(session.isReady).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("stateless mode health check includes mode indicator", async () => {
   const port = await getTestPort();
 

@@ -1642,12 +1642,6 @@ export class FastMCPSession<
   }
 
   public async close() {
-    this.#connectionState = "closed";
-
-    if (this.#pingInterval) {
-      clearInterval(this.#pingInterval);
-    }
-
     this.#abortSession();
 
     try {
@@ -1850,11 +1844,18 @@ export class FastMCPSession<
   }
 
   /**
-   * Cancels the `signal` held by every tool still executing on this session.
-   * Idempotent, so the close path and the transport's own close handler can
-   * both call it.
+   * Marks the session closed, stops pinging the client and cancels the
+   * `signal` held by every tool still executing on this session. Idempotent,
+   * so the close path and the transport's own close handler can both call it.
    */
   #abortSession() {
+    this.#connectionState = "closed";
+
+    if (this.#pingInterval) {
+      clearInterval(this.#pingInterval);
+      this.#pingInterval = null;
+    }
+
     if (!this.#abortController.signal.aborted) {
       this.#abortController.abort(new SessionError("Session closed"));
     }
@@ -2108,6 +2109,11 @@ export class FastMCPSession<
       void this.#loadRoots(true);
     } else {
       await this.#loadRoots(false);
+
+      // The client may hang up while it is asked for its roots.
+      if (this.#abortController.signal.aborted) {
+        return;
+      }
     }
 
     if (this.#clientCapabilities) {
