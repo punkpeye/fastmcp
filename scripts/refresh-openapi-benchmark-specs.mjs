@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Re-downloads the large benchmark specs and re-pins their hashes in
-// src/openapi/__fixtures__/benchmark-specs/sources.json.
+// src/openapi/__fixtures__/benchmark-specs/sources.json. A GitHub-hosted spec
+// is first moved to the newest commit on its `track` branch that touched it.
 //
 // The spec files themselves are not committed (see ensureBenchmarkSpecs.mjs);
 // what lands in a commit is the sources.json hash change, which is the part
@@ -12,6 +13,9 @@ import path from "node:path";
 
 import {
   download,
+  githubRawUrl,
+  latestCommitFor,
+  parseGitHubRawUrl,
   readManifest,
   sha256,
   SPECS_DIR,
@@ -22,7 +26,20 @@ const MANIFEST_PATH = path.join(SPECS_DIR, "sources.json");
 const manifest = await readManifest();
 const document = JSON.parse(await readFile(MANIFEST_PATH, "utf8"));
 
-for (const [file, { sha256: previous, url }] of Object.entries(manifest)) {
+for (const [file, { sha256: previous, track, url: pinned }] of Object.entries(
+  manifest,
+)) {
+  const source = parseGitHubRawUrl(pinned);
+  const url =
+    source && track
+      ? githubRawUrl(source, await latestCommitFor(source, track))
+      : pinned;
+
+  if (url !== pinned) {
+    console.log(`  moved ${file} to ${url}`);
+    document.specs[file].url = url;
+  }
+
   console.log(`Fetching ${file} <- ${url}`);
 
   const text = await download(file, url);
