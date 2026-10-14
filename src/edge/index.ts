@@ -436,6 +436,21 @@ export class EdgeFastMCP {
       );
     }
 
+    for (const arg of prompt.arguments ?? []) {
+      if (
+        arg.required &&
+        !(promptArgs && Object.hasOwn(promptArgs, arg.name))
+      ) {
+        return this.#rpcError(
+          id,
+          ErrorCode.InvalidParams,
+          `Prompt '${promptName}' requires argument '${arg.name}': ${
+            arg.description || "No description provided"
+          }`,
+        );
+      }
+    }
+
     try {
       const result = await prompt.load(promptArgs ?? {});
       const messages =

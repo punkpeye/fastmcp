@@ -509,6 +509,64 @@ describe("EdgeFastMCP", () => {
     expect(body.result.messages[0].content.text).toBe("Prompt with test");
   });
 
+  it("answers -32602 when prompts/get omits a required argument", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+    const load = vi.fn(async (args: Record<string, string>) => {
+      return `Commit: ${args.changes}`;
+    });
+
+    server.addPrompt({
+      arguments: [
+        { description: "Changes to commit", name: "changes", required: true },
+      ],
+      load,
+      name: "git-commit",
+    });
+    server.addPrompt({
+      arguments: [{ name: "constructor", required: true }],
+      load,
+      name: "build",
+    });
+
+    const getPrompt = async (name: string, args?: Record<string, string>) => {
+      const response = await server.fetch(
+        new Request("http://localhost/mcp", {
+          body: JSON.stringify({
+            id: 8,
+            jsonrpc: "2.0",
+            method: "prompts/get",
+            params: { arguments: args, name },
+          }),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+
+      return (await response.json()) as JsonResponse;
+    };
+
+    expect((await getPrompt("git-commit")).error).toMatchObject({
+      code: -32602,
+      message:
+        "Prompt 'git-commit' requires argument 'changes': Changes to commit",
+    });
+    // `in` would find Object.prototype.constructor and let it through.
+    expect((await getPrompt("build", {})).error).toMatchObject({
+      code: -32602,
+      message: expect.stringContaining("requires argument 'constructor'"),
+    });
+    expect(load).not.toHaveBeenCalled();
+
+    const body = await getPrompt("git-commit", { changes: "add tests" });
+    expect(body.result.messages[0].content.text).toBe("Commit: add tests");
+  });
+
   it("should handle health check", async () => {
     const server = new EdgeFastMCP({
       name: "TestServer",
