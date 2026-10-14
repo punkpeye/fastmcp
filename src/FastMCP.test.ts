@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   CreateMessageRequestSchema,
   ElicitRequestSchema,
@@ -5106,6 +5107,37 @@ test("stateless mode does not warn when client capabilities are unavailable", as
   } finally {
     await server.stop();
   }
+});
+
+test("a session closed before the client initializes does not warn about its capabilities", async () => {
+  const logger = {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    log: vi.fn(),
+    warn: vi.fn(),
+  };
+  const session = new FastMCPSession({
+    logger,
+    name: "Test",
+    prompts: [],
+    resources: [],
+    resourcesTemplates: [],
+    tools: [],
+    version: "1.0.0",
+  });
+  const [, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  // No client ever sends initialize, so the poll would run out its 10
+  // attempts (~1s) and warn.
+  const connecting = session.connect(serverTransport);
+
+  await session.close();
+  await connecting;
+
+  expect(logger.warn).not.toHaveBeenCalledWith(
+    expect.stringContaining("could not infer client capabilities"),
+  );
 });
 
 test("stateless mode health check includes mode indicator", async () => {

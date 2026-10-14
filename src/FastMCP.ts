@@ -2084,6 +2084,11 @@ export class FastMCPSession<
         }
 
         await delay(retryDelay);
+
+        // A session closed before the client initialized won't hear from it.
+        if (this.#connectionState === "closed") {
+          return;
+        }
       }
 
       if (!this.#clientCapabilities) {
