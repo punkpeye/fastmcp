@@ -106,6 +106,79 @@ test("executeRequest builds the URL, path substitution, query, headers, and JSON
   expect((calledInit!.headers as Headers).get("x-api-key")).toBe("secret");
 });
 
+test.each([
+  "application/json",
+  "Application/JSON",
+  "APPLICATION/JSON; charset=utf-8",
+  "application/problem+JSON",
+])(
+  "recognizes JSON response media types case-insensitively: %s",
+  async (contentType) => {
+    const payload = { ok: true };
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify(payload), {
+          headers: { "content-type": contentType },
+        }),
+    );
+
+    const result = await executeRequest({
+      args: {},
+      fetchImpl,
+      parameterMap: {},
+      route: route({ path: "/pets" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    expect(result.json).toEqual(payload);
+    expect(result.text).toBe(JSON.stringify(payload, null, 2));
+  },
+);
+
+test.each([
+  'text/plain; profile="application/json"',
+  'text/plain; profile="APPLICATION/JSON"',
+])(
+  "JSON text in a media-type parameter does not select JSON parsing: %s",
+  async (contentType) => {
+    const text = '{"ok":true}';
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(text, { headers: { "content-type": contentType } }),
+    );
+
+    const result = await executeRequest({
+      args: {},
+      fetchImpl,
+      parameterMap: {},
+      route: route({ path: "/pets" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    expect(result).toEqual({ text });
+  },
+);
+
+test.each(["application/json", "Application/JSON"])(
+  "an invalid JSON response still falls back to text: %s",
+  async (contentType) => {
+    const text = "not valid JSON";
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(text, { headers: { "content-type": contentType } }),
+    );
+    const result = await executeRequest({
+      args: {},
+      fetchImpl,
+      parameterMap: {},
+      route: route({ path: "/pets" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    expect(result).toEqual({ text });
+  },
+);
+
 test("executeRequest replaces every occurrence of a repeated path parameter", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () => new Response("{}", { status: 200 }),
