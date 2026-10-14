@@ -3526,7 +3526,8 @@ export class FastMCP<
    *
    * The transport's lifecycle belongs to the caller: `stop()` does not close
    * transports passed here. Close the returned session (or the transport) when
-   * you are done with it.
+   * you are done with it. If the client hangs up before the session is set up,
+   * the returned session is already closed and is not listed in `sessions`.
    *
    * @param transport - An already-constructed MCP server transport.
    * @param auth - Session auth, equivalent to what `authenticate` would return.
@@ -3538,27 +3539,7 @@ export class FastMCP<
   ): Promise<FastMCPSession<T>> {
     const session = this.#createSession(auth);
 
-    await session.connect(transport);
-
-    this.#sessions.push(session);
-
-    session.once("error", () => {
-      this.#removeSession(session);
-    });
-
-    const originalOnClose = transport.onclose;
-
-    transport.onclose = () => {
-      this.#removeSession(session);
-
-      if (originalOnClose) {
-        originalOnClose();
-      }
-    };
-
-    this.emit("connect", {
-      session: session as FastMCPSession<FastMCPSessionAuth>,
-    });
+    await this.#connectSession(session, transport);
 
     this.#serverState = ServerState.Running;
 
@@ -3856,13 +3837,12 @@ export class FastMCP<
         websiteUrl: this.#options.websiteUrl,
       });
 
-      await session.connect(transport);
-
       // Belt-and-suspenders: detect when the MCP client closes its end of
       // the stdin pipe and shut down the transport so the process doesn't
       // linger as a zombie/orphan. The upstream SDK fix (PR #2003) handles
       // this inside StdioServerTransport itself, but adding the listener here
-      // means older SDK versions are also protected.
+      // means older SDK versions are also protected. Listening before the
+      // session connects also catches a client that exits during setup.
       let stdinClosed = false;
       const onStdinClose = () => {
         if (stdinClosed) return;
@@ -3874,36 +3854,11 @@ export class FastMCP<
       process.stdin.on("close", onStdinClose);
       process.stdin.on("end", onStdinClose);
 
-      this.#sessions.push(session);
-
-      session.once("error", () => {
-        this.#removeSession(session);
+      await this.#connectSession(session, transport, () => {
+        process.stdin.off("close", onStdinClose);
+        process.stdin.off("end", onStdinClose);
       });
 
-      // Monitor the underlying transport for close events
-      if (transport.onclose) {
-        const originalOnClose = transport.onclose;
-
-        transport.onclose = () => {
-          process.stdin.off("close", onStdinClose);
-          process.stdin.off("end", onStdinClose);
-          this.#removeSession(session);
-
-          if (originalOnClose) {
-            originalOnClose();
-          }
-        };
-      } else {
-        transport.onclose = () => {
-          process.stdin.off("close", onStdinClose);
-          process.stdin.off("end", onStdinClose);
-          this.#removeSession(session);
-        };
-      }
-
-      this.emit("connect", {
-        session: session as FastMCPSession<FastMCPSessionAuth>,
-      });
       this.#serverState = ServerState.Running;
     } else if (config.transportType === "httpStream") {
       const httpConfig = config.httpStream;
@@ -4063,6 +4018,43 @@ export class FastMCP<
       await this.#httpStreamServer.close();
     }
     this.#serverState = ServerState.Stopped;
+  }
+
+  /**
+   * Connects `session` to `transport` and lists it in `sessions` until the
+   * transport closes. The close is watched from before the session connects,
+   * so a client that hangs up during setup leaves no session behind.
+   */
+  async #connectSession(
+    session: FastMCPSession<T>,
+    transport: Transport,
+    onClose?: () => void,
+  ): Promise<void> {
+    let closed = false;
+    const originalOnClose = transport.onclose;
+
+    transport.onclose = () => {
+      closed = true;
+      onClose?.();
+      this.#removeSession(session);
+      originalOnClose?.();
+    };
+
+    await session.connect(transport);
+
+    if (closed) {
+      return;
+    }
+
+    this.#sessions.push(session);
+
+    session.once("error", () => {
+      this.#removeSession(session);
+    });
+
+    this.emit("connect", {
+      session: session as FastMCPSession<FastMCPSessionAuth>,
+    });
   }
 
   /**

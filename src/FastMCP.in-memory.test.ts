@@ -225,6 +225,49 @@ describe("FastMCP in-memory transport", () => {
     expect(onDisconnect).toHaveBeenCalledWith({ session });
   });
 
+  it("leaves no session behind when the client hangs up during setup", async () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+
+    const onConnect = vi.fn();
+    const onDisconnect = vi.fn();
+    server.on("connect", onConnect);
+    server.on("disconnect", onDisconnect);
+
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+
+    const client = new Client(
+      { name: "test-client", version: "0.0.0" },
+      { capabilities: { roots: { listChanged: true } } },
+    );
+
+    let rootsRequested!: () => void;
+    const rootsAsked = new Promise<void>((resolve) => {
+      rootsRequested = resolve;
+    });
+
+    // Never answered, so the session is still being set up when the client
+    // hangs up.
+    client.setRequestHandler(ListRootsRequestSchema, () => {
+      rootsRequested();
+
+      return new Promise(() => {});
+    });
+
+    const connecting = server.connect(serverTransport);
+
+    await client.connect(clientTransport);
+    await rootsAsked;
+    await client.close();
+
+    const session = await connecting;
+
+    expect(session.isReady).toBe(false);
+    expect(server.sessions).toEqual([]);
+    expect(onConnect).not.toHaveBeenCalled();
+    expect(onDisconnect).not.toHaveBeenCalled();
+  });
+
   it("passes auth through to the tool context and applies canAccess", async () => {
     type Auth = { id: number; role: string };
 

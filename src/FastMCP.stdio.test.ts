@@ -127,4 +127,26 @@ describe("stdio stdin listener lifecycle", () => {
     expect(stdinOffSpy).toHaveBeenCalledWith("close", closeListener);
     expect(stdinOffSpy).toHaveBeenCalledWith("end", closeListener);
   });
+
+  it("leaves no session behind when stdin ends while the session is being set up", async () => {
+    // Like StdioServerTransport, closing reports the close.
+    fakeTransport.close.mockImplementation(async () => {
+      fakeTransport.onclose?.();
+    });
+
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const onConnect = vi.fn();
+    server.on("connect", onConnect);
+
+    const starting = server.start({ transportType: "stdio" });
+
+    // No client ever initializes, so setup is still waiting for one (~1s)
+    // when stdin ends.
+    stdinListeners.get("end")!();
+    await starting;
+
+    expect(fakeTransport.close).toHaveBeenCalledTimes(1);
+    expect(server.sessions).toEqual([]);
+    expect(onConnect).not.toHaveBeenCalled();
+  });
 });
