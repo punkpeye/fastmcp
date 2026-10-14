@@ -284,8 +284,10 @@ export function buildOutputSchema(
     SUCCESS_STATUS_PATTERN.test(code),
   );
 
-  const declaredSchema =
-    successEntry?.[1].content?.["application/json"]?.schema;
+  const declaredSchema = findMediaType(
+    successEntry?.[1].content,
+    "application/json",
+  )?.schema;
 
   if (!declaredSchema) {
     return undefined;
@@ -443,10 +445,10 @@ function extractBodyProperties(
     return { properties };
   }
 
-  const hasJson = "application/json" in content;
-  const hasForm = "application/x-www-form-urlencoded" in content;
+  const json = findMediaType(content, "application/json");
+  const form = findMediaType(content, "application/x-www-form-urlencoded");
 
-  if (!hasJson && !hasForm) {
+  if (json === undefined && form === undefined) {
     const contentTypes = Object.keys(content);
 
     return contentTypes.length > 0
@@ -454,10 +456,8 @@ function extractBodyProperties(
       : { properties };
   }
 
-  const bodyEncoding: "form" | "json" = hasJson ? "json" : "form";
-  const declaredSchema = hasJson
-    ? content["application/json"]?.schema
-    : content["application/x-www-form-urlencoded"]?.schema;
+  const bodyEncoding: "form" | "json" = json === undefined ? "form" : "json";
+  const declaredSchema = bodyEncoding === "json" ? json?.schema : form?.schema;
 
   if (!declaredSchema) {
     // The content type is declared and supported; it just has no schema
@@ -567,6 +567,30 @@ function filterReferencedDefs(
   return Object.fromEntries(
     [...referenced].map((name) => [name, allDefs[name]]),
   );
+}
+
+/**
+ * Looks `mediaType` up in an OpenAPI `content` map. Media types are
+ * case-insensitive and may carry parameters (RFC 9110, section 8.3.1), so a
+ * spec can declare `application/json` as `Application/JSON` or
+ * `application/json; charset=utf-8`. An exact key wins.
+ */
+function findMediaType<TMediaType>(
+  content: Record<string, TMediaType> | undefined,
+  mediaType: string,
+): TMediaType | undefined {
+  if (!content) {
+    return undefined;
+  }
+
+  const key = Object.hasOwn(content, mediaType)
+    ? mediaType
+    : Object.keys(content).find(
+        (candidate) =>
+          candidate.split(";")[0].trim().toLowerCase() === mediaType,
+      );
+
+  return key === undefined ? undefined : content[key];
 }
 
 function normalizeExclusiveBound(

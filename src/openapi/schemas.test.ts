@@ -672,6 +672,37 @@ test("application/json is preferred over form-urlencoded when a route declares b
   expect(flatSchema.properties).toEqual({ fromJson: { type: "string" } });
 });
 
+test.each([
+  ["application/json; charset=utf-8", "json"],
+  ["Application/JSON", "json"],
+  ["application/x-www-form-urlencoded; charset=UTF-8", "form"],
+  ["Application/X-WWW-Form-Urlencoded", "form"],
+])(
+  "a request body declared as %s is recognized, since media types are case-insensitive and may carry parameters",
+  (contentType, encoding) => {
+    const { bodyEncoding, flatSchema, unsupportedBodyContentType } =
+      buildFlatSchema(
+        route({
+          requestBody: {
+            content: {
+              [contentType]: {
+                schema: {
+                  properties: { amount: { type: "integer" } },
+                  type: "object",
+                },
+              },
+            },
+          },
+        }),
+        undefined,
+      );
+
+    expect(unsupportedBodyContentType).toBeUndefined();
+    expect(bodyEncoding).toBe(encoding);
+    expect(flatSchema.properties).toEqual({ amount: { type: "integer" } });
+  },
+);
+
 test("a request body declared only in an unsupported content type is signaled for skipping, not silently emptied", () => {
   const { flatSchema, unsupportedBodyContentType } = buildFlatSchema(
     route({
@@ -1099,6 +1130,38 @@ test("buildOutputSchema picks the first 2xx application/json response schema", (
     properties: { id: { type: "integer" } },
     type: "object",
   });
+});
+
+test("buildOutputSchema reads a JSON response declared with different casing or parameters, preferring an exact application/json", () => {
+  const object = (name: string) => ({
+    properties: { [name]: { type: "string" } },
+    type: "object",
+  });
+
+  expect(
+    buildOutputSchema(
+      route({
+        responses: {
+          "200": {
+            content: {
+              "Application/JSON; charset=utf-8": { schema: object("id") },
+            },
+          },
+        },
+      }),
+      undefined,
+    ),
+  ).toEqual(object("id"));
+
+  // Declared after the parameterized key, so a first-match lookup would miss it.
+  const content = Object.fromEntries([
+    ["application/json; charset=utf-8", { schema: object("other") }],
+    ["application/json", { schema: object("exact") }],
+  ]);
+
+  expect(
+    buildOutputSchema(route({ responses: { "200": { content } } }), undefined),
+  ).toEqual(object("exact"));
 });
 
 test("buildOutputSchema skips a response that's explicitly non-object (e.g. an array)", () => {
