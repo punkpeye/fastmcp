@@ -4782,6 +4782,154 @@ test.each([
   },
 );
 
+test.each([
+  {
+    args: ["--transport=http-stream", "--stateless=true"],
+    env: {},
+    scenario: "--name=value arguments",
+    stateless: true,
+  },
+  {
+    args: ["--transport", "http-stream", "--stateless", "--endpoint", "/mcp"],
+    env: {},
+    scenario: "a bare --stateless followed by another flag",
+    stateless: true,
+  },
+  {
+    args: ["--transport", "httpStream", "--stateless"],
+    env: {},
+    scenario: "a bare --stateless at the end",
+    stateless: true,
+  },
+  {
+    args: [],
+    env: { FASTMCP_TRANSPORT: "http-stream" },
+    scenario: "FASTMCP_TRANSPORT=http-stream",
+    stateless: false,
+  },
+  {
+    args: [],
+    env: { FASTMCP_STATELESS: "TRUE", FASTMCP_TRANSPORT: "HTTPSTREAM" },
+    scenario: "environment values in any case",
+    stateless: true,
+  },
+])(
+  "start() reads its config from $scenario",
+  async ({ args, env, stateless }) => {
+    const originalArgv = process.argv;
+    const port = await getTestPort();
+    const server = new FastMCP({
+      name: "Test server",
+      version: "1.0.0",
+    });
+
+    process.argv = [
+      ...originalArgv.slice(0, 2),
+      `--port=${port}`,
+      "--host",
+      "127.0.0.1",
+      ...args,
+    ];
+    vi.stubEnv("FASTMCP_STATELESS", undefined);
+    vi.stubEnv("FASTMCP_TRANSPORT", undefined);
+
+    for (const [name, value] of Object.entries(env)) {
+      vi.stubEnv(name, value);
+    }
+
+    try {
+      await server.start();
+
+      const response = await fetch(`http://127.0.0.1:${port}/ready`);
+      expect(await response.json()).toEqual(
+        stateless
+          ? { mode: "stateless", ready: 1, status: "ready", total: 1 }
+          : { ready: 0, status: "no_sessions", total: 0 },
+      );
+    } finally {
+      process.argv = originalArgv;
+      vi.unstubAllEnvs();
+      await server.stop();
+    }
+  },
+);
+
+test.each([
+  {
+    args: ["--transport", "sse"],
+    env: {},
+    error: `--transport must be "stdio", "httpStream" or "http-stream", got "sse"`,
+  },
+  {
+    args: [],
+    env: { FASTMCP_TRANSPORT: "http" },
+    error: `FASTMCP_TRANSPORT must be "stdio", "httpStream" or "http-stream", got "http"`,
+  },
+  {
+    args: ["--transport", "http-stream", "--stateless", "yes"],
+    env: {},
+    error: `--stateless must be "true" or "false", got "yes"`,
+  },
+  {
+    args: ["--transport", "http-stream"],
+    env: { FASTMCP_STATELESS: "1" },
+    error: `FASTMCP_STATELESS must be "true" or "false", got "1"`,
+  },
+])(
+  "start() rejects a config it cannot read: $error",
+  async ({ args, env, error }) => {
+    const originalArgv = process.argv;
+    const server = new FastMCP({
+      name: "Test server",
+      version: "1.0.0",
+    });
+
+    process.argv = [...originalArgv.slice(0, 2), ...args];
+
+    for (const [name, value] of Object.entries(env)) {
+      vi.stubEnv(name, value);
+    }
+
+    try {
+      await expect(server.start()).rejects.toThrow(error);
+    } finally {
+      process.argv = originalArgv;
+      vi.unstubAllEnvs();
+      await server.stop();
+    }
+  },
+);
+
+test("start() overrides skip the CLI and environment config", async () => {
+  const originalArgv = process.argv;
+  const port = await getTestPort();
+  const server = new FastMCP({
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  process.argv = [...originalArgv.slice(0, 2), "--transport", "sse"];
+  vi.stubEnv("FASTMCP_STATELESS", "yes");
+
+  try {
+    await server.start({
+      httpStream: { host: "127.0.0.1", port, stateless: false },
+      transportType: "httpStream",
+    });
+
+    const response = await fetch(`http://127.0.0.1:${port}/ready`);
+    expect(await response.json()).toEqual({
+      ready: 0,
+      status: "no_sessions",
+      total: 0,
+    });
+  } finally {
+    process.argv = originalArgv;
+    vi.unstubAllEnvs();
+    await server.stop();
+  }
+});
+
 test("stateless mode works correctly", async () => {
   const port = await getTestPort();
 

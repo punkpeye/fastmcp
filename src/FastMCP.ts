@@ -3193,6 +3193,55 @@ function parseBasicAuthHeader(
 }
 
 /**
+ * Reads a boolean CLI argument or environment variable. An empty value counts
+ * as unset, and anything but "true" or "false" throws rather than reading as
+ * false.
+ */
+function parseBooleanSetting(
+  value: string | undefined,
+  source: string,
+): boolean | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  switch (value.toLowerCase()) {
+    case "false":
+      return false;
+    case "true":
+      return true;
+    default:
+      throw new Error(`${source} must be "true" or "false", got "${value}"`);
+  }
+}
+
+/**
+ * Reads the transport from a CLI argument or environment variable. An empty
+ * value counts as unset, and an unknown one throws rather than falling back
+ * to stdio.
+ */
+function parseTransportSetting(
+  value: string | undefined,
+  source: string,
+): "httpStream" | "stdio" | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  switch (value.toLowerCase()) {
+    case "http-stream":
+    case "httpstream":
+      return "httpStream";
+    case "stdio":
+      return "stdio";
+    default:
+      throw new Error(
+        `${source} must be "stdio", "httpStream" or "http-stream", got "${value}"`,
+      );
+  }
+}
+
+/**
  * RFC 9728 §3.1: the well-known path goes between the host and the resource's
  * path, so `https://host/mcp` is described at
  * `https://host/.well-known/oauth-protected-resource/mcp`.
@@ -4850,12 +4899,24 @@ export class FastMCP<
       }
     | { transportType: "stdio" } {
     const args = process.argv.slice(2);
+    // Reads `--name value` and `--name=value`. A flag with no value after it,
+    // like a bare `--stateless`, reads as "".
     const getArg = (name: string) => {
-      const index = args.findIndex((arg) => arg === `--${name}`);
+      const index = args.findIndex(
+        (arg) => arg === `--${name}` || arg.startsWith(`--${name}=`),
+      );
 
-      return index !== -1 && index + 1 < args.length
-        ? args[index + 1]
-        : undefined;
+      if (index === -1) {
+        return undefined;
+      }
+
+      if (args[index] !== `--${name}`) {
+        return args[index].slice(name.length + 3);
+      }
+
+      const value = args[index + 1];
+
+      return value === undefined || value.startsWith("--") ? "" : value;
     };
 
     const transportArg = getArg("transport");
@@ -4874,8 +4935,8 @@ export class FastMCP<
     // Overrides > CLI > env > defaults
     const transportType =
       overrides?.transportType ||
-      (transportArg === "http-stream" ? "httpStream" : transportArg) ||
-      envTransport ||
+      parseTransportSetting(transportArg, "--transport") ||
+      parseTransportSetting(envTransport, "FASTMCP_TRANSPORT") ||
       "stdio";
 
     if (transportType === "httpStream") {
@@ -4893,9 +4954,12 @@ export class FastMCP<
         overrides?.httpStream?.enableJsonResponse || false;
       const stateless =
         overrides?.httpStream?.stateless ??
-        (statelessArg !== undefined
-          ? statelessArg === "true"
-          : envStateless === "true");
+        // A bare `--stateless` means `--stateless true`.
+        (statelessArg === ""
+          ? true
+          : parseBooleanSetting(statelessArg, "--stateless")) ??
+        parseBooleanSetting(envStateless, "FASTMCP_STATELESS") ??
+        false;
       const cors = overrides?.httpStream?.cors;
       const eventStore = overrides?.httpStream?.eventStore;
       const sslCa = overrides?.httpStream?.sslCa;
