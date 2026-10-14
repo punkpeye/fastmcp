@@ -2155,9 +2155,11 @@ export class FastMCPSession<
   }
 
   private addPrompt(inputPrompt: InputPrompt<T>) {
-    const completers: Record<string, ArgumentValueCompleter<T>> = {};
-    const enums: Record<string, string[]> = {};
-    const fuseInstances: Record<string, Fuse<string>> = {};
+    const completers: Record<string, ArgumentValueCompleter<T>> = Object.create(
+      null,
+    );
+    const enums: Record<string, string[]> = Object.create(null);
+    const fuseInstances: Record<string, Fuse<string>> = Object.create(null);
 
     for (const argument of inputPrompt.arguments ?? []) {
       if (argument.complete) {
@@ -2220,7 +2222,9 @@ export class FastMCPSession<
   }
 
   private addResourceTemplate(inputResourceTemplate: InputResourceTemplate<T>) {
-    const completers: Record<string, ArgumentValueCompleter<T>> = {};
+    const completers: Record<string, ArgumentValueCompleter<T>> = Object.create(
+      null,
+    );
 
     for (const argument of inputResourceTemplate.arguments ?? []) {
       if (argument.complete) {
