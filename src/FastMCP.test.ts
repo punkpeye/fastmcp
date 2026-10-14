@@ -4406,6 +4406,109 @@ test("uses `formatInvalidParamsErrorMessage` callback to build ErrorCode.Invalid
   });
 });
 
+test.each([
+  {
+    cli: "true",
+    env: undefined,
+    expected: false,
+    override: false,
+    scenario: "an explicit false override takes precedence over CLI true",
+  },
+  {
+    cli: undefined,
+    env: "true",
+    expected: false,
+    override: false,
+    scenario: "an explicit false override takes precedence over env true",
+  },
+  {
+    cli: "true",
+    env: "true",
+    expected: false,
+    override: false,
+    scenario:
+      "an explicit false override takes precedence over CLI and env true",
+  },
+  {
+    cli: "false",
+    env: "false",
+    expected: true,
+    override: true,
+    scenario:
+      "an explicit true override takes precedence over CLI and env false",
+  },
+  {
+    cli: "false",
+    env: "true",
+    expected: false,
+    override: undefined,
+    scenario: "CLI false takes precedence over env true",
+  },
+  {
+    cli: "true",
+    env: "false",
+    expected: true,
+    override: undefined,
+    scenario: "CLI true takes precedence over env false",
+  },
+  {
+    cli: undefined,
+    env: "true",
+    expected: true,
+    override: undefined,
+    scenario: "env true is used when neither override nor CLI is set",
+  },
+  {
+    cli: undefined,
+    env: "false",
+    expected: false,
+    override: undefined,
+    scenario: "env false is used when neither override nor CLI is set",
+  },
+  {
+    cli: undefined,
+    env: undefined,
+    expected: false,
+    override: undefined,
+    scenario: "stateful mode is the default when no stateless value is set",
+  },
+])(
+  "stateless config precedence: $scenario",
+  async ({ cli, env, expected, override }) => {
+    const originalArgv = process.argv;
+    const port = await getTestPort();
+    const server = new FastMCP({
+      name: "Test server",
+      version: "1.0.0",
+    });
+
+    process.argv = [
+      ...originalArgv.slice(0, 2),
+      ...(cli === undefined ? [] : ["--stateless", cli]),
+    ];
+    vi.stubEnv("FASTMCP_STATELESS", env);
+
+    try {
+      await server.start({
+        httpStream: { host: "127.0.0.1", port, stateless: override },
+        transportType: "httpStream",
+      });
+
+      const response = await fetch(`http://127.0.0.1:${port}/ready`);
+      expect(response.status).toBe(expected ? 200 : 503);
+      expect(await response.json()).toEqual(
+        expected
+          ? { mode: "stateless", ready: 1, status: "ready", total: 1 }
+          : { ready: 0, status: "no_sessions", total: 0 },
+      );
+    } finally {
+      process.argv = originalArgv;
+      vi.unstubAllEnvs();
+      await server.stop();
+    }
+  },
+);
+
 test("stateless mode works correctly", async () => {
   const port = await getTestPort();
 

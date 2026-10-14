@@ -4743,10 +4743,10 @@ export class FastMCP<
       const enableJsonResponse =
         overrides?.httpStream?.enableJsonResponse || false;
       const stateless =
-        overrides?.httpStream?.stateless ||
-        statelessArg === "true" ||
-        envStateless === "true" ||
-        false;
+        overrides?.httpStream?.stateless ??
+        (statelessArg !== undefined
+          ? statelessArg === "true"
+          : envStateless === "true");
       const cors = overrides?.httpStream?.cors;
       const eventStore = overrides?.httpStream?.eventStore;
       const sslCa = overrides?.httpStream?.sslCa;
