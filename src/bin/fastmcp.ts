@@ -254,5 +254,7 @@ await yargs(hideBin(process.argv))
     },
   )
 
+  .demandCommand(1)
+  .strict()
   .help()
   .parseAsync();

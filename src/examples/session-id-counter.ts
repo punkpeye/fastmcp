@@ -6,7 +6,7 @@
  * or tracking user-specific data across multiple requests.
  *
  * To run this example:
- * npx fastmcp dev src/examples/session-id-counter.ts --http-stream
+ * npx tsx src/examples/session-id-counter.ts
  *
  * Then test with multiple clients to see how each session maintains its own state.
  */
