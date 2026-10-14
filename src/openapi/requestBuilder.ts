@@ -93,6 +93,8 @@ export async function executeRequest(
     path = path.replaceAll(`{${name}}`, encodeURIComponent(value));
   }
 
+  assertNoSubstitutedDotSegments(options.route, path);
+
   const url = new URL(baseUrl.replace(/\/$/, "") + path);
   url.search = queryParts.join("&");
 
@@ -300,6 +302,33 @@ function appendQueryValue(
 
   for (const item of Array.isArray(value) ? value : [value]) {
     query.append(name, String(item));
+  }
+}
+
+/**
+ * `encodeURIComponent` leaves `.` alone, and `new URL()` collapses `.` and `..`
+ * path segments, so a path parameter that fills a whole segment with `.` or
+ * `..` would drop path segments from the request URL instead of being sent as
+ * a value. Percent-encoding can't prevent this (the URL parser treats `%2e` as
+ * a dot too, and `encodeURIComponent` already escapes the `%` of any such
+ * input), so reject it. A segment the template itself spells as `.` or `..` is
+ * the spec author's own and is left alone.
+ */
+function assertNoSubstitutedDotSegments(
+  route: HttpRoute,
+  resolvedPath: string,
+): void {
+  const templateSegments = new Set(route.path.split("/"));
+
+  for (const segment of resolvedPath.split("/")) {
+    if (
+      (segment === "." || segment === "..") &&
+      !templateSegments.has(segment)
+    ) {
+      throw new UserError(
+        `${route.method.toUpperCase()} ${route.path}: path parameter values must not produce a "${segment}" path segment.`,
+      );
+    }
   }
 }
 

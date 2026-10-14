@@ -125,6 +125,88 @@ test("executeRequest replaces every occurrence of a repeated path parameter", as
   );
 });
 
+test.each([
+  { args: { id: ".." }, path: "/v1/users/{id}/profile" },
+  { args: { id: "." }, path: "/v1/users/{id}/profile" },
+  { args: { id: ".." }, path: "/v1/users/{id}" },
+  // Segments that only become a dot segment once substituted next to
+  // literal text.
+  { args: { ext: "", name: "" }, path: "/files/{name}.{ext}" },
+  { args: { ext: "", name: "." }, path: "/files/{name}.{ext}" },
+  { args: { ext: ".", name: "" }, path: "/files/{name}.{ext}" },
+  { args: { a: ".", b: "." }, path: "/files/{a}{b}" },
+])(
+  "executeRequest rejects path parameters that resolve to a dot segment: $path $args",
+  async ({ args, path }) => {
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () => new Response("{}", { status: 200 }),
+    );
+
+    await expect(
+      executeRequest({
+        args,
+        fetchImpl,
+        parameterMap: Object.fromEntries(
+          Object.keys(args).map((name) => [name, { in: "path", name }]),
+        ),
+        route: route({ path }),
+        servers: [{ url: "https://api.example.com" }],
+      }),
+    ).rejects.toThrow(/path segment/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  { expected: "/v1/users/42/profile", value: "42" },
+  { expected: "/v1/users/a%20b/profile", value: "a b" },
+  { expected: "/v1/users/a%2Fb/profile", value: "a/b" },
+  // Not dot segments, and still stay inside the segment once encoded.
+  { expected: "/v1/users/..%2Fadmin/profile", value: "../admin" },
+  { expected: "/v1/users/%252e%252e/profile", value: "%2e%2e" },
+  { expected: "/v1/users/%252E%252E/profile", value: "%2E%2E" },
+  { expected: "/v1/users/.../profile", value: "..." },
+  { expected: "/v1/users/.hidden/profile", value: ".hidden" },
+  { expected: "/v1/users/%20../profile", value: " .." },
+])(
+  "executeRequest keeps path parameter $value inside its own segment",
+  async ({ expected, value }) => {
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () => new Response("{}", { status: 200 }),
+    );
+
+    await executeRequest({
+      args: { id: value },
+      fetchImpl,
+      parameterMap: { id: { in: "path", name: "id" } },
+      route: route({ path: "/v1/users/{id}/profile" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    const url = new URL(calledUrl);
+    expect(url.origin).toBe("https://api.example.com");
+    expect(url.pathname).toBe(expected);
+  },
+);
+
+test("a dot segment written in the route template itself is left alone", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response("{}", { status: 200 }),
+  );
+
+  await executeRequest({
+    args: { id: "42" },
+    fetchImpl,
+    parameterMap: { id: { in: "path", name: "id" } },
+    route: route({ path: "/v1/./pets/{id}" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [calledUrl] = fetchImpl.mock.calls[0]!;
+  expect(new URL(calledUrl).pathname).toBe("/v1/pets/42");
+});
+
 test("a caller-supplied header overrides the generated content-type, case-insensitively", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () => new Response("{}", { status: 200 }),
