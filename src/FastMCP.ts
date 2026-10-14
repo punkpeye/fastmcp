@@ -3110,13 +3110,25 @@ function joinPaths(basePath: "" | `/${string}`, path: string): `/${string}` {
  * `uri` has them. A template with a query (`{?q}`, `{&q}`) or fragment
  * (`{#f}`) expression may still meet one it doesn't fill, such as extra query
  * parameters, so that part is only compared when the template has none.
- * Query order and percent-encoding may differ.
+ * Query order and percent-encoding may differ. A malformed percent-escape
+ * (`%ZZ`) can't come from expanding a template either, so it doesn't match.
  */
 function matchUriTemplate(
   template: ReturnType<typeof parseURITemplate>,
   uri: string,
 ): Record<string, string> | undefined {
-  const match = template.fromUri(uri);
+  let match: Record<string, string> | undefined;
+
+  try {
+    match = template.fromUri(uri);
+  } catch (error) {
+    // `fromUri` decodes values with `decodeURIComponent`, which throws on it.
+    if (error instanceof URIError) {
+      return undefined;
+    }
+
+    throw error;
+  }
 
   if (!match) {
     return undefined;

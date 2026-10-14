@@ -82,6 +82,33 @@ describe("resource template matching", () => {
     }
   });
 
+  it("answers -32602, not -32603, for a URI with a malformed percent-escape", async () => {
+    const server = new FastMCP({ name: "T", version: "1.0.0" });
+    const load = vi.fn(async ({ id }: { id: string }) => ({
+      text: `doc ${id}`,
+    }));
+    server.addResourceTemplate({
+      arguments: [{ name: "id", required: true }],
+      load,
+      mimeType: "text/plain",
+      name: "Docs",
+      uriTemplate: "docs://{id}",
+    });
+    const client = await connect(server);
+    try {
+      await expect(client.readResource({ uri: "docs://%ZZ" })).rejects.toEqual(
+        expect.objectContaining({ code: ErrorCode.InvalidParams }),
+      );
+      expect(load).not.toHaveBeenCalled();
+      await expect(server.embedded("docs://%ZZ")).rejects.toThrow(
+        "Resource not found",
+      );
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  });
+
   it("still matches a query expression given parameters it doesn't declare", async () => {
     const server = new FastMCP({ name: "T", version: "1.0.0" });
     const load = vi.fn(async ({ id }: { id: string }) => ({
