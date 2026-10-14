@@ -167,16 +167,24 @@ export class DiskStore implements TokenStorage {
       value,
     };
 
+    // Write to a temporary file and rename it into place. rename() is atomic
+    // on POSIX filesystems, so a concurrent get(), take() or cleanup() sees
+    // either the old entry or the new one, never a truncated file. The
+    // temporary name does not end in the extension, so cleanup() and size()
+    // never pick it up.
+    const tempPath = `${filePath}.${randomUUID()}.tmp`;
+
     try {
       // 0o600: these files hold authorization codes, access/refresh tokens
       // and PKCE verifiers, so nothing outside the owning user should read
-      // them. `mode` only applies when the file is created; an overwrite
-      // keeps whatever mode the existing file already has.
-      await writeFile(filePath, JSON.stringify(entry, null, 2), {
+      // them. Every save creates a new file, so the mode always applies.
+      await writeFile(tempPath, JSON.stringify(entry, null, 2), {
         encoding: "utf-8",
         mode: 0o600,
       });
+      await rename(tempPath, filePath);
     } catch (error) {
+      await rm(tempPath, { force: true });
       console.error(`Failed to save key ${key}:`, error);
       throw error;
     }

@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm, stat } from "fs/promises";
+import { chmod, mkdtemp, readdir, rm, stat } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -172,6 +172,43 @@ describe("DiskStore", () => {
     store.destroy();
   });
 
+  it("should never report a stored key as missing while it is overwritten", async () => {
+    const store = new DiskStore({ directory: TEST_DIR });
+    const value = { blob: "x".repeat(100_000) };
+    await store.save("key", value);
+
+    const misses: number[] = [];
+
+    for (let i = 0; i < 20; i++) {
+      const [, got] = await Promise.all([
+        store.save("key", value),
+        store.get("key"),
+      ]);
+
+      if (got === null) {
+        misses.push(i);
+      }
+    }
+
+    expect(misses).toEqual([]);
+
+    store.destroy();
+  });
+
+  it("should not clean up an entry while it is overwritten", async () => {
+    const store = new DiskStore({ directory: TEST_DIR });
+    const value = { blob: "x".repeat(100_000) };
+    await store.save("key", value);
+
+    for (let i = 0; i < 20; i++) {
+      await Promise.all([store.save("key", value), store.cleanup()]);
+
+      expect(await store.get("key")).toEqual(value);
+    }
+
+    store.destroy();
+  });
+
   it("should count stored items", async () => {
     const store = new DiskStore({ directory: TEST_DIR });
 
@@ -272,6 +309,27 @@ describe("DiskStore", () => {
         const fileStats = await stat(join(directory, "token-key.json"));
 
         expect(directoryStats.mode & 0o077).toBe(0);
+        expect(fileStats.mode & 0o077).toBe(0);
+      } finally {
+        store.destroy();
+        await rm(directory, { force: true, recursive: true });
+      }
+    });
+
+    it("should restrict a file that already existed with a looser mode", async () => {
+      const directory = await mkdtemp(
+        join(tmpdir(), "fastmcp-diskstore-perms-"),
+      );
+      const store = new DiskStore({ directory });
+
+      try {
+        await store.save("token-key", { access_token: "at-old" });
+        await chmod(join(directory, "token-key.json"), 0o644);
+
+        await store.save("token-key", { access_token: "at-new" });
+
+        const fileStats = await stat(join(directory, "token-key.json"));
+
         expect(fileStats.mode & 0o077).toBe(0);
       } finally {
         store.destroy();
