@@ -198,6 +198,142 @@ test("executeRequest replaces every occurrence of a repeated path parameter", as
   );
 });
 
+test.each([false, true])(
+  "simple path objects encode each key/value before adding separators (explode: %s)",
+  async (explode) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+    await executeRequest({
+      args: {
+        color: {
+          active: false,
+          count: 0,
+          empty: "",
+          "key,=/": "x,y=z/?#% 文!'()*",
+          nil: null,
+        },
+      },
+      fetchImpl,
+      parameterMap: {
+        color: { explode, in: "path", name: "color", style: "simple" },
+      },
+      route: route({ path: "/colors/{color}" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    const url = new URL(calledUrl);
+    expect(url.origin).toBe("https://api.example.com");
+    expect(url.pathname).toBe(
+      explode
+        ? "/colors/active=false,count=0,empty=,key%2C%3D%2F=x%2Cy%3Dz%2F%3F%23%25%20%E6%96%87%21%27%28%29%2A,nil=null"
+        : "/colors/active,false,count,0,empty,,key%2C%3D%2F,x%2Cy%3Dz%2F%3F%23%25%20%E6%96%87%21%27%28%29%2A,nil,null",
+    );
+    expect(url.search).toBe("");
+    expect(url.hash).toBe("");
+  },
+);
+
+test("simple path objects replace repeated placeholders using the path defaults", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+  await executeRequest({
+    args: { color: { G: 200, R: 100 } },
+    fetchImpl,
+    parameterMap: { color: { in: "path", name: "color" } },
+    route: route({ path: "/colors/{color}/mirrors/{color}" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  expect(fetchImpl.mock.calls[0]![0]).toBe(
+    "https://api.example.com/colors/G,200,R,100/mirrors/G,200,R,100",
+  );
+});
+
+test.each([false, true])(
+  "empty simple path objects expand to an empty value (explode: %s)",
+  async (explode) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+    await executeRequest({
+      args: { color: {} },
+      fetchImpl,
+      parameterMap: { color: { explode, in: "path", name: "color" } },
+      route: route({ path: "/colors/{color}" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    expect(fetchImpl.mock.calls[0]![0]).toBe("https://api.example.com/colors/");
+  },
+);
+
+test.each([
+  { expected: "0", value: 0 },
+  { expected: "false", value: false },
+  { expected: "null", value: null },
+  { expected: "!'()*", value: "!'()*" },
+  { expected: "a%2Cb%2Cc%2Fd", value: ["a,b", "c/d"] },
+  { expected: "", value: [] },
+])(
+  "scalar and array path values keep their existing encoding: $value",
+  async ({ expected, value }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+    await executeRequest({
+      args: { color: value },
+      fetchImpl,
+      parameterMap: {
+        color: { explode: true, in: "path", name: "color", style: "simple" },
+      },
+      route: route({ path: "/colors/{color}" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    expect(fetchImpl.mock.calls[0]![0]).toBe(
+      `https://api.example.com/colors/${expected}`,
+    );
+  },
+);
+
+test.each([
+  { style: "label", value: { R: 100 } },
+  { style: "matrix", value: { R: 100 } },
+  { style: "simple", value: { nested: { R: 100 } } },
+  { style: "simple", value: { nested: [100, 200] } },
+])(
+  "unsupported path object shapes/styles retain their existing serialization: $style $value",
+  async ({ style, value }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+    await executeRequest({
+      args: { color: value },
+      fetchImpl,
+      parameterMap: { color: { in: "path", name: "color", style } },
+      route: route({ path: "/colors/{color}" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    expect(fetchImpl.mock.calls[0]![0]).toBe(
+      "https://api.example.com/colors/%5Bobject%20Object%5D",
+    );
+  },
+);
+
+test("an empty simple path object cannot turn a neighboring literal into a dot segment", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+  await expect(
+    executeRequest({
+      args: { color: {} },
+      fetchImpl,
+      parameterMap: { color: { in: "path", name: "color" } },
+      route: route({ path: "/colors/{color}." }),
+      servers: [{ url: "https://api.example.com" }],
+    }),
+  ).rejects.toThrow(/path segment/);
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
 test.each([
   { args: { id: ".." }, path: "/v1/users/{id}/profile" },
   { args: { id: "." }, path: "/v1/users/{id}/profile" },

@@ -68,7 +68,11 @@ export async function executeRequest(
         headers.set(mapping.name, String(value));
         break;
       case "path":
-        pathParams[mapping.name] = String(value);
+        pathParams[mapping.name] = encodePathValue(
+          value,
+          mapping.style,
+          mapping.explode,
+        );
         break;
       case "query": {
         const query = new URLSearchParams();
@@ -90,7 +94,7 @@ export async function executeRequest(
   let path = options.route.path;
 
   for (const [name, value] of Object.entries(pathParams)) {
-    path = path.replaceAll(`{${name}}`, encodeURIComponent(value));
+    path = path.replaceAll(`{${name}}`, value);
   }
 
   assertNoSubstitutedDotSegments(options.route, path);
@@ -359,6 +363,51 @@ function encodeFormBody(payload: unknown): string {
   }
 
   return params.toString();
+}
+
+/** Simple expansion escapes everything except RFC 3986 unreserved characters. */
+function encodePathComponent(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+/**
+ * Simple-style flat objects use alternating keys/values, or key=value pairs
+ * when exploded. Encode each component before adding separators so commas,
+ * equals signs and slashes in the data cannot become serialization structure.
+ * Other styles/shapes retain their existing whole-value encoding.
+ */
+function encodePathValue(
+  value: unknown,
+  style: string | undefined,
+  explode: boolean | undefined,
+): string {
+  if (
+    (style === undefined || style === "simple") &&
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    const entries = Object.entries(value as Record<string, unknown>);
+
+    if (
+      entries.every(([, item]) => item === null || typeof item !== "object")
+    ) {
+      return entries
+        .map(([key, item]) => {
+          const encodedKey = encodePathComponent(key);
+          const encodedValue = encodePathComponent(String(item));
+          return explode === true
+            ? `${encodedKey}=${encodedValue}`
+            : `${encodedKey},${encodedValue}`;
+        })
+        .join(",");
+    }
+  }
+
+  return encodeURIComponent(String(value));
 }
 
 async function resolveHeaders(
