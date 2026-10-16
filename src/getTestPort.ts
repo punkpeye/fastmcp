@@ -2,16 +2,33 @@ import { getRandomPort } from "get-port-please";
 import { createServer } from "node:net";
 
 /**
- * Whether nothing is listening on `port` at `host`. Only EADDRINUSE counts as
- * taken: an address this machine does not have — the IPv6 loopback on a host
- * without IPv6 — cannot hold the port for anyone.
+ * Whether nothing is listening on `port` at `host`.
+ *
+ * EADDRINUSE means something is. So does a bind the OS refuses for this machine
+ * alone, such as a Windows port inside an excluded range, which reports EACCES
+ * rather than EADDRINUSE: nothing can listen there, so the port is unusable
+ * rather than available. The distinction matters — treating EACCES as free is
+ * what hands a test server a port it can never bind.
+ *
+ * An address this machine does not have — the IPv6 loopback on a host without
+ * IPv6 — is the one case that does count as free: nothing can hold a port on an
+ * address that does not exist.
  */
 const isFreeOn = (port: number, host: string): Promise<boolean> =>
   new Promise((resolve) => {
     const server = createServer();
     server.unref();
     server.once("error", (error: NodeJS.ErrnoException) => {
-      resolve(error.code !== "EADDRINUSE");
+      const code = error.code ?? "";
+
+      if (code === "EADDRNOTAVAIL" || code === "EAFNOSUPPORT") {
+        // No such address on this machine, so it cannot hold the port
+        resolve(true);
+        return;
+      }
+
+      // EADDRINUSE, and a refused bind such as EACCES on a reserved port
+      resolve(code !== "EADDRINUSE" && code !== "EACCES" && code !== "EPERM");
     });
     server.listen({ host, port }, () => {
       server.close(() => resolve(true));
