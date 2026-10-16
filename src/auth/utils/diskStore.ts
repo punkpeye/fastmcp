@@ -14,6 +14,7 @@ import {
   writeFile,
 } from "fs/promises";
 import { join } from "path";
+import { setTimeout as delay } from "timers/promises";
 
 import type { TokenStorage } from "../types.js";
 
@@ -182,7 +183,7 @@ export class DiskStore implements TokenStorage {
         encoding: "utf-8",
         mode: 0o600,
       });
-      await rename(tempPath, filePath);
+      await this.renameWithRetry(tempPath, filePath);
     } catch (error) {
       await rm(tempPath, { force: true });
       console.error(`Failed to save key ${key}:`, error);
@@ -267,5 +268,33 @@ export class DiskStore implements TokenStorage {
     // Sanitize key to prevent directory traversal
     const sanitizedKey = key.replace(/[^a-zA-Z0-9_-]/g, "_");
     return join(this.directory, `${sanitizedKey}${this.fileExtension}`);
+  }
+
+  /**
+   * Windows can temporarily deny replacing a file that is being read. Retry
+   * the atomic rename, never deleting the previous entry to make room. Five
+   * retries wait 310 ms in total; persistent and unrelated errors still fail.
+   */
+  private async renameWithRetry(
+    source: string,
+    destination: string,
+  ): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await rename(source, destination);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException | undefined)?.code;
+        if (
+          process.platform !== "win32" ||
+          attempt >= 5 ||
+          !["EACCES", "EBUSY", "EPERM"].includes(code ?? "")
+        ) {
+          throw error;
+        }
+
+        await delay(10 * 2 ** attempt);
+      }
+    }
   }
 }
