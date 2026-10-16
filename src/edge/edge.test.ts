@@ -407,6 +407,54 @@ describe("EdgeFastMCP", () => {
     expect(body.result.resources[0].uri).toBe("test://resource");
   });
 
+  it("lists no resource templates when it advertises static resources", async () => {
+    const server = new EdgeFastMCP({ name: "TestServer", version: "1.0.0" });
+    server.addResource({
+      load: async () => "Test content",
+      name: "Test Resource",
+      uri: "test://resource",
+    });
+
+    const post = async (message: Record<string, unknown>) => {
+      const response = await server.fetch(
+        new Request("http://localhost/mcp", {
+          body: JSON.stringify(message),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as JsonResponse;
+    };
+
+    const initialized = await post({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "test-client", version: "1.0.0" },
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+      },
+    });
+    expect(initialized.result.capabilities.resources).toEqual({});
+
+    expect(
+      await post({
+        id: 2,
+        jsonrpc: "2.0",
+        method: "resources/templates/list",
+      }),
+    ).toEqual({
+      id: 2,
+      jsonrpc: "2.0",
+      result: { resourceTemplates: [] },
+    });
+  });
+
   it("should read a resource", async () => {
     const server = new EdgeFastMCP({
       name: "TestServer",

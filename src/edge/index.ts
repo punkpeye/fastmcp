@@ -398,6 +398,13 @@ export class EdgeFastMCP {
         case "resources/read":
           return this.#handleResourcesRead(id, params);
 
+        case "resources/templates/list":
+          return {
+            id,
+            jsonrpc: "2.0",
+            result: { resourceTemplates: [] },
+          } as JSONRPCMessage;
+
         case "tools/call":
           return this.#handleToolsCall(id, params);
 
