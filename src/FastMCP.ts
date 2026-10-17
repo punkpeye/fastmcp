@@ -2501,7 +2501,7 @@ export class FastMCPSession<
 
       try {
         result = await prompt.load(
-          args as Record<string, string | undefined>,
+          args ?? {},
           this.#auth,
           this.#createLoadContext(request.params?._meta),
         );

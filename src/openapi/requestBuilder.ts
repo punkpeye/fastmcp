@@ -6,7 +6,7 @@ import { UserError } from "../FastMCP.js";
 export interface ExecuteRequestOptions {
   args: Record<string, unknown>;
   baseUrlOverride?: string;
-  /** How to serialize a request body, if `args` contains any body-mapped values. */
+  /** Selected body encoding, including an empty required JSON object. */
   bodyEncoding?: "form" | "json";
   fetchImpl: typeof fetch;
   headers?: FromOpenAPIOptions["headers"];
@@ -104,7 +104,12 @@ export async function executeRequest(
 
   let body: string | undefined;
 
-  if (Object.keys(bodyProps).length > 0) {
+  const requiredJsonBody =
+    options.bodyEncoding === "json" &&
+    options.route.requestBody?.required === true &&
+    !options.wholeBodyKey;
+
+  if (Object.keys(bodyProps).length > 0 || requiredJsonBody) {
     const payload = options.wholeBodyKey
       ? bodyProps[options.wholeBodyKey]
       : bodyProps;

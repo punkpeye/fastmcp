@@ -71,6 +71,48 @@ function route(overrides: Partial<HttpRoute>): HttpRoute {
   };
 }
 
+test.each([{}, { limit: 10 }])(
+  "sends an empty required flattened JSON body with arguments %j",
+  async (args) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+    await executeRequest({
+      args,
+      bodyEncoding: "json",
+      fetchImpl,
+      parameterMap: {
+        label: { in: "body", name: "label" },
+        limit: { in: "query", name: "limit" },
+      },
+      route: route({
+        method: "post",
+        path: "/jobs",
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { label: { type: "string" } },
+                type: "object",
+              },
+            },
+          },
+          required: true,
+        },
+      }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(new URL(url).searchParams.get("limit")).toBe(
+      "limit" in args ? "10" : null,
+    );
+    expect(init?.body).toBe("{}");
+    expect(new Headers(init?.headers).get("content-type")).toBe(
+      "application/json",
+    );
+  },
+);
+
 test("executeRequest builds the URL, path substitution, query, headers, and JSON body, then unflattens the response", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () =>
