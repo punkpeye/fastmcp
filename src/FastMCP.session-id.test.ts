@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 interface TestAuth {
   [key: string]: unknown;
@@ -36,7 +37,7 @@ describe("FastMCP Session ID Support", () => {
         parameters: z.object({}),
       });
 
-      const port = 3000 + Math.floor(Math.random() * 1000);
+      const port = await getTestPort();
 
       await server.start({
         httpStream: {
@@ -105,7 +106,7 @@ describe("FastMCP Session ID Support", () => {
         parameters: z.object({}),
       });
 
-      const port = 3000 + Math.floor(Math.random() * 1000);
+      const port = await getTestPort();
 
       await server.start({
         httpStream: {
@@ -188,7 +189,7 @@ describe("FastMCP Session ID Support", () => {
         parameters: z.object({}),
       });
 
-      const port = 3000 + Math.floor(Math.random() * 1000);
+      const port = await getTestPort();
 
       await server.start({
         httpStream: {
@@ -287,7 +288,7 @@ describe("FastMCP Session ID Support", () => {
         parameters: z.object({}),
       });
 
-      const port = 3000 + Math.floor(Math.random() * 1000);
+      const port = await getTestPort();
 
       await server.start({
         httpStream: {
