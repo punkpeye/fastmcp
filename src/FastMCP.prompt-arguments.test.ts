@@ -16,6 +16,38 @@ async function connect(server: FastMCP) {
   return client;
 }
 
+describe("prompts/get with omitted optional arguments", () => {
+  it("passes an empty object to load", async () => {
+    const server = new FastMCP({ name: "T", version: "1.0.0" });
+    server.addPrompt({
+      arguments: [{ name: "name" }],
+      load: async ({ name = "World" }) => `Hello, ${name}!`,
+      name: "greeting",
+    });
+    const client = await connect(server);
+    try {
+      const argumentSets: (Record<string, string> | undefined)[] = [
+        undefined,
+        {},
+        { name: "Alice" },
+      ];
+      for (const args of argumentSets) {
+        const result = await client.getPrompt({
+          arguments: args,
+          name: "greeting",
+        });
+        expect(result.messages[0]?.content).toEqual({
+          text: `Hello, ${args?.name ?? "World"}!`,
+          type: "text",
+        });
+      }
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  });
+});
+
 describe("prompts/get for a prompt the server does not have", () => {
   it("answers -32602 Invalid params, as the spec requires", async () => {
     const server = new FastMCP({ name: "T", version: "1.0.0" });
