@@ -138,6 +138,150 @@ async function connect(server: FastMCP) {
   return client;
 }
 
+const JOB_SCHEMA = {
+  properties: { label: { type: "string" } },
+  type: "object",
+};
+const JOB_JSON = { "application/json": { schema: JOB_SCHEMA } };
+const JOB_REF_JSON = {
+  "application/json": { schema: { $ref: "#/components/schemas/Job" } },
+};
+
+test.each(
+  ["3.0.3", "3.1.0"].flatMap((openapi) =>
+    [
+      {
+        args: {},
+        expectedBody: "{}",
+        label: "required object with optional properties",
+        requestBody: { content: JOB_JSON, required: true },
+      },
+      {
+        args: {},
+        expectedBody: "{}",
+        label: "required closed empty object",
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                additionalProperties: false,
+                properties: {},
+                type: "object",
+              },
+            },
+          },
+          required: true,
+        },
+      },
+      {
+        args: {},
+        expectedBody: "{}",
+        label: "required JSON without a schema",
+        requestBody: { content: { "application/json": {} }, required: true },
+      },
+      {
+        args: {},
+        expectedBody: undefined,
+        label: "omitted optional object",
+        requestBody: { content: JOB_JSON, required: false },
+      },
+      {
+        args: {},
+        expectedBody: undefined,
+        label: "omitted object with default requiredness",
+        requestBody: { content: JOB_JSON },
+      },
+      {
+        args: { label: "nightly" },
+        expectedBody: '{"label":"nightly"}',
+        label: "required object with a supplied property",
+        requestBody: { content: JOB_JSON, required: true },
+      },
+      {
+        args: { limit: 10 },
+        expectedBody: "{}",
+        label: "required object with only query arguments supplied",
+        requestBody: { content: JOB_JSON, required: true },
+      },
+      {
+        args: { body: {} },
+        expectedBody: "{}",
+        label: "explicit empty whole body",
+        requestBody: { content: JOB_REF_JSON, required: true },
+      },
+      {
+        args: {},
+        expectedBody: undefined,
+        label: "omitted optional whole body",
+        requestBody: { content: JOB_REF_JSON, required: false },
+      },
+      {
+        args: {},
+        expectedBody: undefined,
+        label: "unchanged omitted form body",
+        requestBody: {
+          content: {
+            "application/x-www-form-urlencoded": { schema: JOB_SCHEMA },
+          },
+          required: true,
+        },
+      },
+      {
+        args: {},
+        expectedBody: undefined,
+        label: "operation without a request body",
+        requestBody: undefined,
+      },
+    ].map((entry) => ({ ...entry, openapi })),
+  ),
+)(
+  "empty JSON request body: $label in OpenAPI $openapi",
+  async ({ args, expectedBody, openapi, requestBody }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        components: { schemas: { Job: JOB_SCHEMA } },
+        info: { title: "Jobs API", version: "1.0.0" },
+        openapi,
+        paths: {
+          "/jobs": {
+            post: {
+              operationId: "createJob",
+              parameters: [
+                { in: "query", name: "limit", schema: { type: "integer" } },
+              ],
+              requestBody,
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const result = await client.callTool({
+        arguments: args,
+        name: "createJob",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+        "https://api.example.com/jobs" + ("limit" in args ? "?limit=10" : ""),
+        expect.objectContaining({ body: expectedBody, method: "POST" }),
+      );
+      expect(
+        new Headers(fetchImpl.mock.calls[0][1]?.headers).get("content-type"),
+      ).toBe(expectedBody === undefined ? null : "application/json");
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
 test.each(
   ["3.0.3", "3.1.0"].flatMap((openapi) => [
     { allowReserved: true, expected: "?formula=x/y", openapi },
