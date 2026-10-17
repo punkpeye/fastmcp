@@ -4,13 +4,14 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 
 import { FastMCP } from "./FastMCP.js";
+import { getTestPort } from "./getTestPort.js";
 
 describe("HTTPS support", () => {
   let server: FastMCP;
   let port: number;
 
-  beforeEach(() => {
-    port = Math.floor(Math.random() * 10000) + 50000;
+  beforeEach(async () => {
+    port = await getTestPort();
     server = new FastMCP({
       name: "HTTPS Test Server",
       version: "1.0.0",
