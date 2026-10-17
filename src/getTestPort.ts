@@ -2,16 +2,18 @@ import { getRandomPort } from "get-port-please";
 import { createServer } from "node:net";
 
 /**
- * Whether nothing is listening on `port` at `host`. Only EADDRINUSE counts as
- * taken: an address this machine does not have — the IPv6 loopback on a host
- * without IPv6 — cannot hold the port for anyone.
+ * Whether `port` is free at `host`. It is not when something listens there
+ * (EADDRINUSE) or when the OS refuses the bind (EACCES or EPERM), as Windows
+ * does for a port inside an excluded range. Any other error counts as free: an
+ * address this machine does not have — the IPv6 loopback on a host without
+ * IPv6 — cannot hold the port for anyone.
  */
 const isFreeOn = (port: number, host: string): Promise<boolean> =>
   new Promise((resolve) => {
     const server = createServer();
     server.unref();
     server.once("error", (error: NodeJS.ErrnoException) => {
-      resolve(error.code !== "EADDRINUSE");
+      resolve(!["EACCES", "EADDRINUSE", "EPERM"].includes(error.code ?? ""));
     });
     server.listen({ host, port }, () => {
       server.close(() => resolve(true));
