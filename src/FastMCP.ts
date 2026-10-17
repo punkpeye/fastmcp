@@ -3354,6 +3354,7 @@ export class FastMCP<
   #resourcesTemplates: InputResourceTemplate<T>[] = [];
   #serverState: ServerState = ServerState.Stopped;
   #sessions: FastMCPSession<T>[] = [];
+  #stdioSessions = new Set<FastMCPSession<T>>();
 
   #tools: Tool<T>[] = [];
 
@@ -3854,12 +3855,29 @@ export class FastMCP<
       process.stdin.on("close", onStdinClose);
       process.stdin.on("end", onStdinClose);
 
-      await this.#connectSession(session, transport, () => {
-        process.stdin.off("close", onStdinClose);
-        process.stdin.off("end", onStdinClose);
-      });
+      // Closing a stdio transport pauses stdin, and a paused stream stays
+      // paused when the next transport listens to it, so a server started
+      // again after stop() would never read its client. The transport starts
+      // listening within this tick, before the stream emits anything.
+      if (process.stdin.isPaused()) {
+        process.stdin.resume();
+      }
 
-      this.#serverState = ServerState.Running;
+      this.#stdioSessions.add(session);
+      try {
+        await this.#connectSession(session, transport, () => {
+          this.#stdioSessions.delete(session);
+          process.stdin.off("close", onStdinClose);
+          process.stdin.off("end", onStdinClose);
+        });
+      } catch (error) {
+        await session.close();
+        throw error;
+      }
+
+      if (this.#stdioSessions.has(session)) {
+        this.#serverState = ServerState.Running;
+      }
     } else if (config.transportType === "httpStream") {
       const httpConfig = config.httpStream;
       const protocol =
@@ -4011,9 +4029,14 @@ export class FastMCP<
   }
 
   /**
-   * Stops the server.
+   * Stops transports created by `start()`. Transports passed to `connect()`
+   * remain open and belong to the caller.
    */
   public async stop() {
+    await Promise.all(
+      [...this.#stdioSessions].map((session) => session.close()),
+    );
+
     if (this.#httpStreamServer) {
       await this.#httpStreamServer.close();
     }
