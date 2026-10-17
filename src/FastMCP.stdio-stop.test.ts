@@ -2,6 +2,11 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import {
+  ReadBuffer,
+  serializeMessage,
+} from "@modelcontextprotocol/sdk/shared/stdio.js";
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FastMCP, ServerState } from "./FastMCP.js";
@@ -14,6 +19,33 @@ vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
     return stdioTransport;
   }),
 }));
+
+/** A client transport that writes to the server's stdin and reads its stdout. */
+function pipeTransport(stdin: PassThrough, stdout: PassThrough): Transport {
+  const buffer = new ReadBuffer();
+  const transport: Transport = {
+    close: async () => {
+      stdout.removeAllListeners("data");
+      transport.onclose?.();
+    },
+    send: async (message) => {
+      stdin.write(serializeMessage(message));
+    },
+    start: async () => {
+      stdout.on("data", (chunk: Buffer) => {
+        buffer.append(chunk);
+        for (
+          let message = buffer.readMessage();
+          message;
+          message = buffer.readMessage()
+        ) {
+          transport.onmessage?.(message);
+        }
+      });
+    },
+  };
+  return transport;
+}
 
 async function startStdio(server: FastMCP) {
   const [clientTransport, serverTransport] =
@@ -147,5 +179,35 @@ describe("stopping owned stdio sessions", () => {
     expect(close).toHaveBeenCalled();
     expect(server.serverState).toBe(ServerState.Stopped);
     expect(server.sessions).toEqual([]);
+  });
+
+  it("starts stdio again after stopping", async () => {
+    const { StdioServerTransport } = await vi.importActual<
+      typeof import("@modelcontextprotocol/sdk/server/stdio.js")
+    >("@modelcontextprotocol/sdk/server/stdio.js");
+    // Stands in for the process's stdin, which the real transport's close()
+    // leaves paused.
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    vi.spyOn(process, "stdin", "get").mockReturnValue(
+      stdin as unknown as typeof process.stdin,
+    );
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+
+    for (let run = 0; run < 2; run++) {
+      stdioTransport = new StdioServerTransport(stdin, stdout);
+      const client = new Client({ name: "test-client", version: "1.0.0" });
+      await Promise.all([
+        server.start({ transportType: "stdio" }),
+        client.connect(pipeTransport(stdin, stdout)),
+      ]);
+
+      try {
+        await expect(client.ping()).resolves.toEqual({});
+      } finally {
+        await server.stop();
+        await client.close();
+      }
+    }
   });
 });

@@ -3855,6 +3855,14 @@ export class FastMCP<
       process.stdin.on("close", onStdinClose);
       process.stdin.on("end", onStdinClose);
 
+      // Closing a stdio transport pauses stdin, and a paused stream stays
+      // paused when the next transport listens to it, so a server started
+      // again after stop() would never read its client. The transport starts
+      // listening within this tick, before the stream emits anything.
+      if (process.stdin.isPaused()) {
+        process.stdin.resume();
+      }
+
       this.#stdioSessions.add(session);
       try {
         await this.#connectSession(session, transport, () => {
