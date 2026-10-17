@@ -128,18 +128,22 @@ export interface OpenApiParameter {
   allowReserved?: boolean;
   deprecated?: boolean;
   description?: string;
-  /** Whether form-style query arrays/objects use separate parameters (default: true). */
+  /**
+   * Form-style query arrays/objects use separate parameters (default: true).
+   * Simple-style path objects use key=value pairs (default: false).
+   */
   explode?: boolean;
   in: ParameterLocation;
   name: string;
   required?: boolean;
   schema?: OpenApiSchema;
   /**
-   * Only meaningful for `in: "query"`. `"deepObject"`, `"spaceDelimited"`,
-   * and `"pipeDelimited"` get dedicated serialization in requestBuilder.ts;
-   * `"form"` (the default when unset) uses repeated keys for arrays and
-   * property pairs for objects unless `explode: false` requests a single
-   * comma-separated value.
+   * Query parameters support `"deepObject"`, `"spaceDelimited"`, and
+   * `"pipeDelimited"`; `"form"` (the query default) uses repeated keys for
+   * arrays and property pairs for objects unless `explode: false` requests
+   * a single comma-separated value. `"simple"` (the path default) serializes
+   * flat path objects as comma-separated keys/values or, when exploded,
+   * key=value pairs.
    */
   style?: string;
 }

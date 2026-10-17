@@ -9,6 +9,7 @@
 - [GET → resources](#get--resources)
 - [Structured output](#structured-output)
 - [Query and form-body serialization](#query-and-form-body-serialization)
+- [Path parameter serialization](#path-parameter-serialization)
 - [Options](#options)
 - [Authentication](#authentication)
 - [Adding to an existing server](#adding-to-an-existing-server)
@@ -94,15 +95,23 @@ Query parameters are serialized according to their declared `style`:
 
 Query parameters with `allowReserved: true` preserve query-safe reserved characters such as `/`, `:`, `?`, and `,`, plus existing percent-encoded triples (`%2F` stays `%2F`). Raw `[]#&=+` remain encoded to preserve the query structure and values; HTTP(S) URL serialization also encodes apostrophes. Other unsafe characters and Unicode are percent-encoded. Parameter names and query parameters with `allowReserved: false` or no flag keep their existing encoding.
 
-The `explode` flag currently only affects form-style query arrays and objects. Other parameter locations and form-body encoding are unchanged.
+For form-style query arrays and objects, `explode` defaults to `true`. Form-body encoding is unchanged by this flag.
 
 With `explode: false`, commas inside individual array items or object keys/values are not escaped separately from the separators. For example, `["x,y", "z"]` is sent as `fields=x%2Cy%2Cz`; a server that URL-decodes and then splits on commas cannot distinguish the comma inside the first item from a separator.
 
-Form-style query objects support scalar property values; nested objects/arrays require `deepObject` serialization. Any other object-valued parameter — a `spaceDelimited`/`pipeDelimited` query, path, header, or cookie parameter — is still sent as the literal string `"[object Object]"`.
+Form-style query objects support scalar property values; nested objects/arrays require `deepObject` serialization. Object-valued `spaceDelimited`/`pipeDelimited` queries, headers, and cookies are still sent as the literal string `"[object Object]"`.
 
 Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded.
 
 Required flattened JSON request bodies are sent as `{}` when no body properties are supplied. A required `application/json` body without a schema also sends `{}`. Omitted optional bodies remain absent.
+
+## Path parameter serialization
+
+Flat object path parameters support `style: simple`, including the path default when `style` is omitted. With `{ R: 100, G: 200, B: 150 }`, `explode: false` (the default) produces `R,100,G,200,B,150`; `explode: true` produces `R=100,G=200,B=150`.
+
+Each property key and scalar value is percent-encoded separately before adding the comma and equals-sign separators. For example, `{ "x,y": "a/b=c" }` becomes `x%2Cy,a%2Fb%3Dc`, or `x%2Cy=a%2Fb%3Dc` when exploded. Empty objects expand to an empty path value. Scalar and array path parameters keep their existing encoding, including encoded array commas.
+
+Nested object/array properties and other path styles (such as `matrix` and `label`) remain unsupported: these objects are still sent as the literal string `"[object Object]"`.
 
 ## Options
 

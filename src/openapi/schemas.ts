@@ -84,7 +84,7 @@ export interface ParameterMapping {
   explode?: boolean;
   in: "body" | ParameterLocation;
   name: string;
-  /** Only meaningful for `in: "query"` — see `OpenApiParameter.style`. */
+  /** Query serialization and simple-style path objects — see `OpenApiParameter.style`. */
   style?: string;
 }
 
