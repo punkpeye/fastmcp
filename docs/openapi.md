@@ -102,6 +102,8 @@ Form-style query objects support scalar property values; nested objects/arrays r
 
 Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded.
 
+Required flattened JSON request bodies are sent as `{}` when no body properties are supplied. A required `application/json` body without a schema also sends `{}`. Omitted optional bodies remain absent.
+
 ## Options
 
 | Option      | Type                                                       | Description                                                                                |
