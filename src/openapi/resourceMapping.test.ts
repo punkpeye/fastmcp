@@ -101,6 +101,51 @@ test.each(["path", "query"] as const)(
   },
 );
 
+test.each(["path", "query"] as const)(
+  "object and nullable object %s parameters make a route ineligible",
+  (location) => {
+    for (const schema of [
+      { type: "object" },
+      { nullable: true, type: "object" },
+      { type: ["object", "null"] },
+    ]) {
+      expect(
+        isEligibleForResource(
+          route({
+            parameters: [{ in: location, name: "filter", schema }],
+          }),
+        ),
+      ).toBe(false);
+    }
+  },
+);
+
+test.each(["path", "query"] as const)(
+  "referenced object %s parameters make a route ineligible",
+  (location) => {
+    for (const name of ["Filter", "FilterAlias", "NullableFilter"]) {
+      expect(
+        isEligibleForResource(
+          route({
+            parameters: [
+              {
+                in: location,
+                name: "filter",
+                schema: { $ref: `#/components/schemas/${name}` },
+              },
+            ],
+          }),
+          {
+            Filter: { type: "object" },
+            FilterAlias: { $ref: "#/components/schemas/Filter" },
+            NullableFilter: { type: ["object", "null"] },
+          },
+        ),
+      ).toBe(false);
+    }
+  },
+);
+
 test("an empty parameterMap produces a static resource", () => {
   const mapping = buildResourceMapping(
     route({ path: "/pets" }),

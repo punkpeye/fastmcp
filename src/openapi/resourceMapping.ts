@@ -71,8 +71,11 @@ export function buildResourceMapping(
  * - An array-typed path/query parameter can't be represented consistently
  *   between OpenAPI's query serialization (repeated keys) and RFC 6570's
  *   array representation (comma-joined or `*`-exploded).
+ * - An object-typed path/query parameter loses its object shape when the
+ *   URI template is parsed, so its OpenAPI serialization receives strings
+ *   or arrays instead of an object.
  *
- * A route failing either check falls through to the existing tool path —
+ * A route failing any check falls through to the existing tool path —
  * this only ever *removes* operations from the tool list in favor of a
  * resource, never breaks one.
  */
@@ -86,8 +89,7 @@ export function isEligibleForResource(
     }
 
     const type = resolveComponentRef(param.schema ?? {}, sharedDefs).type;
-    return (
-      type !== "array" && (!Array.isArray(type) || !type.includes("array"))
-    );
+    const types = Array.isArray(type) ? type : [type];
+    return !types.includes("array") && !types.includes("object");
   });
 }

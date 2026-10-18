@@ -74,7 +74,7 @@ export interface FromOpenAPIOptions {
    * When `true`, an eligible `GET` operation becomes an MCP resource (no
    * path/query parameters) or resource template (path and/or query
    * parameters) instead of a tool. A `GET` with any `header`/`cookie`
-   * parameter, or any array-typed path/query parameter, stays a tool
+   * parameter, or any array- or object-typed path/query parameter, stays a tool
    * regardless — see docs/openapi.md "GET → resources".
    * @default false
    */

@@ -1578,6 +1578,110 @@ test.each([
   },
 );
 
+test.each([
+  {
+    expectedPath:
+      "/search?filter%5Bowner%5D=alice+%26+bob&filter%5Bstatus%5D=active",
+    label: "deepObject query",
+    parameter: { explode: true, in: "query", style: "deepObject" },
+    path: "/search",
+  },
+  {
+    expectedPath: "/search?owner=alice+%26+bob&status=active",
+    label: "default form query",
+    parameter: { in: "query" },
+    path: "/search",
+  },
+  {
+    expectedPath: "/search?filter=owner%2Calice+%26+bob%2Cstatus%2Cactive",
+    label: "unexploded form query",
+    parameter: { explode: false, in: "query", style: "form" },
+    path: "/search",
+  },
+  {
+    expectedPath: "/search/owner,alice%20%26%20bob,status,active",
+    label: "default simple path",
+    parameter: { in: "path" },
+    path: "/search/{filter}",
+  },
+  {
+    expectedPath: "/search/owner=alice%20%26%20bob,status=active",
+    label: "exploded simple path",
+    parameter: { explode: true, in: "path", style: "simple" },
+    path: "/search/{filter}",
+  },
+])(
+  "resources: true — $label object parameters stay callable tools",
+  async ({ expectedPath, parameter, path }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      resources: true,
+      spec: {
+        ...WIDGETS_READ_SPEC,
+        components: {
+          schemas: {
+            Filter: {
+              properties: {
+                owner: { type: "string" },
+                status: { type: "string" },
+              },
+              required: ["owner", "status"],
+              type: "object",
+            },
+            FilterAlias: { $ref: "#/components/schemas/Filter" },
+          },
+        },
+        paths: {
+          ...WIDGETS_READ_SPEC.paths,
+          [path]: {
+            get: {
+              operationId: "searchWidgets",
+              parameters: [
+                {
+                  ...parameter,
+                  name: "filter",
+                  required: true,
+                  schema: { $ref: "#/components/schemas/FilterAlias" },
+                },
+              ],
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const { resourceTemplates } = await client.listResourceTemplates();
+      expect(resourceTemplates.map((template) => template.name)).toEqual([
+        "getWidget",
+      ]);
+      const { resources } = await client.listResources();
+      expect(resources.map((resource) => resource.uri)).toEqual([
+        "openapi://listWidgets/widgets",
+      ]);
+      const { tools } = await client.listTools();
+      expect(tools.map((tool) => tool.name)).toEqual(["searchWidgets"]);
+
+      const result = await client.callTool({
+        arguments: { filter: { owner: "alice & bob", status: "active" } },
+        name: "searchWidgets",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+        `https://api.example.com${expectedPath}`,
+        expect.objectContaining({ method: "GET" }),
+      );
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
 test("a FastAPI-style form body (`$ref` to a component schema) becomes a tool with flattened parameters that posts form-encoded", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () => new Response(JSON.stringify({ access_token: "t" })),
