@@ -114,12 +114,15 @@ export interface EdgeTool<TParams = unknown> {
   description: string;
   execute: (params: TParams) => Promise<
     | {
+        _meta?: Record<string, unknown>;
         content: Array<{
           data?: string;
           mimeType?: string;
           text?: string;
           type: string;
         }>;
+        isError?: boolean;
+        structuredContent?: Record<string, unknown>;
       }
     | string
   >;
@@ -608,16 +611,16 @@ export class EdgeFastMCP {
     try {
       const result = await tool.execute(args);
 
-      // Normalize result to content array
-      const content =
+      // Normalize string results while preserving explicit tool results.
+      const toolResult =
         typeof result === "string"
-          ? [{ text: result, type: "text" }]
-          : result.content;
+          ? { content: [{ text: result, type: "text" }] }
+          : result;
 
       return {
         id,
         jsonrpc: "2.0",
-        result: { content },
+        result: toolResult,
       } as JSONRPCMessage;
     } catch (error) {
       // A tool that throws is a tool execution error: the MCP specification
