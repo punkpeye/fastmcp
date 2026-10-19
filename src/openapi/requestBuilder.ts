@@ -183,7 +183,7 @@ export function resolveBaseUrl(
   let url = server.url;
 
   for (const [name, variable] of Object.entries(server.variables ?? {})) {
-    url = url.replaceAll(`{${name}}`, variable.default);
+    url = url.replaceAll(`{${name}}`, () => variable.default);
   }
 
   try {
