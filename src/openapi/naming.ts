@@ -51,7 +51,11 @@ function baseNameFor(
   mcpNames: Record<string, string> | undefined,
 ): string {
   if (route.operationId) {
-    return mcpNames?.[route.operationId] ?? route.operationId.split("__")[0];
+    const override =
+      mcpNames && Object.hasOwn(mcpNames, route.operationId)
+        ? mcpNames[route.operationId]
+        : undefined;
+    return override ?? route.operationId.split("__")[0];
   }
 
   return route.summary || `${route.method}_${route.path}`;
