@@ -1,4 +1,5 @@
 import {
+  CallToolResultSchema,
   LATEST_PROTOCOL_VERSION,
   SUPPORTED_PROTOCOL_VERSIONS,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -326,6 +327,98 @@ describe("EdgeFastMCP", () => {
       },
     });
   });
+
+  it.each([
+    {
+      content: [{ text: "upstream API returned 503", type: "text" }],
+      isError: true,
+    },
+    {
+      content: [{ text: "Account loaded", type: "text" }],
+      isError: false,
+    },
+    {
+      content: [{ text: "Account loaded", type: "text" }],
+      structuredContent: { accountId: "123" },
+    },
+    {
+      _meta: { retryAfter: 30 },
+      content: [{ text: "upstream API returned 503", type: "text" }],
+      isError: true,
+      structuredContent: { status: 503 },
+    },
+  ])("preserves explicit tool result fields: %j", async (result) => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+    server.addTool({
+      description: "Fetch account",
+      execute: async () => result,
+      name: "fetchAccount",
+    });
+    expect(CallToolResultSchema.safeParse(result).success).toBe(true);
+
+    const response = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify({
+          id: 13,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { name: "fetchAccount" },
+        }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      id: 13,
+      jsonrpc: "2.0",
+      result,
+    });
+  });
+
+  it.each([undefined, null])(
+    "reports a tool that returns %s as a tool execution error",
+    async (result) => {
+      const server = new EdgeFastMCP({
+        name: "TestServer",
+        version: "1.0.0",
+      });
+      server.addTool({
+        description: "Return nothing",
+        // A JavaScript tool is not held to the declared return type.
+        execute: async () => result as never,
+        name: "returnNothing",
+      });
+
+      const response = await server.fetch(
+        new Request("http://localhost/mcp", {
+          body: JSON.stringify({
+            id: 14,
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: { name: "returnNothing" },
+          }),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      const body: JsonResponse = await response.json();
+      expect(body.id).toBe(14);
+      expect(body.result.isError).toBe(true);
+    },
+  );
 
   it("should pass transformed tool arguments to execute", async () => {
     const server = new EdgeFastMCP({
