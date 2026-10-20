@@ -1991,3 +1991,33 @@ test("outputSchema: an array-shaped response schema is never wired, and a real a
   expect(result.structuredContent).toBeUndefined();
   expect((result.content as { text: string }[])[0].text).toContain("a");
 });
+
+test("mcpNames only uses own overrides for prototype-named operations", async () => {
+  const server = await fromOpenAPI({
+    mcpNames: { valueOf: "getValue" },
+    spec: {
+      info: { title: "Naming API", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: Object.fromEntries(
+        ["toString", "constructor", "valueOf"].map((operationId) => [
+          `/${operationId}`,
+          { post: { operationId, responses: { 200: { description: "OK" } } } },
+        ]),
+      ),
+      servers: [{ url: "https://api.example.com" }],
+    },
+  });
+  const client = await connect(server);
+  try {
+    const { tools } = await client.listTools();
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      "constructor",
+      "getValue",
+      "toString",
+    ]);
+  } finally {
+    await server.sessions[0]?.close();
+    await client.close();
+    await server.stop();
+  }
+});
