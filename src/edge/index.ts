@@ -695,22 +695,19 @@ export class EdgeFastMCP {
     schema: StandardSchemaV1 | z.ZodType,
   ): Record<string, unknown> {
     try {
-      // Zod 4+: use native toJSONSchema if available
-      /* eslint-disable @typescript-eslint/no-explicit-any */
-      if (typeof (z as any).toJSONSchema === "function") {
-        return strictInputSchema(
-          (z as any).toJSONSchema(schema) as JsonSchema,
-        ) as Record<string, unknown>;
+      if (schema["~standard"].vendor === "zod") {
+        // Zod 3 goes straight to zod-to-json-schema, as xsschema does for
+        // FastMCP. Importing xsschema here would put its optional peers
+        // (effect, sury, ...) into edge bundles, which then fail to build.
+        const jsonSchema =
+          "_zod" in schema
+            ? z.toJSONSchema(schema as z.ZodType)
+            : zodToJsonSchema(schema as Parameters<typeof zodToJsonSchema>[0]);
+        return strictInputSchema(jsonSchema as JsonSchema) as Record<
+          string,
+          unknown
+        >;
       }
-      /* eslint-enable @typescript-eslint/no-explicit-any */
-      // Zod 3 fallback: use zod-to-json-schema
-      /* eslint-disable @typescript-eslint/no-explicit-any */
-      if ("_def" in (schema as any) || schema instanceof z.ZodType) {
-        return strictInputSchema(
-          zodToJsonSchema(schema as any, { target: "openApi3" }) as JsonSchema,
-        ) as Record<string, unknown>;
-      }
-      /* eslint-enable @typescript-eslint/no-explicit-any */
       // For StandardSchema, fall back to a generic object schema
       return { type: "object" };
     } catch {
