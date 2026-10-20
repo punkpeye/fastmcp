@@ -2021,3 +2021,35 @@ test("mcpNames only uses own overrides for prototype-named operations", async ()
     await server.stop();
   }
 });
+
+test("preserves replacement tokens in server variable defaults when calling a tool", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    spec: {
+      ...WIDGETS_SPEC,
+      servers: [
+        {
+          url: "https://api.example.com/{basePath}/mirror/{basePath}",
+          variables: { basePath: { default: "$&" } },
+        },
+      ],
+    },
+  });
+  const client = await connect(server);
+  try {
+    const result = await client.callTool({
+      arguments: { name: "test" },
+      name: "createWidget",
+    });
+    expect(result.isError).toBeFalsy();
+    expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+      "https://api.example.com/$&/mirror/$&/widgets",
+      expect.objectContaining({ method: "POST" }),
+    );
+  } finally {
+    await server.sessions[0]?.close();
+    await client.close();
+    await server.stop();
+  }
+});

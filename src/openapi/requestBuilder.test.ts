@@ -48,6 +48,28 @@ test("server variables are substituted before resolution", () => {
   expect(url).toBe("https://api.example.com/v1");
 });
 
+test.each(["$&", "$$", "$`", "$'", "v1"])(
+  "server variable default %s is substituted literally at every occurrence",
+  (value) => {
+    const url = resolveBaseUrl(
+      [
+        {
+          url: "/{version}/mirror/{version}",
+          variables: { version: { default: value } },
+        },
+      ],
+      "https://api.example.com/openapi.json",
+      undefined,
+    );
+    expect(url).toBe(
+      new URL(
+        `/${value}/mirror/${value}`,
+        "https://api.example.com",
+      ).toString(),
+    );
+  },
+);
+
 test("a relative servers[0].url with no origin and no baseUrl override throws instead of silently building a broken request", () => {
   expect(() =>
     resolveBaseUrl([{ url: "/api/v3" }], undefined, undefined),
