@@ -5,6 +5,8 @@ import { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
+  Annotations,
+  AudioContentSchema,
   CallToolRequestSchema,
   ClientCapabilities,
   CompleteRequestSchema,
@@ -12,10 +14,12 @@ import {
   ElicitRequestFormParams,
   ElicitRequestURLParams,
   ElicitResult,
+  EmbeddedResourceSchema,
   ErrorCode,
   GetPromptRequestSchema,
   GetPromptResult,
   Icon,
+  ImageContentSchema,
   ListPromptsRequestSchema,
   ListPromptsResult,
   ListResourcesRequestSchema,
@@ -27,6 +31,7 @@ import {
   McpError,
   ReadResourceRequestSchema,
   ResourceLink,
+  ResourceLinkSchema,
   Root,
   RootsListChangedNotificationSchema,
   Tool as SDKTool,
@@ -35,6 +40,7 @@ import {
   ServerRequest,
   SetLevelRequestSchema,
   SubscribeRequestSchema,
+  TextContentSchema,
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
@@ -378,6 +384,8 @@ type SerializableValue =
   | SerializableValue[];
 
 type TextContent = {
+  _meta?: Record<string, unknown>;
+  annotations?: Annotations;
   text: string;
   type: "text";
 };
@@ -455,55 +463,38 @@ const STREAM_KEEPALIVE_LOGGER = "fastmcp-keepalive";
 
 const STREAM_KEEPALIVE_DEFAULT_INTERVAL_MS = 20_000;
 
-const TextContentZodSchema = z
-  .object({
-    /**
-     * The text content of the message.
-     */
-    text: z.string(),
-    type: z.literal("text"),
-  })
-  .strict() satisfies z.ZodType<TextContent>;
+const TextContentZodSchema =
+  TextContentSchema.strict() satisfies z.ZodType<TextContent>;
 
 type ImageContent = {
+  _meta?: Record<string, unknown>;
+  annotations?: Annotations;
   data: string;
   mimeType: string;
   type: "image";
 };
 
-const ImageContentZodSchema = z
-  .object({
-    /**
-     * The base64-encoded image data.
-     */
-    data: z.string().base64(),
-    /**
-     * The MIME type of the image. Different providers may support different image types.
-     */
-    mimeType: z.string(),
-    type: z.literal("image"),
-  })
-  .strict() satisfies z.ZodType<ImageContent>;
+const ImageContentZodSchema = ImageContentSchema.extend({
+  data: z.string().base64(),
+}).strict() satisfies z.ZodType<ImageContent>;
 
 type AudioContent = {
+  _meta?: Record<string, unknown>;
+  annotations?: Annotations;
   data: string;
   mimeType: string;
   type: "audio";
 };
 
-const AudioContentZodSchema = z
-  .object({
-    /**
-     * The base64-encoded audio data.
-     */
-    data: z.string().base64(),
-    mimeType: z.string(),
-    type: z.literal("audio"),
-  })
-  .strict() satisfies z.ZodType<AudioContent>;
+const AudioContentZodSchema = AudioContentSchema.extend({
+  data: z.string().base64(),
+}).strict() satisfies z.ZodType<AudioContent>;
 
 type ResourceContent = {
+  _meta?: Record<string, unknown>;
+  annotations?: Annotations;
   resource: {
+    _meta?: Record<string, unknown>;
     blob?: string;
     mimeType?: string;
     text?: string;
@@ -512,26 +503,8 @@ type ResourceContent = {
   type: "resource";
 };
 
-const ResourceContentZodSchema = z
-  .object({
-    resource: z.object({
-      blob: z.string().optional(),
-      mimeType: z.string().optional(),
-      text: z.string().optional(),
-      uri: z.string(),
-    }),
-    type: z.literal("resource"),
-  })
-  .strict() satisfies z.ZodType<ResourceContent>;
-
-const ResourceLinkZodSchema = z.object({
-  description: z.string().optional(),
-  mimeType: z.string().optional(),
-  name: z.string(),
-  title: z.string().optional(),
-  type: z.literal("resource_link"),
-  uri: z.string(),
-}) satisfies z.ZodType<ResourceLink>;
+const ResourceContentZodSchema =
+  EmbeddedResourceSchema.strict() satisfies z.ZodType<ResourceContent>;
 
 type Content =
   | AudioContent
@@ -545,7 +518,7 @@ const ContentZodSchema = z.discriminatedUnion("type", [
   ImageContentZodSchema,
   AudioContentZodSchema,
   ResourceContentZodSchema,
-  ResourceLinkZodSchema,
+  ResourceLinkSchema,
 ]) satisfies z.ZodType<Content>;
 
 type ContentResult = {

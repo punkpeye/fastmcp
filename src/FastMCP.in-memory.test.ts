@@ -1,10 +1,15 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ContentBlockSchema,
+  ListRootsRequestSchema,
+  ResourceLink,
+  ResourceLinkSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { type ContentResult, FastMCP } from "./FastMCP.js";
+import { type Content, type ContentResult, FastMCP } from "./FastMCP.js";
 
 /**
  * Connects a client to a server over a linked in-memory transport pair, the
@@ -50,6 +55,173 @@ describe("FastMCP in-memory transport", () => {
 
     await client.close();
   });
+
+  it.each<{ content: Content; name: string }>([
+    {
+      content: {
+        annotations: { audience: ["assistant"] },
+        text: "For the model",
+        type: "text",
+      },
+      name: "text annotations",
+    },
+    {
+      content: {
+        _meta: { source: "search" },
+        text: "For the model",
+        type: "text",
+      },
+      name: "text _meta",
+    },
+    {
+      content: {
+        _meta: { source: "search" },
+        annotations: { audience: ["assistant"] },
+        data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+        mimeType: "image/png",
+        type: "image",
+      },
+      name: "image annotations and _meta",
+    },
+    {
+      content: {
+        _meta: { source: "search" },
+        annotations: { audience: ["assistant"] },
+        data: "UklGRiQAAABXQVZFZm10IBAAAAABAAEAIAAgAAAAZGF0YQAAAAA=",
+        mimeType: "audio/wav",
+        type: "audio",
+      },
+      name: "audio annotations and _meta",
+    },
+    {
+      content: {
+        _meta: { source: "search" },
+        annotations: { audience: ["assistant"] },
+        resource: {
+          _meta: { source: "document" },
+          text: "Report contents",
+          uri: "file:///report.txt",
+        },
+        type: "resource",
+      },
+      name: "embedded text annotations and _meta",
+    },
+    {
+      content: {
+        _meta: { source: "search" },
+        annotations: { audience: ["assistant"] },
+        resource: {
+          _meta: { source: "document" },
+          blob: "aGVsbG8=",
+          uri: "file:///report.bin",
+        },
+        type: "resource",
+      },
+      name: "embedded blob annotations and _meta",
+    },
+  ])("preserves $name on tool result content", async ({ content }) => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    server.addTool({ execute: async () => content, name: "annotatedContent" });
+
+    const { client, session } = await connectInMemory(server);
+    try {
+      expect(ContentBlockSchema.safeParse(content).success).toBe(true);
+      expect(await client.callTool({ name: "annotatedContent" })).toEqual({
+        content: [content],
+      });
+    } finally {
+      await client.close();
+      await session.close();
+    }
+  });
+
+  it.each([
+    { data: "not base64!", type: "image" },
+    { data: "YQ", type: "image" },
+    { data: "not base64!", type: "audio" },
+    { data: "YQ", type: "audio" },
+  ])("rejects invalid base64 $data in $type tool content", async (content) => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    server.addTool({
+      execute: async () => ({
+        ...content,
+        mimeType: "application/octet-stream",
+      }),
+      name: "invalidContent",
+    });
+
+    const { client, session } = await connectInMemory(server);
+    try {
+      expect(await client.callTool({ name: "invalidContent" })).toEqual({
+        content: [{ text: expect.stringContaining("base64"), type: "text" }],
+        isError: true,
+      });
+    } finally {
+      await client.close();
+      await session.close();
+    }
+  });
+
+  it.each([
+    { text: "Report", type: "text" },
+    { data: "aGVsbG8=", mimeType: "image/png", type: "image" },
+    { data: "aGVsbG8=", mimeType: "audio/wav", type: "audio" },
+    {
+      resource: { text: "Report", uri: "file:///report.txt" },
+      type: "resource",
+    },
+  ])("rejects unknown fields in $type tool content", async (content) => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    server.addTool({
+      execute: async () => ({ ...content, unexpected: true }),
+      name: "invalidContent",
+    });
+
+    const { client, session } = await connectInMemory(server);
+    try {
+      expect(await client.callTool({ name: "invalidContent" })).toEqual({
+        content: [
+          { text: expect.stringContaining("unexpected"), type: "text" },
+        ],
+        isError: true,
+      });
+    } finally {
+      await client.close();
+      await session.close();
+    }
+  });
+
+  it.each([false, true])(
+    "preserves resource link metadata in tool results (explicit result: %s)",
+    async (explicitResult) => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      const link: ResourceLink = {
+        _meta: { source: "search" },
+        annotations: { audience: ["assistant"], priority: 0.8 },
+        icons: [
+          { mimeType: "image/png", src: "https://example.com/report.png" },
+        ],
+        name: "report",
+        type: "resource_link",
+        uri: "file:///report.txt",
+      };
+      server.addTool({
+        execute: async () => (explicitResult ? { content: [link] } : link),
+        name: "findReport",
+      });
+
+      const { client, session } = await connectInMemory(server);
+      try {
+        expect(ResourceLinkSchema.safeParse(link).success).toBe(true);
+        expect(await client.callTool({ name: "findReport" })).toEqual({
+          content: [link],
+        });
+      } finally {
+        await client.close();
+        await session.close();
+      }
+    },
+  );
 
   it("serves resources and prompts", async () => {
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
