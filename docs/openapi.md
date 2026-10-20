@@ -36,6 +36,8 @@ Each operation uses the first server in its nearest non-empty `servers` array: o
 
 Tool inputs combine path, query, header, cookie, and body fields. If a parameter name is shared across locations or with a body property, it becomes `{name}__{location}`; body properties keep their names. If that generated alias is already occupied, `_2`, `_3`, and so on are appended until it is unique. These aliases only affect MCP input names; HTTP requests still use the original parameter and body names.
 
+A top-level parameter or flattened body property named `__proto__` also receives an alias, because the schema validator does not validate that literal property name. For example, a path parameter becomes `__proto____path` and a body property becomes `__proto____body`; occupied aliases receive the same numeric suffixes. The HTTP field name remains `__proto__`. This does not rename properties inside nested or whole-body schemas.
+
 ## Choosing which operations become tools
 
 Turning every operation in a large spec into a tool produces a tool list most MCP clients can't work with well. There is no way to make this fully automatic, so `fromOpenAPI` asks you to choose:
@@ -69,9 +71,10 @@ const server = await fromOpenAPI({
 A `GET` stays a tool instead — even with `resources: true` — when:
 
 - it has any `header` or `cookie` parameter (these can't be expressed in a resource URI, and resource reads have no per-call side channel for them), or
-- any of its path/query parameters is array-typed, including component schema references and nullable arrays (OpenAPI's array query serialization and RFC 6570's don't match).
+- any of its path/query parameters is array-typed, including component schema references and nullable arrays (OpenAPI's array query serialization and RFC 6570's don't match), or
+- any of its path/query parameters is object-typed, including component schema references and nullable objects (the URI template parser does not preserve the object shape needed for OpenAPI serialization).
 
-This means a "get by ID" style endpoint typically becomes a resource template, while a "search/filter" endpoint with array-valued query parameters typically stays a tool — which tends to match how each is actually used.
+This means a "get by ID" style endpoint typically becomes a resource template, while a "search/filter" endpoint with array- or object-valued query parameters typically stays a tool — which tends to match how each is actually used.
 
 There's no per-operation override for this — an eligible `GET` always maps to a resource when `resources: true`; use `exclude` if you want a specific one to stay a tool instead of being generated at all.
 

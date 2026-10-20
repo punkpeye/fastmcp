@@ -1,8 +1,10 @@
+import SwaggerParser from "@apidevtools/swagger-parser";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { loadSpec } from "./loadSpec.js";
+import { resolveBaseUrl } from "./requestBuilder.js";
 import { extractRoutes } from "./routes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -71,3 +73,31 @@ test("a spec passed as an already-parsed object has no real resolution base for 
     }),
   ).rejects.toThrow();
 });
+
+test.each(["http", "HTTP", "HtTp", "https", "HTTPS", "HtTpS"])(
+  "preserves the origin of a %s URL for relative servers",
+  async (scheme) => {
+    const spec = `${scheme}://api.example.com/Specs/OpenAPI.json`;
+    const document = await SwaggerParser.bundle({
+      info: { title: "Origin test", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {},
+      servers: [{ url: "../API/v1" }],
+    });
+    // Isolate the remote document download; retain the real loader and URL
+    // resolution used by generated tools. No public network is required.
+    const bundle = vi
+      .spyOn(SwaggerParser, "bundle")
+      .mockResolvedValue(document);
+    try {
+      const loaded = await loadSpec(spec);
+      expect(bundle).toHaveBeenCalledWith(spec);
+      expect(loaded.origin).toBe(spec);
+      expect(
+        resolveBaseUrl(loaded.document.servers, loaded.origin, undefined),
+      ).toBe(`${scheme.toLowerCase()}://api.example.com/API/v1`);
+    } finally {
+      bundle.mockRestore();
+    }
+  },
+);

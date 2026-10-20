@@ -81,3 +81,49 @@ test("a collision suffix never pushes the name past 56 characters", () => {
     expect(name.length).toBeLessThanOrEqual(56);
   }
 });
+
+test.each<Record<string, string>>([{}, { listPets: "getAllPets" }])(
+  "ignores Object.prototype properties in mcpNames %j",
+  (mcpNames) => {
+    const routes = ["toString", "constructor", "valueOf", "listPets"].map(
+      (operationId) => route({ operationId }),
+    );
+    expect([...generateNames(routes, mcpNames).values()]).toEqual([
+      "toString",
+      "constructor",
+      "valueOf",
+      mcpNames.listPets ?? "listPets",
+    ]);
+  },
+);
+
+test("ignores inherited string overrides and keeps suffix stripping and collisions", () => {
+  const mcpNames = Object.create({ listPets__get: "inheritedName" }) as Record<
+    string,
+    string
+  >;
+  const routes = [
+    route({ operationId: "listPets__get" }),
+    route({ operationId: "listPets" }),
+  ];
+  expect([...generateNames(routes, mcpNames).values()]).toEqual([
+    "listPets",
+    "listPets_2",
+  ]);
+});
+
+test("honors own overrides for Object.prototype property names", () => {
+  const routes = ["toString", "constructor", "valueOf"].map((operationId) =>
+    route({ operationId }),
+  );
+  const mcpNames = {
+    constructor: "create Widget!",
+    toString: "describe Widget!",
+    valueOf: "get Value!",
+  };
+  expect([...generateNames(routes, mcpNames).values()]).toEqual([
+    "describe_Widget",
+    "create_Widget",
+    "get_Value",
+  ]);
+});

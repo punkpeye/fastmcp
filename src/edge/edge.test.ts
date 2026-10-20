@@ -488,6 +488,57 @@ describe("EdgeFastMCP", () => {
     expect(body.result.contents[0].text).toBe("Test content");
   });
 
+  it.each([
+    {
+      content: { text: '{"ok":true}' },
+      expectedMimeType: "application/json",
+      mimeType: "application/json",
+    },
+    {
+      content: { blob: "aGVsbG8=" },
+      expectedMimeType: "application/octet-stream",
+      mimeType: "application/octet-stream",
+    },
+    {
+      content: { mimeType: "text/markdown", text: "# Hello" },
+      expectedMimeType: "text/markdown",
+      mimeType: "text/plain",
+    },
+  ])(
+    "preserves $expectedMimeType when a resource load returns an object",
+    async ({ content, expectedMimeType, mimeType }) => {
+      const server = new EdgeFastMCP({ name: "TestServer", version: "1.0.0" });
+      server.addResource({
+        load: async () => content,
+        mimeType,
+        name: "Test Resource",
+        uri: "test://resource",
+      });
+
+      const response = await server.fetch(
+        new Request("http://localhost/mcp", {
+          body: JSON.stringify({
+            id: 5,
+            jsonrpc: "2.0",
+            method: "resources/read",
+            params: { uri: "test://resource" },
+          }),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      const body: JsonResponse = await response.json();
+      expect(body.result.contents).toEqual([
+        { ...content, mimeType: expectedMimeType, uri: "test://resource" },
+      ]);
+    },
+  );
+
   it("should list prompts", async () => {
     const server = new EdgeFastMCP({
       name: "TestServer",

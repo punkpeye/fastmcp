@@ -537,7 +537,11 @@ export class EdgeFastMCP {
       const content =
         typeof result === "string"
           ? { mimeType: resource.mimeType ?? "text/plain", text: result, uri }
-          : { uri, ...result };
+          : {
+              uri,
+              ...result,
+              mimeType: result.mimeType ?? resource.mimeType,
+            };
 
       return {
         id,
