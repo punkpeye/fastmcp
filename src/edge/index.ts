@@ -34,8 +34,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
-import { toJsonSchema } from "xsschema";
 import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 import { strictInputSchema } from "../strictInputSchema.js";
 import { unsupportedProtocolVersion } from "./WebStreamableHTTPServerTransport.js";
@@ -657,20 +657,18 @@ export class EdgeFastMCP {
   /**
    * Handle tools/list request
    */
-  async #handleToolsList(id: number | string): Promise<JSONRPCMessage> {
+  #handleToolsList(id: number | string): JSONRPCMessage {
     return {
       id,
       jsonrpc: "2.0",
       result: {
-        tools: await Promise.all(
-          this.#tools.map(async (tool) => ({
-            description: tool.description,
-            inputSchema: tool.parameters
-              ? await this.#schemaToJsonSchema(tool.parameters)
-              : { type: "object" },
-            name: tool.name,
-          })),
-        ),
+        tools: this.#tools.map((tool) => ({
+          description: tool.description,
+          inputSchema: tool.parameters
+            ? this.#schemaToJsonSchema(tool.parameters)
+            : { type: "object" },
+          name: tool.name,
+        })),
       },
     } as JSONRPCMessage;
   }
@@ -693,15 +691,18 @@ export class EdgeFastMCP {
   /**
    * Convert schema to JSON Schema
    */
-  async #schemaToJsonSchema(
+  #schemaToJsonSchema(
     schema: StandardSchemaV1 | z.ZodType,
-  ): Promise<Record<string, unknown>> {
+  ): Record<string, unknown> {
     try {
       if (schema["~standard"].vendor === "zod") {
+        // Zod 3 goes straight to zod-to-json-schema, as xsschema does for
+        // FastMCP. Importing xsschema here would put its optional peers
+        // (effect, sury, ...) into edge bundles, which then fail to build.
         const jsonSchema =
           "_zod" in schema
             ? z.toJSONSchema(schema as z.ZodType)
-            : await toJsonSchema(schema);
+            : zodToJsonSchema(schema as Parameters<typeof zodToJsonSchema>[0]);
         return strictInputSchema(jsonSchema as JsonSchema) as Record<
           string,
           unknown
