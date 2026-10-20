@@ -383,6 +383,43 @@ describe("EdgeFastMCP", () => {
     });
   });
 
+  it.each([undefined, null])(
+    "reports a tool that returns %s as a tool execution error",
+    async (result) => {
+      const server = new EdgeFastMCP({
+        name: "TestServer",
+        version: "1.0.0",
+      });
+      server.addTool({
+        description: "Return nothing",
+        // A JavaScript tool is not held to the declared return type.
+        execute: async () => result as never,
+        name: "returnNothing",
+      });
+
+      const response = await server.fetch(
+        new Request("http://localhost/mcp", {
+          body: JSON.stringify({
+            id: 14,
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: { name: "returnNothing" },
+          }),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      const body: JsonResponse = await response.json();
+      expect(body.id).toBe(14);
+      expect(body.result.isError).toBe(true);
+    },
+  );
+
   it("should pass transformed tool arguments to execute", async () => {
     const server = new EdgeFastMCP({
       name: "TestServer",

@@ -612,10 +612,18 @@ export class EdgeFastMCP {
       const result = await tool.execute(args);
 
       // Normalize string results while preserving explicit tool results.
+      // Copy the result's fields rather than the object itself, so a tool
+      // that returns nothing still fails below instead of answering with no
+      // result.
       const toolResult =
         typeof result === "string"
           ? { content: [{ text: result, type: "text" }] }
-          : result;
+          : {
+              _meta: result._meta,
+              content: result.content,
+              isError: result.isError,
+              structuredContent: result.structuredContent,
+            };
 
       return {
         id,
