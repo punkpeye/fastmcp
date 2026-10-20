@@ -36,6 +36,8 @@ Each operation uses the first server in its nearest non-empty `servers` array: o
 
 Tool inputs combine path, query, header, cookie, and body fields. If a parameter name is shared across locations or with a body property, it becomes `{name}__{location}`; body properties keep their names. If that generated alias is already occupied, `_2`, `_3`, and so on are appended until it is unique. These aliases only affect MCP input names; HTTP requests still use the original parameter and body names.
 
+A top-level parameter or flattened body property named `__proto__` also receives an alias, because the schema validator does not validate that literal property name. For example, a path parameter becomes `__proto____path` and a body property becomes `__proto____body`; occupied aliases receive the same numeric suffixes. The HTTP field name remains `__proto__`. This does not rename properties inside nested or whole-body schemas.
+
 ## Choosing which operations become tools
 
 Turning every operation in a large spec into a tool produces a tool list most MCP clients can't work with well. There is no way to make this fully automatic, so `fromOpenAPI` asks you to choose:

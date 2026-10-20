@@ -33,7 +33,7 @@ export async function executeRequest(
     options.baseUrlOverride,
   );
 
-  const pathParams: Record<string, string> = {};
+  const pathParams: Record<string, string> = Object.create(null);
   const queryParts: string[] = [];
   // A plain object keys headers case-sensitively, so a caller-supplied
   // header (e.g. "Content-Type") wouldn't be recognized as the same header
@@ -41,7 +41,7 @@ export async function executeRequest(
   // normalizes casing, so `.set()` correctly overrides rather than
   // combining into a comma-joined, malformed value.
   const headers = new Headers(await resolveHeaders(options.headers));
-  const bodyProps: Record<string, unknown> = {};
+  const bodyProps: Record<string, unknown> = Object.create(null);
 
   for (const [key, value] of Object.entries(options.args)) {
     const mapping = options.parameterMap[key];

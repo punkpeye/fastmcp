@@ -97,8 +97,9 @@ type WalkMode = "data" | "schema" | "schemaMap";
  * Collision precedence ports the Python implementation's rule
  * (`utilities/openapi/schemas.py:_combine_schemas_and_map_params`): a name
  * that collides across path/query/header/cookie gets suffixed
- * `{name}__{location}`; a request body property with a colliding name always
- * keeps its bare name. Generated aliases that still collide get `_2`, `_3`,
+ * `{name}__{location}`; a request body property keeps its bare name except
+ * `__proto__`, which is also aliased for validator compatibility.
+ * Generated aliases that still collide get `_2`, `_3`,
  * ... appended without displacing any bare parameter or body property.
  *
  * `GET` never contributes a request body: `fetch` (and the Fetch spec in
@@ -129,9 +130,9 @@ export function buildFlatSchema(
     sharedDefs,
   );
 
-  const properties: Record<string, OpenApiSchema> = {};
+  const properties: Record<string, OpenApiSchema> = Object.create(null);
   const required: string[] = [];
-  const parameterMap: Record<string, ParameterMapping> = {};
+  const parameterMap: Record<string, ParameterMapping> = Object.create(null);
   const used = new Set(bodyProperties.keys());
 
   // Reserve names that will stay bare before assigning any generated aliases,
@@ -142,20 +143,27 @@ export function buildFlatSchema(
     }
   }
 
+  const allocateAlias = (base: string): string => {
+    let key = base;
+    let suffix = 1;
+    while (used.has(key)) {
+      suffix += 1;
+      key = `${base}_${suffix}`;
+    }
+    used.add(key);
+    return key;
+  };
   for (const [name, occurrences] of byName) {
-    const collides = occurrences.length > 1 || bodyProperties.has(name);
+    // AJV skips a literal __proto__ property; expose a normal argument alias
+    // while retaining the original HTTP field name in parameterMap.
+    const collides =
+      name === "__proto__" ||
+      occurrences.length > 1 ||
+      bodyProperties.has(name);
 
     for (const param of occurrences) {
       const base = collides ? `${name}__${param.in}` : name;
-      let key = base;
-      let suffix = 1;
-
-      while (collides && used.has(key)) {
-        suffix += 1;
-        key = `${base}_${suffix}`;
-      }
-
-      used.add(key);
+      const key = collides ? allocateAlias(base) : name;
 
       properties[key] = rewriteComponentRefs(
         param.schema ?? { type: "string" },
@@ -175,11 +183,12 @@ export function buildFlatSchema(
   }
 
   for (const [name, { required: isRequired, schema }] of bodyProperties) {
-    properties[name] = rewriteComponentRefs(schema);
-    parameterMap[name] = { in: "body", name };
+    const key = name === "__proto__" ? allocateAlias(`${name}__body`) : name;
+    properties[key] = rewriteComponentRefs(schema);
+    parameterMap[key] = { in: "body", name };
 
     if (isRequired) {
-      required.push(name);
+      required.push(key);
     }
   }
 
