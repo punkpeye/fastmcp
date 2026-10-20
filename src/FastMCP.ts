@@ -5,6 +5,7 @@ import { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
+  Annotations,
   AudioContentSchema,
   CallToolRequestSchema,
   ClientCapabilities,
@@ -383,6 +384,8 @@ type SerializableValue =
   | SerializableValue[];
 
 type TextContent = {
+  _meta?: Record<string, unknown>;
+  annotations?: Annotations;
   text: string;
   type: "text";
 };
@@ -464,6 +467,8 @@ const TextContentZodSchema =
   TextContentSchema.strict() satisfies z.ZodType<TextContent>;
 
 type ImageContent = {
+  _meta?: Record<string, unknown>;
+  annotations?: Annotations;
   data: string;
   mimeType: string;
   type: "image";
@@ -474,6 +479,8 @@ const ImageContentZodSchema = ImageContentSchema.extend({
 }).strict() satisfies z.ZodType<ImageContent>;
 
 type AudioContent = {
+  _meta?: Record<string, unknown>;
+  annotations?: Annotations;
   data: string;
   mimeType: string;
   type: "audio";
@@ -484,7 +491,10 @@ const AudioContentZodSchema = AudioContentSchema.extend({
 }).strict() satisfies z.ZodType<AudioContent>;
 
 type ResourceContent = {
+  _meta?: Record<string, unknown>;
+  annotations?: Annotations;
   resource: {
+    _meta?: Record<string, unknown>;
     blob?: string;
     mimeType?: string;
     text?: string;

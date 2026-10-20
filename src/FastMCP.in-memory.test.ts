@@ -1,7 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
-  ContentBlock,
   ContentBlockSchema,
   ListRootsRequestSchema,
   ResourceLink,
@@ -10,7 +9,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { type ContentResult, FastMCP } from "./FastMCP.js";
+import { type Content, type ContentResult, FastMCP } from "./FastMCP.js";
 
 /**
  * Connects a client to a server over a linked in-memory transport pair, the
@@ -57,7 +56,7 @@ describe("FastMCP in-memory transport", () => {
     await client.close();
   });
 
-  it.each<{ content: ContentBlock; name: string }>([
+  it.each<{ content: Content; name: string }>([
     {
       content: {
         annotations: { audience: ["assistant"] },
