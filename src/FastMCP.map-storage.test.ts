@@ -42,10 +42,15 @@ test("FastMCPSession internal storage prevents duplicates for prompts", async ()
 
   // @ts-expect-error - accessing internal request handlers for testing
   const getPromptHandler = server._requestHandlers.get("prompts/get");
-  const promptResult = await getPromptHandler({
-    method: "prompts/get",
-    params: { name: "my-prompt" },
-  });
+  const promptResult = await getPromptHandler(
+    {
+      method: "prompts/get",
+      params: { name: "my-prompt" },
+    },
+    // The SDK passes every handler its request's `extra`; load contexts log
+    // through its `sendNotification`.
+    { sendNotification: async () => {} },
+  );
 
   expect(promptResult.messages[0].content.text).toBe("v2");
 });
@@ -84,10 +89,15 @@ test("FastMCPSession internal storage prevents duplicates for resources", async 
 
   // @ts-expect-error - accessing internal request handlers for testing
   const readResourceHandler = server._requestHandlers.get("resources/read");
-  const resourceResult = await readResourceHandler({
-    method: "resources/read",
-    params: { uri: "file://test.txt" },
-  });
+  const resourceResult = await readResourceHandler(
+    {
+      method: "resources/read",
+      params: { uri: "file://test.txt" },
+    },
+    // The SDK passes every handler its request's `extra`; load contexts log
+    // through its `sendNotification`.
+    { sendNotification: async () => {} },
+  );
 
   expect(resourceResult.contents[0].text).toBe("v2");
 });

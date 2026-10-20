@@ -5099,6 +5099,95 @@ test("reports progress notifications in stateless HTTP mode", async () => {
   }
 });
 
+test("sends tool, prompt and resource logs in stateless HTTP mode", async () => {
+  const port = await getTestPort();
+
+  const server = new FastMCP({
+    name: "Test server",
+    version: "1.0.0",
+  });
+
+  server.addTool({
+    description: "Logs once",
+    execute: async (_args, { log }) => {
+      log.info("from tool");
+
+      return "done";
+    },
+    name: "log-tool",
+  });
+
+  server.addPrompt({
+    load: async (_args, _auth, context) => {
+      context?.log.info("from prompt");
+
+      return "prompt text";
+    },
+    name: "log-prompt",
+  });
+
+  server.addResource({
+    load: async (_auth, context) => {
+      context?.log.info("from resource");
+
+      return { text: "resource text" };
+    },
+    name: "log-resource",
+    uri: "file:///log-resource.txt",
+  });
+
+  await server.start({
+    httpStream: {
+      port,
+      stateless: true,
+    },
+    transportType: "httpStream",
+  });
+
+  try {
+    const client = new Client(
+      {
+        name: "Test client",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {},
+      },
+    );
+
+    const messages: unknown[] = [];
+
+    client.setNotificationHandler(
+      LoggingMessageNotificationSchema,
+      (notification) => {
+        messages.push(notification.params.data);
+      },
+    );
+
+    await client.connect(
+      new StreamableHTTPClientTransport(
+        new URL(`http://localhost:${port}/mcp`),
+      ),
+    );
+
+    // There is no standalone SSE stream in stateless mode, so a log message
+    // reaches the client only on the stream of the request it belongs to.
+    await client.callTool({ arguments: {}, name: "log-tool" });
+    await client.getPrompt({ name: "log-prompt" });
+    await client.readResource({ uri: "file:///log-resource.txt" });
+
+    expect(messages).toEqual([
+      { message: "from tool" },
+      { message: "from prompt" },
+      { message: "from resource" },
+    ]);
+
+    await client.close();
+  } finally {
+    await server.stop();
+  }
+});
+
 test("streams content in stateless HTTP mode", async () => {
   const StreamContentNotificationSchema = z.object({
     method: z.literal("notifications/tool/streamContent"),
