@@ -5,6 +5,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { z as z3 } from "zod/v3";
 
 import { EdgeFastMCP } from "./index.js";
 
@@ -85,26 +86,73 @@ describe("EdgeFastMCP", () => {
     expect(await initialize("1999-01-01")).toBe(LATEST_PROTOCOL_VERSION);
   });
 
-  it("should list tools", async () => {
-    const server = new EdgeFastMCP({
-      name: "TestServer",
-      version: "1.0.0",
-    });
+  it.each([
+    { parameters: z3.object({ name: z3.string() }), version: "3" },
+    { parameters: z.object({ name: z.string() }), version: "4" },
+    {
+      parameters: z.object({ name: z.string().default("World") }),
+      version: "4 with a default",
+    },
+  ])(
+    "should list tools with Zod $version parameters",
+    async ({ parameters }) => {
+      const server = new EdgeFastMCP({
+        name: "TestServer",
+        version: "1.0.0",
+      });
 
+      server.addTool({
+        description: "Greet someone",
+        execute: async ({ name }) => `Hello, ${name}!`,
+        name: "greet",
+        parameters,
+      });
+
+      const response = await server.fetch(
+        new Request("http://localhost/mcp", {
+          body: JSON.stringify({
+            id: 2,
+            jsonrpc: "2.0",
+            method: "tools/list",
+          }),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      const body: JsonResponse = await response.json();
+      expect(body.result.tools).toHaveLength(1);
+      expect(body.result.tools[0].name).toBe("greet");
+      expect(body.result.tools[0].description).toBe("Greet someone");
+      expect(body.result.tools[0].inputSchema.properties.name).toMatchObject({
+        type: "string",
+      });
+      expect(body.result.tools[0].inputSchema.required).toEqual(["name"]);
+    },
+  );
+
+  it("keeps the generic Standard Schema fallback in tools/list", async () => {
+    const server = new EdgeFastMCP({ name: "TestServer", version: "1.0.0" });
     server.addTool({
-      description: "Greet someone",
-      execute: async ({ name }) => `Hello, ${name}!`,
-      name: "greet",
-      parameters: z.object({ name: z.string() }),
+      description: "Accept anything",
+      execute: async () => "ok",
+      name: "generic",
+      parameters: {
+        "~standard": {
+          validate: (value) => ({ value }),
+          vendor: "custom",
+          version: 1,
+        },
+      },
     });
 
     const response = await server.fetch(
       new Request("http://localhost/mcp", {
-        body: JSON.stringify({
-          id: 2,
-          jsonrpc: "2.0",
-          method: "tools/list",
-        }),
+        body: JSON.stringify({ id: 2, jsonrpc: "2.0", method: "tools/list" }),
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
@@ -113,11 +161,8 @@ describe("EdgeFastMCP", () => {
       }),
     );
 
-    expect(response.status).toBe(200);
     const body: JsonResponse = await response.json();
-    expect(body.result.tools).toHaveLength(1);
-    expect(body.result.tools[0].name).toBe("greet");
-    expect(body.result.tools[0].description).toBe("Greet someone");
+    expect(body.result.tools[0].inputSchema).toEqual({ type: "object" });
   });
 
   it("keeps a record argument's value schema in tools/list, as FastMCP does", async () => {

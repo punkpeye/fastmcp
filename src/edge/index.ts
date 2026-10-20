@@ -34,8 +34,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
 import { Hono } from "hono";
+import { toJsonSchema } from "xsschema";
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 import { strictInputSchema } from "../strictInputSchema.js";
 import { unsupportedProtocolVersion } from "./WebStreamableHTTPServerTransport.js";
@@ -657,18 +657,20 @@ export class EdgeFastMCP {
   /**
    * Handle tools/list request
    */
-  #handleToolsList(id: number | string): JSONRPCMessage {
+  async #handleToolsList(id: number | string): Promise<JSONRPCMessage> {
     return {
       id,
       jsonrpc: "2.0",
       result: {
-        tools: this.#tools.map((tool) => ({
-          description: tool.description,
-          inputSchema: tool.parameters
-            ? this.#schemaToJsonSchema(tool.parameters)
-            : { type: "object" },
-          name: tool.name,
-        })),
+        tools: await Promise.all(
+          this.#tools.map(async (tool) => ({
+            description: tool.description,
+            inputSchema: tool.parameters
+              ? await this.#schemaToJsonSchema(tool.parameters)
+              : { type: "object" },
+            name: tool.name,
+          })),
+        ),
       },
     } as JSONRPCMessage;
   }
@@ -691,26 +693,20 @@ export class EdgeFastMCP {
   /**
    * Convert schema to JSON Schema
    */
-  #schemaToJsonSchema(
+  async #schemaToJsonSchema(
     schema: StandardSchemaV1 | z.ZodType,
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
     try {
-      // Zod 4+: use native toJSONSchema if available
-      /* eslint-disable @typescript-eslint/no-explicit-any */
-      if (typeof (z as any).toJSONSchema === "function") {
-        return strictInputSchema(
-          (z as any).toJSONSchema(schema) as JsonSchema,
-        ) as Record<string, unknown>;
+      if (schema["~standard"].vendor === "zod") {
+        const jsonSchema =
+          "_zod" in schema
+            ? z.toJSONSchema(schema as z.ZodType)
+            : await toJsonSchema(schema);
+        return strictInputSchema(jsonSchema as JsonSchema) as Record<
+          string,
+          unknown
+        >;
       }
-      /* eslint-enable @typescript-eslint/no-explicit-any */
-      // Zod 3 fallback: use zod-to-json-schema
-      /* eslint-disable @typescript-eslint/no-explicit-any */
-      if ("_def" in (schema as any) || schema instanceof z.ZodType) {
-        return strictInputSchema(
-          zodToJsonSchema(schema as any, { target: "openApi3" }) as JsonSchema,
-        ) as Record<string, unknown>;
-      }
-      /* eslint-enable @typescript-eslint/no-explicit-any */
       // For StandardSchema, fall back to a generic object schema
       return { type: "object" };
     } catch {
