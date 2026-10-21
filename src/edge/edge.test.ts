@@ -3,6 +3,7 @@ import {
   LATEST_PROTOCOL_VERSION,
   SUPPORTED_PROTOCOL_VERSIONS,
 } from "@modelcontextprotocol/sdk/types.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { z as z3 } from "zod/v3";
@@ -13,6 +14,87 @@ import { EdgeFastMCP } from "./index.js";
 type JsonResponse = any;
 
 describe("EdgeFastMCP", () => {
+  it.each(
+    [
+      {
+        args: (value: unknown) => ({ value: [value] }),
+        name: "arrays",
+        parameters: (value: z.ZodType) => z.object({ value: z.array(value) }),
+      },
+      {
+        args: (value: unknown) => ({ value }),
+        name: "unions",
+        parameters: (value: z.ZodType) =>
+          z.object({ value: z.union([value, z.string()]) }),
+      },
+      {
+        args: (value: unknown) => ({ value: { entry: value } }),
+        name: "record values",
+        parameters: (value: z.ZodType) =>
+          z.object({ value: z.record(z.string(), value) }),
+      },
+    ].flatMap(({ args, name, parameters }) =>
+      [
+        {
+          acceptsExtra: false,
+          acceptsNumberExtra: false,
+          kind: "ordinary objects",
+          object: z.object({ name: z.string() }),
+        },
+        {
+          acceptsExtra: true,
+          acceptsNumberExtra: true,
+          kind: "explicitly loose objects",
+          object: z.looseObject({ name: z.string() }),
+        },
+        {
+          acceptsExtra: true,
+          acceptsNumberExtra: false,
+          kind: "objects with typed catchalls",
+          object: z.object({ name: z.string() }).catchall(z.string()),
+        },
+      ].map(({ object, ...control }) => ({
+        ...control,
+        args,
+        name,
+        parameters: parameters(object),
+      })),
+    ),
+  )(
+    "preserves $kind inside $name in input schemas",
+    async ({ acceptsExtra, acceptsNumberExtra, args, parameters }) => {
+      const server = new EdgeFastMCP({ name: "Inputs", version: "1.0.0" });
+      server.addTool({
+        description: "Check nested objects",
+        execute: async () => "ok",
+        name: "nested",
+        parameters,
+      });
+
+      const response = await server.fetch(
+        new Request("http://localhost/mcp", {
+          body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+      expect(response.status).toBe(200);
+      const body: JsonResponse = await response.json();
+      const schema = body.result.tools[0].inputSchema;
+      const validate = new Ajv2020({ strict: false }).compile(schema);
+
+      expect(validate(args({ name: "a" }))).toBe(true);
+      expect(validate(args({ name: 42 }))).toBe(false);
+      expect(validate(args({ extra: "allowed", name: "a" }))).toBe(
+        acceptsExtra,
+      );
+      expect(validate(args({ extra: 42, name: "a" }))).toBe(acceptsNumberExtra);
+    },
+  );
+
   it("should handle initialize request", async () => {
     const server = new EdgeFastMCP({
       name: "TestServer",
@@ -87,15 +169,24 @@ describe("EdgeFastMCP", () => {
   });
 
   it.each([
-    { parameters: z3.object({ name: z3.string() }), version: "3" },
-    { parameters: z.object({ name: z.string() }), version: "4" },
+    {
+      parameters: z3.object({ name: z3.string() }),
+      required: ["name"],
+      version: "3",
+    },
+    {
+      parameters: z.object({ name: z.string() }),
+      required: ["name"],
+      version: "4",
+    },
     {
       parameters: z.object({ name: z.string().default("World") }),
+      required: undefined,
       version: "4 with a default",
     },
   ])(
     "should list tools with Zod $version parameters",
-    async ({ parameters }) => {
+    async ({ parameters, required }) => {
       const server = new EdgeFastMCP({
         name: "TestServer",
         version: "1.0.0",
@@ -131,7 +222,87 @@ describe("EdgeFastMCP", () => {
       expect(body.result.tools[0].inputSchema.properties.name).toMatchObject({
         type: "string",
       });
-      expect(body.result.tools[0].inputSchema.required).toEqual(["name"]);
+      expect(body.result.tools[0].inputSchema.required).toEqual(required);
+    },
+  );
+
+  it.each([
+    {
+      args: { n: "abcd" },
+      expected: { n: 4 },
+      fieldSchema: { type: "string" },
+      name: "a transform",
+      parameters: z.object({
+        n: z.string().transform((value) => value.length),
+      }),
+      required: ["n"],
+    },
+    {
+      args: {},
+      expected: { n: 5 },
+      fieldSchema: { default: 5, type: "number" },
+      name: "a default",
+      parameters: z.object({ n: z.number().default(5) }),
+      required: undefined,
+    },
+  ])(
+    "lists and calls a tool with $name alongside a plain tool",
+    async ({ args, expected, fieldSchema, parameters, required }) => {
+      const server = new EdgeFastMCP({ name: "Inputs", version: "1.0.0" });
+      server.addTool({
+        description: "Convert input",
+        execute: async (value) => JSON.stringify(value),
+        name: "converted",
+        parameters,
+      });
+      server.addTool({
+        description: "Echo input",
+        execute: async ({ message }) => message,
+        name: "plain",
+        parameters: z.object({ message: z.string() }),
+      });
+
+      const request = async (method: string, params?: unknown) => {
+        const response = await server.fetch(
+          new Request("http://localhost/mcp", {
+            body: JSON.stringify({ id: 1, jsonrpc: "2.0", method, params }),
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            method: "POST",
+          }),
+        );
+        expect(response.status).toBe(200);
+        const body: JsonResponse = await response.json();
+        expect(body.error).toBeUndefined();
+        return body.result;
+      };
+
+      const { tools } = await request("tools/list");
+      expect(tools.map((tool: { name: string }) => tool.name)).toEqual([
+        "converted",
+        "plain",
+      ]);
+      const schema = tools[0].inputSchema;
+      expect(schema.properties?.n).toMatchObject(fieldSchema);
+      expect(schema.required).toEqual(required);
+      expect(schema.additionalProperties).toBe(false);
+
+      const result = await request("tools/call", {
+        arguments: args,
+        name: "converted",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(result.content).toEqual([
+        { text: JSON.stringify(expected), type: "text" },
+      ]);
+      const plainResult = await request("tools/call", {
+        arguments: { message: "ok" },
+        name: "plain",
+      });
+      expect(plainResult.isError).toBeFalsy();
+      expect(plainResult.content).toEqual([{ text: "ok", type: "text" }]);
     },
   );
 

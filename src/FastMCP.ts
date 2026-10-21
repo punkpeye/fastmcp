@@ -1,3 +1,5 @@
+import type { JsonSchema } from "xsschema";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -2733,7 +2735,25 @@ export class FastMCPSession<
             annotations: tool.annotations,
             description: tool.description,
             inputSchema: (tool.parameters
-              ? strictInputSchema(await toJsonSchema(tool.parameters))
+              ? strictInputSchema(
+                  tool.parameters["~standard"].vendor === "zod" &&
+                    "_zod" in tool.parameters
+                    ? (z.toJSONSchema(tool.parameters as z.ZodType, {
+                        io: "input",
+                        override: ({ jsonSchema, zodSchema }) => {
+                          const def = zodSchema._zod.def;
+                          if (
+                            def.type === "object" &&
+                            !def.catchall &&
+                            jsonSchema.additionalProperties === undefined
+                          ) {
+                            jsonSchema.additionalProperties = false;
+                          }
+                        },
+                        target: "draft-7",
+                      }) as JsonSchema)
+                    : await toJsonSchema(tool.parameters),
+                )
               : {
                   additionalProperties: false,
                   properties: {},

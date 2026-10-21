@@ -701,7 +701,19 @@ export class EdgeFastMCP {
         // (effect, sury, ...) into edge bundles, which then fail to build.
         const jsonSchema =
           "_zod" in schema
-            ? z.toJSONSchema(schema as z.ZodType)
+            ? z.toJSONSchema(schema as z.ZodType, {
+                io: "input",
+                override: ({ jsonSchema, zodSchema }) => {
+                  const def = zodSchema._zod.def;
+                  if (
+                    def.type === "object" &&
+                    !def.catchall &&
+                    jsonSchema.additionalProperties === undefined
+                  ) {
+                    jsonSchema.additionalProperties = false;
+                  }
+                },
+              })
             : zodToJsonSchema(schema as Parameters<typeof zodToJsonSchema>[0]);
         return strictInputSchema(jsonSchema as JsonSchema) as Record<
           string,
