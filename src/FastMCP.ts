@@ -105,6 +105,19 @@ type MediaContentInput =
   | { path: string }
   | { timeoutMs?: number; url: string };
 
+const isSvg = (buffer: Buffer): boolean => {
+  let text = buffer.toString("utf8").trimStart();
+  const preamble = /^(?:<\?xml\s[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE\s[^>]*>)/;
+  let match = preamble.exec(text);
+
+  while (match) {
+    text = text.slice(match[0].length).trimStart();
+    match = preamble.exec(text);
+  }
+
+  return /^<svg(?:\s|\/?>)/.test(text);
+};
+
 export const imageContent = async (
   input: MediaContentInput,
 ): Promise<ImageContent> => {
@@ -163,12 +176,16 @@ export const imageContent = async (
     }
 
     const { fileTypeFromBuffer } = await import("file-type");
-    const mimeType = await fileTypeFromBuffer(rawData);
+    const fileType = await fileTypeFromBuffer(rawData);
+    const mimeType =
+      (!fileType || fileType.mime === "application/xml") && isSvg(rawData)
+        ? "image/svg+xml"
+        : fileType?.mime;
 
-    if (!mimeType || !mimeType.mime.startsWith("image/")) {
+    if (!mimeType || !mimeType.startsWith("image/")) {
       console.warn(
         `Warning: Content may not be a valid image. Detected MIME: ${
-          mimeType?.mime || "unknown"
+          mimeType || "unknown"
         }`,
       );
     }
@@ -177,7 +194,7 @@ export const imageContent = async (
 
     return {
       data: base64Data,
-      mimeType: mimeType?.mime ?? "image/png",
+      mimeType: mimeType ?? "image/png",
       type: "image",
     } as const;
   } catch (error) {

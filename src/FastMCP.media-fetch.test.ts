@@ -12,6 +12,9 @@
  *   strands the socket behind it until GC. The body is now cancelled first,
  *   and the HTTP status still reaches the caller.
  */
+import { mkdtemp, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { audioContent, imageContent } from "./FastMCP.js";
@@ -50,6 +53,99 @@ const mockHungServer = () => {
       }),
   );
 };
+
+describe("imageContent MIME detection", () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    { content: svg, name: "plain" },
+    {
+      content: `<?xml version="1.0"?>\n<!-- icon -->\n${svg}`,
+      name: "prolog and comment",
+    },
+    {
+      content: `\uFEFF \n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<!-- icon -->\n${svg}`,
+      name: "BOM and doctype",
+    },
+  ])("imageContent detects SVG from a $name buffer", async ({ content }) => {
+    const buffer = Buffer.from(content);
+
+    expect(await imageContent({ buffer })).toEqual({
+      data: buffer.toString("base64"),
+      mimeType: "image/svg+xml",
+      type: "image",
+    });
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("imageContent detects SVG from a path", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "fastmcp-svg-"));
+    const path = join(directory, "icon.svg");
+
+    try {
+      await writeFile(path, svg);
+
+      expect(await imageContent({ path })).toEqual({
+        data: Buffer.from(svg).toString("base64"),
+        mimeType: "image/svg+xml",
+        type: "image",
+      });
+      expect(console.warn).not.toHaveBeenCalled();
+    } finally {
+      await rm(directory, { recursive: true });
+    }
+  });
+
+  it("imageContent detects SVG from a URL", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(svg));
+
+    expect(
+      await imageContent({ url: "https://media.example.com/icon" }),
+    ).toEqual({
+      data: Buffer.from(svg).toString("base64"),
+      mimeType: "image/svg+xml",
+      type: "image",
+    });
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it.each(["not an image", `<html>${svg}</html>`, "<svg-icon/>"])(
+    "imageContent keeps the PNG fallback and warning for %s",
+    async (content) => {
+      const buffer = Buffer.from(content);
+
+      expect(await imageContent({ buffer })).toEqual({
+        data: buffer.toString("base64"),
+        mimeType: "image/png",
+        type: "image",
+      });
+      expect(console.warn).toHaveBeenCalledWith(
+        "Warning: Content may not be a valid image. Detected MIME: unknown",
+      );
+    },
+  );
+
+  it("imageContent preserves detected non-SVG MIME types", async () => {
+    const buffer = Buffer.from('<?xml version="1.0"?><html/>');
+
+    expect(await imageContent({ buffer })).toEqual({
+      data: buffer.toString("base64"),
+      mimeType: "application/xml",
+      type: "image",
+    });
+    expect(console.warn).toHaveBeenCalledWith(
+      "Warning: Content may not be a valid image. Detected MIME: application/xml",
+    );
+  });
+});
 
 describe("imageContent/audioContent fetch timeout", () => {
   beforeEach(() => {
