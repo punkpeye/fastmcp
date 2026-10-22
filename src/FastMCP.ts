@@ -1469,6 +1469,8 @@ export class FastMCPSession<
   #capabilities: ServerCapabilities = {};
   #clientCapabilities?: ClientCapabilities;
   #connectionState: "closed" | "connecting" | "error" | "ready" = "connecting";
+  // Caller-supplied transports leave the response mode unspecified.
+  #enableJsonResponse: boolean | undefined;
   #logger: Logger;
   /**
    * The minimum level the client asked for with `logging/setLevel`, or
@@ -1534,6 +1536,7 @@ export class FastMCPSession<
   constructor({
     auth,
     authRequired = false,
+    enableJsonResponse,
     hasTools,
     icons,
     instructions,
@@ -1562,6 +1565,7 @@ export class FastMCPSession<
      * gated by `canAccess` (see `toolsVisibleTo`).
      */
     authRequired?: boolean;
+    enableJsonResponse?: boolean;
     /**
      * Whether the server has any tools at all, including ones this session's
      * `canAccess` filtering removed from `tools`. Defaults to `tools.length > 0`.
@@ -1591,6 +1595,7 @@ export class FastMCPSession<
 
     this.#auth = auth;
     this.#authRequired = authRequired;
+    this.#enableJsonResponse = enableJsonResponse;
     this.#logger = logger;
     this.#onToolCall = onToolCall;
     this.#pingConfig = ping;
@@ -1953,6 +1958,10 @@ export class FastMCPSession<
   #createLoadContext(
     meta: Record<string, unknown> | undefined,
     sendNotification: SendNotification,
+    requestId: RequestHandlerExtra<
+      ServerRequest,
+      ServerNotification
+    >["requestId"],
   ): LoadContext<T> {
     return {
       client: {
@@ -1961,7 +1970,13 @@ export class FastMCPSession<
       elicit: (
         params: ElicitRequestFormParams | ElicitRequestURLParams,
         options?: RequestOptions,
-      ) => this.#server.elicitInput(params, options),
+      ) =>
+        this.#server.elicitInput(
+          params,
+          this.#enableJsonResponse === false
+            ? { ...options, relatedRequestId: requestId }
+            : options,
+        ),
       log: this.#createLog(sendNotification),
       requestId:
         typeof meta?.requestId === "string" ? meta.requestId : undefined,
@@ -2571,6 +2586,7 @@ export class FastMCPSession<
             this.#createLoadContext(
               request.params?._meta,
               extra.sendNotification,
+              extra.requestId,
             ),
           );
         } catch (error) {
@@ -2652,6 +2668,7 @@ export class FastMCPSession<
                 this.#createLoadContext(
                   request.params?._meta,
                   extra.sendNotification,
+                  extra.requestId,
                 ),
               );
 
@@ -2693,6 +2710,7 @@ export class FastMCPSession<
               this.#createLoadContext(
                 request.params?._meta,
                 extra.sendNotification,
+                extra.requestId,
               ),
             );
           } catch (error) {
@@ -3002,7 +3020,13 @@ export class FastMCPSession<
               elicit: (
                 params: ElicitRequestFormParams | ElicitRequestURLParams,
                 options?: RequestOptions,
-              ) => this.#server.elicitInput(params, options),
+              ) =>
+                this.#server.elicitInput(
+                  params,
+                  this.#enableJsonResponse === false
+                    ? { ...options, relatedRequestId: extra.requestId }
+                    : options,
+                ),
               log,
               reportProgress,
               requestId:
@@ -3994,7 +4018,12 @@ export class FastMCP<
 
             // In stateless mode, create a new session for each request
             // without persisting it in the sessions array
-            return this.#createSession(auth, sessionId, true);
+            return this.#createSession(
+              auth,
+              sessionId,
+              true,
+              httpConfig.enableJsonResponse,
+            );
           },
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
@@ -4051,7 +4080,12 @@ export class FastMCP<
               ? request.headers["mcp-session-id"][0]
               : request.headers["mcp-session-id"];
 
-            return this.#createSession(auth, sessionId);
+            return this.#createSession(
+              auth,
+              sessionId,
+              false,
+              httpConfig.enableJsonResponse,
+            );
           },
           enableJsonResponse: httpConfig.enableJsonResponse,
           eventStore: httpConfig.eventStore,
@@ -4164,6 +4198,7 @@ export class FastMCP<
     auth?: T,
     sessionId?: string,
     stateless = false,
+    enableJsonResponse?: boolean,
   ): FastMCPSession<T> {
     // Check if authentication failed
     if (
@@ -4185,6 +4220,7 @@ export class FastMCP<
     return new FastMCPSession<T>({
       auth,
       authRequired,
+      enableJsonResponse,
       hasTools: this.#tools.length > 0,
       icons: this.#options.icons,
       instructions: this.#options.instructions,
