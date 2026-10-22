@@ -1454,6 +1454,8 @@ export class FastMCPSession<
    */
   #subscriptions: Set<string> = new Set();
 
+  #tools: Tool<T>[];
+
   #transportType?: "httpStream" | "stdio";
 
   /**
@@ -1464,6 +1466,8 @@ export class FastMCPSession<
   #unnegotiatedWarnings: Set<string> = new Set();
 
   #utils?: ServerOptions<T>["utils"];
+
+  #visibleTools: Tool<T>[] = [];
 
   constructor({
     auth,
@@ -1532,6 +1536,7 @@ export class FastMCPSession<
     this.#sessionId = sessionId;
     this.#stateless = stateless;
     this.#streamKeepaliveConfig = streamKeepalive;
+    this.#tools = tools;
     this.#transportType = transportType;
     this.#needsEventLoopFlush = transportType === "httpStream";
 
@@ -1587,7 +1592,9 @@ export class FastMCPSession<
     this.setupCompleteHandlers();
 
     if (supportsTools) {
-      this.setupToolHandlers(tools);
+      this.setupToolHandlers(
+        toolsVisibleTo(tools, this.#auth, this.#authRequired),
+      );
     }
 
     if (resources.length || resourcesTemplates.length) {
@@ -1753,6 +1760,7 @@ export class FastMCPSession<
       return;
     }
 
+    this.#tools = tools;
     this.setupToolHandlers(
       toolsVisibleTo(tools, this.#auth, this.#authRequired),
     );
@@ -1779,6 +1787,15 @@ export class FastMCPSession<
    */
   public updateAuth(auth: T): void {
     this.#auth = auth;
+    const tools = toolsVisibleTo(this.#tools, auth, this.#authRequired);
+
+    if (
+      tools.length !== this.#visibleTools.length ||
+      tools.some((tool, index) => tool !== this.#visibleTools[index])
+    ) {
+      this.setupToolHandlers(tools);
+      this.triggerListChangedNotification("notifications/tools/list_changed");
+    }
   }
 
   public waitForReady(): Promise<void> {
@@ -2718,6 +2735,7 @@ export class FastMCPSession<
   }
 
   private setupToolHandlers(tools: Tool<T>[]) {
+    this.#visibleTools = tools;
     const toolsMap = new Map(tools.map((tool) => [tool.name, tool]));
     let cachedToolsList: ListToolsResult["tools"] | null = null;
 
@@ -3804,7 +3822,7 @@ export class FastMCP<
         roots: this.#options.roots,
         streamKeepalive: this.#options.streamKeepalive,
         title: this.#options.title,
-        tools: toolsVisibleTo(this.#tools, auth, authRequired),
+        tools: this.#tools,
         transportType: "stdio",
         utils: this.#options.utils,
         version: this.#options.version,
@@ -4097,7 +4115,7 @@ export class FastMCP<
       stateless,
       streamKeepalive: this.#options.streamKeepalive,
       title: this.#options.title,
-      tools: toolsVisibleTo(this.#tools, auth, authRequired),
+      tools: this.#tools,
       transportType: "httpStream",
       utils: this.#options.utils,
       version: this.#options.version,
