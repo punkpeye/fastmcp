@@ -223,10 +223,7 @@ describe("imageContent/audioContent fetch timeout", () => {
   });
 
   it("audioContent passes an AbortSignal to the fetch", async () => {
-    mediaFetchMock.mockResolvedValue({
-      arrayBuffer: async () => new Uint8Array(WAV_BUFFER).buffer,
-      ok: true,
-    });
+    mediaFetchMock.mockResolvedValue(new Response(new Uint8Array(WAV_BUFFER)));
 
     await audioContent({ url: "https://media.example.com/beep.wav" });
 
@@ -238,10 +235,7 @@ describe("imageContent/audioContent fetch timeout", () => {
   });
 
   it("audioContent uses the caller's timeoutMs for URL fetches", async () => {
-    mediaFetchMock.mockResolvedValue({
-      arrayBuffer: async () => new Uint8Array(WAV_BUFFER).buffer,
-      ok: true,
-    });
+    mediaFetchMock.mockResolvedValue(new Response(new Uint8Array(WAV_BUFFER)));
 
     await audioContent({
       timeoutMs: 250,
@@ -338,4 +332,86 @@ describe("imageContent/audioContent HTTP errors", () => {
       "Failed to fetch image from URL (https://media.example.com/missing.png): Server responded with status: 404 - Not Found",
     );
   });
+});
+
+describe("audioContent MIME detection", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const serve = (body: Uint8Array, contentType: string) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(body, { headers: { "Content-Type": contentType } }),
+    );
+  };
+
+  // EBML header with DocType "webm", which file-type reports as video/webm.
+  const WEBM_BUFFER = Buffer.from(
+    "GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYEC",
+    "base64",
+  );
+
+  it("labels an audio-only WebM with the type the server declared", async () => {
+    serve(new Uint8Array(WEBM_BUFFER), "audio/webm; codecs=opus");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const content = await audioContent({
+      url: "https://media.example.com/clip.webm",
+    });
+
+    expect(content.mimeType).toBe("audio/webm");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("uses the declared audio type for bytes file-type cannot sniff", async () => {
+    // Raw PCM has no signature.
+    serve(new Uint8Array(64), "audio/L16; rate=16000");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const content = await audioContent({
+      url: "https://media.example.com/clip.pcm",
+    });
+
+    expect(content.mimeType).toBe("audio/l16");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("keeps the sniffed type when the bytes name an audio type", async () => {
+    serve(new Uint8Array(WAV_BUFFER), "audio/mpeg");
+
+    const content = await audioContent({
+      url: "https://media.example.com/mislabeled.mp3",
+    });
+
+    expect(content.mimeType).toBe("audio/wav");
+  });
+
+  it("ignores a declared type that is not audio", async () => {
+    serve(new Uint8Array(PNG_BUFFER), "text/html");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const content = await audioContent({
+      url: "https://media.example.com/page",
+    });
+
+    expect(content.mimeType).toBe("image/png");
+  });
+
+  it.each([
+    { buffer: WEBM_BUFFER, mimeType: "audio/webm", name: "WebM" },
+    {
+      // ftyp box with the isom brand, which file-type reports as video/mp4.
+      buffer: Buffer.from("AAAADGZ0eXBpc29t", "base64"),
+      mimeType: "audio/mp4",
+      name: "MP4",
+    },
+  ])(
+    "labels a $name buffer with its audio type",
+    async ({ buffer, mimeType }) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      expect((await audioContent({ buffer })).mimeType).toBe(mimeType);
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
 });

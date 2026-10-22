@@ -209,10 +209,47 @@ export const imageContent = async (
   }
 };
 
+/**
+ * Containers file-type names by their video type even when they hold only
+ * audio, as a browser's MediaRecorder output does.
+ */
+const AUDIO_CONTAINER_TYPES = new Map([
+  ["video/3gpp", "audio/3gpp"],
+  ["video/3gpp2", "audio/3gpp2"],
+  ["video/matroska", "audio/matroska"],
+  ["video/mp4", "audio/mp4"],
+  ["video/ogg", "audio/ogg"],
+  ["video/webm", "audio/webm"],
+]);
+
+/**
+ * Picks the MIME type for audioContent. Sniffed bytes win when they name an
+ * audio type. Otherwise the type a URL's response declared is used if it is
+ * `audio/*`, and then a container's audio type: file-type reports an
+ * audio-only WebM as `video/webm`.
+ */
+const resolveAudioMimeType = (
+  detected: string | undefined,
+  declared: null | string,
+): string | undefined => {
+  if (detected?.startsWith("audio/")) {
+    return detected;
+  }
+
+  const declaredMime = declared?.split(";", 1)[0].trim().toLowerCase();
+
+  if (declaredMime?.startsWith("audio/")) {
+    return declaredMime;
+  }
+
+  return (detected && AUDIO_CONTAINER_TYPES.get(detected)) ?? detected;
+};
+
 export const audioContent = async (
   input: MediaContentInput,
 ): Promise<AudioContent> => {
   let rawData: Buffer;
+  let declaredMimeType: null | string = null;
 
   try {
     if ("url" in input) {
@@ -230,6 +267,7 @@ export const audioContent = async (
           );
         }
 
+        declaredMimeType = response.headers.get("content-type");
         rawData = Buffer.from(await response.arrayBuffer());
       } catch (error) {
         // "AbortError" is unreachable today (no caller signal); kept as insurance.
@@ -267,12 +305,13 @@ export const audioContent = async (
     }
 
     const { fileTypeFromBuffer } = await import("file-type");
-    const mimeType = await fileTypeFromBuffer(rawData);
+    const detected = await fileTypeFromBuffer(rawData);
+    const mimeType = resolveAudioMimeType(detected?.mime, declaredMimeType);
 
-    if (!mimeType || !mimeType.mime.startsWith("audio/")) {
+    if (!mimeType || !mimeType.startsWith("audio/")) {
       console.warn(
         `Warning: Content may not be a valid audio file. Detected MIME: ${
-          mimeType?.mime || "unknown"
+          mimeType || "unknown"
         }`,
       );
     }
@@ -281,7 +320,7 @@ export const audioContent = async (
 
     return {
       data: base64Data,
-      mimeType: mimeType?.mime ?? "audio/mpeg",
+      mimeType: mimeType ?? "audio/mpeg",
       type: "audio",
     } as const;
   } catch (error) {
