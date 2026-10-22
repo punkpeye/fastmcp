@@ -189,10 +189,29 @@ export const imageContent = async (
   }
 };
 
+/**
+ * Picks the MIME type for audioContent. Sniffed bytes win when they name an
+ * audio type. Otherwise the type a URL's response declared is used if it is
+ * `audio/*`: file-type reports an audio-only WebM as `video/webm`.
+ */
+const resolveAudioMimeType = (
+  detected: string | undefined,
+  declared: null | string,
+): string | undefined => {
+  if (detected?.startsWith("audio/")) {
+    return detected;
+  }
+
+  const declaredMime = declared?.split(";", 1)[0].trim().toLowerCase();
+
+  return declaredMime?.startsWith("audio/") ? declaredMime : detected;
+};
+
 export const audioContent = async (
   input: MediaContentInput,
 ): Promise<AudioContent> => {
   let rawData: Buffer;
+  let declaredMimeType: null | string = null;
 
   try {
     if ("url" in input) {
@@ -210,6 +229,7 @@ export const audioContent = async (
           );
         }
 
+        declaredMimeType = response.headers.get("content-type");
         rawData = Buffer.from(await response.arrayBuffer());
       } catch (error) {
         // "AbortError" is unreachable today (no caller signal); kept as insurance.
@@ -247,12 +267,13 @@ export const audioContent = async (
     }
 
     const { fileTypeFromBuffer } = await import("file-type");
-    const mimeType = await fileTypeFromBuffer(rawData);
+    const detected = await fileTypeFromBuffer(rawData);
+    const mimeType = resolveAudioMimeType(detected?.mime, declaredMimeType);
 
-    if (!mimeType || !mimeType.mime.startsWith("audio/")) {
+    if (!mimeType || !mimeType.startsWith("audio/")) {
       console.warn(
         `Warning: Content may not be a valid audio file. Detected MIME: ${
-          mimeType?.mime || "unknown"
+          mimeType || "unknown"
         }`,
       );
     }
@@ -261,7 +282,7 @@ export const audioContent = async (
 
     return {
       data: base64Data,
-      mimeType: mimeType?.mime ?? "audio/mpeg",
+      mimeType: mimeType ?? "audio/mpeg",
       type: "audio",
     } as const;
   } catch (error) {
