@@ -2056,25 +2056,28 @@ export class FastMCPSession<
       return;
     }
 
+    const params = {
+      data: {
+        context,
+        message,
+      },
+      level,
+    };
+
     // Request-scoped, like reportProgress: without the relatedRequestId the
     // SDK binds into `extra.sendNotification`, the message goes to the
     // standalone GET SSE stream, which stateless HTTP transports never have.
-    sendNotification({
-      method: "notifications/message",
-      params: {
-        data: {
-          context,
-          message,
-        },
-        level,
-      },
-    }).catch((error: unknown) => {
-      this.#logger.error(
-        `[FastMCP error] failed to send ${level} log notification.\n\n${
-          error instanceof Error ? error.stack : JSON.stringify(error)
-        }`,
-      );
-    });
+    // Once the request is answered its stream is gone and the send rejects,
+    // so a message logged after that goes to the standalone stream instead.
+    sendNotification({ method: "notifications/message", params })
+      .catch(() => this.#server.sendLoggingMessage(params))
+      .catch((error: unknown) => {
+        this.#logger.error(
+          `[FastMCP error] failed to send ${level} log notification.\n\n${
+            error instanceof Error ? error.stack : JSON.stringify(error)
+          }`,
+        );
+      });
   }
 
   async #setUpSession(streamableHttp: boolean) {
