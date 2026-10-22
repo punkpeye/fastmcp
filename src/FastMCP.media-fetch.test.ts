@@ -75,6 +75,14 @@ describe("imageContent MIME detection", () => {
       content: `\uFEFF \n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<!-- icon -->\n${svg}`,
       name: "BOM and doctype",
     },
+    {
+      content: `<?xml version="1.0"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [\n  <!ENTITY ns_svg "http://www.w3.org/2000/svg">\n]>\n${svg}`,
+      name: "doctype with an internal subset",
+    },
+    {
+      content: `<?xml version="1.0"?>\n<?xml-stylesheet href="icon.css" type="text/css"?>\n${svg}`,
+      name: "stylesheet instruction",
+    },
   ])("imageContent detects SVG from a $name buffer", async ({ content }) => {
     const buffer = Buffer.from(content);
 

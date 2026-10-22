@@ -107,7 +107,10 @@ type MediaContentInput =
 
 const isSvg = (buffer: Buffer): boolean => {
   let text = buffer.toString("utf8").trimStart();
-  const preamble = /^(?:<\?xml\s[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE\s[^>]*>)/;
+  // XML declaration or other processing instruction, comment, or doctype with
+  // an optional internal subset (Illustrator declares entities there).
+  const preamble =
+    /^(?:<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE\s[^[>]*(?:\[[\s\S]*?\]\s*)?>)/;
   let match = preamble.exec(text);
 
   while (match) {
