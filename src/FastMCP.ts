@@ -714,6 +714,9 @@ type LoggingLevel =
  */
 const DEFAULT_LOGGING_LEVEL: LoggingLevel = "info";
 
+/** The `extra.sendNotification` of the request a log call belongs to. */
+type SendNotification = (notification: ServerNotification) => Promise<void>;
+
 /**
  * The RFC 5424 severities the MCP `logging` utility uses, as ordinals. A higher
  * number is more severe, so a message is sent only when its ordinal is at least
@@ -1947,7 +1950,10 @@ export class FastMCPSession<
    * are tied to a tool call's progress token / streaming notification,
    * which resource and prompt reads do not have.
    */
-  #createLoadContext(meta?: Record<string, unknown>): LoadContext<T> {
+  #createLoadContext(
+    meta: Record<string, unknown> | undefined,
+    sendNotification: SendNotification,
+  ): LoadContext<T> {
     return {
       client: {
         version: this.#server.getClientVersion(),
@@ -1956,7 +1962,7 @@ export class FastMCPSession<
         params: ElicitRequestFormParams | ElicitRequestURLParams,
         options?: RequestOptions,
       ) => this.#server.elicitInput(params, options),
-      log: this.#createLog(),
+      log: this.#createLog(sendNotification),
       requestId:
         typeof meta?.requestId === "string" ? meta.requestId : undefined,
       session: this.#auth,
@@ -1964,19 +1970,19 @@ export class FastMCPSession<
     };
   }
 
-  #createLog(): Context<T>["log"] {
+  #createLog(sendNotification: SendNotification): Context<T>["log"] {
     return {
       debug: (message: string, context?: SerializableValue) => {
-        this.#sendLog("debug", message, context);
+        this.#sendLog(sendNotification, "debug", message, context);
       },
       error: (message: string, context?: SerializableValue) => {
-        this.#sendLog("error", message, context);
+        this.#sendLog(sendNotification, "error", message, context);
       },
       info: (message: string, context?: SerializableValue) => {
-        this.#sendLog("info", message, context);
+        this.#sendLog(sendNotification, "info", message, context);
       },
       warn: (message: string, context?: SerializableValue) => {
-        this.#sendLog("warning", message, context);
+        this.#sendLog(sendNotification, "warning", message, context);
       },
     };
   }
@@ -2076,12 +2082,13 @@ export class FastMCPSession<
   }
 
   /**
-   * `sendLoggingMessage` rejects once the client has hung up, and these four
+   * Sending rejects once the client has hung up, and these four
    * callers are synchronous, so the rejection has nowhere to go. Swallow it the
    * way every other notification sender in this class does, or a client that
    * disconnects mid-tool takes the server process down with it.
    */
   #sendLog(
+    sendNotification: SendNotification,
     level: LoggingLevel,
     message: string,
     context?: SerializableValue,
@@ -2098,14 +2105,21 @@ export class FastMCPSession<
       return;
     }
 
-    this.#server
-      .sendLoggingMessage({
-        data: {
-          context,
-          message,
-        },
-        level,
-      })
+    const params = {
+      data: {
+        context,
+        message,
+      },
+      level,
+    };
+
+    // Request-scoped, like reportProgress: without the relatedRequestId the
+    // SDK binds into `extra.sendNotification`, the message goes to the
+    // standalone GET SSE stream, which stateless HTTP transports never have.
+    // Once the request is answered its stream is gone and the send rejects,
+    // so a message logged after that goes to the standalone stream instead.
+    sendNotification({ method: "notifications/message", params })
+      .catch(() => this.#server.sendLoggingMessage(params))
       .catch((error: unknown) => {
         this.#logger.error(
           `[FastMCP error] failed to send ${level} log notification.\n\n${
@@ -2523,63 +2537,69 @@ export class FastMCPSession<
       };
     });
 
-    this.#server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-      const prompt = this.#prompts.get(request.params.name);
+    this.#server.setRequestHandler(
+      GetPromptRequestSchema,
+      async (request, extra) => {
+        const prompt = this.#prompts.get(request.params.name);
 
-      if (!prompt) {
-        throw new McpError(
-          ErrorCode.InvalidParams,
-          `Unknown prompt: ${request.params.name}`,
-        );
-      }
-
-      const args = request.params.arguments;
-
-      for (const arg of prompt.arguments ?? []) {
-        if (arg.required && !(args && Object.hasOwn(args, arg.name))) {
+        if (!prompt) {
           throw new McpError(
             ErrorCode.InvalidParams,
-            `Prompt '${request.params.name}' requires argument '${arg.name}': ${
-              arg.description || "No description provided"
-            }`,
+            `Unknown prompt: ${request.params.name}`,
           );
         }
-      }
 
-      let result: Awaited<ReturnType<Prompt<T>["load"]>>;
+        const args = request.params.arguments;
 
-      try {
-        result = await prompt.load(
-          args ?? {},
-          this.#auth,
-          this.#createLoadContext(request.params?._meta),
-        );
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        throw new McpError(
-          ErrorCode.InternalError,
-          `Failed to load prompt '${request.params.name}': ${errorMessage}`,
-        );
-      }
+        for (const arg of prompt.arguments ?? []) {
+          if (arg.required && !(args && Object.hasOwn(args, arg.name))) {
+            throw new McpError(
+              ErrorCode.InvalidParams,
+              `Prompt '${request.params.name}' requires argument '${arg.name}': ${
+                arg.description || "No description provided"
+              }`,
+            );
+          }
+        }
 
-      if (typeof result === "string") {
-        return {
-          description: prompt.description,
-          messages: [
-            {
-              content: { text: result, type: "text" },
-              role: "user",
-            },
-          ],
-        };
-      } else {
-        return {
-          description: prompt.description,
-          messages: result.messages,
-        };
-      }
-    });
+        let result: Awaited<ReturnType<Prompt<T>["load"]>>;
+
+        try {
+          result = await prompt.load(
+            args ?? {},
+            this.#auth,
+            this.#createLoadContext(
+              request.params?._meta,
+              extra.sendNotification,
+            ),
+          );
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Failed to load prompt '${request.params.name}': ${errorMessage}`,
+          );
+        }
+
+        if (typeof result === "string") {
+          return {
+            description: prompt.description,
+            messages: [
+              {
+                content: { text: result, type: "text" },
+                role: "user",
+              },
+            ],
+          };
+        } else {
+          return {
+            description: prompt.description,
+            messages: result.messages,
+          };
+        }
+      },
+    );
   }
 
   private setupResourceHandlers() {
@@ -2608,7 +2628,7 @@ export class FastMCPSession<
 
     this.#server.setRequestHandler(
       ReadResourceRequestSchema,
-      async (request) => {
+      async (request, extra) => {
         if ("uri" in request.params) {
           const resource = this.#resources.get(request.params.uri);
 
@@ -2629,7 +2649,10 @@ export class FastMCPSession<
               const result = await resourceTemplate.load(
                 match,
                 this.#auth,
-                this.#createLoadContext(request.params?._meta),
+                this.#createLoadContext(
+                  request.params?._meta,
+                  extra.sendNotification,
+                ),
               );
 
               const resources = Array.isArray(result) ? result : [result];
@@ -2667,7 +2690,10 @@ export class FastMCPSession<
           try {
             maybeArrayResult = await resource.load(
               this.#auth,
-              this.#createLoadContext(request.params?._meta),
+              this.#createLoadContext(
+                request.params?._meta,
+                extra.sendNotification,
+              ),
             );
           } catch (error) {
             const errorMessage =
@@ -2910,7 +2936,7 @@ export class FastMCPSession<
             }
           };
 
-          const log = this.#createLog();
+          const log = this.#createLog(extra.sendNotification);
 
           // Create a promise for tool execution
           // Streams partial results while a tool is still executing

@@ -1286,6 +1286,11 @@ after `logging/setLevel` with `error`, `log.debug` and `log.info` reach nobody.
 Until a client asks, every level is sent. The level in force is readable as
 [`session.loggingLevel`](#logginglevel).
 
+Each message travels on the stream of the request that logged it, so logging
+works in `stateless` mode too. With `httpStream.enableJsonResponse`, which
+answers each request with a single JSON body, messages logged while a request
+runs are dropped.
+
 #### Errors
 
 The errors that are meant to be shown to the user should be thrown as `UserError` instances:
