@@ -159,6 +159,7 @@ export class EdgeFastMCP {
    * Add a prompt to the server
    */
   addPrompt(prompt: EdgePrompt): this {
+    this.#prompts = this.#prompts.filter((p) => p.name !== prompt.name);
     this.#prompts.push(prompt);
     return this;
   }
@@ -167,6 +168,7 @@ export class EdgeFastMCP {
    * Add a resource to the server
    */
   addResource(resource: EdgeResource): this {
+    this.#resources = this.#resources.filter((r) => r.uri !== resource.uri);
     this.#resources.push(resource);
     return this;
   }
@@ -175,6 +177,7 @@ export class EdgeFastMCP {
    * Add a tool to the server
    */
   addTool<TParams>(tool: EdgeTool<TParams>): this {
+    this.#tools = this.#tools.filter((t) => t.name !== tool.name);
     this.#tools.push(tool as EdgeTool);
     return this;
   }

@@ -12,6 +12,26 @@ import { EdgeFastMCP } from "./index.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type JsonResponse = any;
 
+const postResult = async (
+  server: EdgeFastMCP,
+  method: string,
+  params?: Record<string, unknown>,
+): Promise<JsonResponse> => {
+  const response = await server.fetch(
+    new Request("http://localhost/mcp", {
+      body: JSON.stringify({ id: 1, jsonrpc: "2.0", method, params }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    }),
+  );
+  expect(response.status).toBe(200);
+  const body: JsonResponse = await response.json();
+  return body.result;
+};
+
 describe("EdgeFastMCP", () => {
   it("should handle initialize request", async () => {
     const server = new EdgeFastMCP({
@@ -802,6 +822,73 @@ describe("EdgeFastMCP", () => {
 
     const body = await getPrompt("git-commit", { changes: "add tests" });
     expect(body.result.messages[0].content.text).toBe("Commit: add tests");
+  });
+
+  it("replaces a tool added again with the same name", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    for (const version of ["v1", "v2"]) {
+      server.addTool({
+        description: version,
+        execute: async () => version,
+        name: "greet",
+      });
+    }
+
+    expect((await postResult(server, "tools/list")).tools).toEqual([
+      { description: "v2", inputSchema: { type: "object" }, name: "greet" },
+    ]);
+    expect(
+      (await postResult(server, "tools/call", { name: "greet" })).content,
+    ).toEqual([{ text: "v2", type: "text" }]);
+  });
+
+  it("replaces a prompt added again with the same name", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    for (const version of ["v1", "v2"]) {
+      server.addPrompt({
+        description: version,
+        load: async () => version,
+        name: "greet",
+      });
+    }
+
+    expect((await postResult(server, "prompts/list")).prompts).toEqual([
+      { description: "v2", name: "greet" },
+    ]);
+    expect(
+      (await postResult(server, "prompts/get", { name: "greet" })).messages,
+    ).toEqual([{ content: { text: "v2", type: "text" }, role: "user" }]);
+  });
+
+  it("replaces a resource added again with the same URI", async () => {
+    const server = new EdgeFastMCP({
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    for (const version of ["v1", "v2"]) {
+      server.addResource({
+        load: async () => version,
+        name: version,
+        uri: "test://greeting",
+      });
+    }
+
+    expect((await postResult(server, "resources/list")).resources).toEqual([
+      { name: "v2", uri: "test://greeting" },
+    ]);
+    expect(
+      (await postResult(server, "resources/read", { uri: "test://greeting" }))
+        .contents,
+    ).toEqual([{ mimeType: "text/plain", text: "v2", uri: "test://greeting" }]);
   });
 
   it("should handle health check", async () => {
