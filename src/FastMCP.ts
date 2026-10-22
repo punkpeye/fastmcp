@@ -190,9 +190,23 @@ export const imageContent = async (
 };
 
 /**
+ * Containers file-type names by their video type even when they hold only
+ * audio, as a browser's MediaRecorder output does.
+ */
+const AUDIO_CONTAINER_TYPES = new Map([
+  ["video/3gpp", "audio/3gpp"],
+  ["video/3gpp2", "audio/3gpp2"],
+  ["video/matroska", "audio/matroska"],
+  ["video/mp4", "audio/mp4"],
+  ["video/ogg", "audio/ogg"],
+  ["video/webm", "audio/webm"],
+]);
+
+/**
  * Picks the MIME type for audioContent. Sniffed bytes win when they name an
  * audio type. Otherwise the type a URL's response declared is used if it is
- * `audio/*`: file-type reports an audio-only WebM as `video/webm`.
+ * `audio/*`, and then a container's audio type: file-type reports an
+ * audio-only WebM as `video/webm`.
  */
 const resolveAudioMimeType = (
   detected: string | undefined,
@@ -204,7 +218,11 @@ const resolveAudioMimeType = (
 
   const declaredMime = declared?.split(";", 1)[0].trim().toLowerCase();
 
-  return declaredMime?.startsWith("audio/") ? declaredMime : detected;
+  if (declaredMime?.startsWith("audio/")) {
+    return declaredMime;
+  }
+
+  return (detected && AUDIO_CONTAINER_TYPES.get(detected)) ?? detected;
 };
 
 export const audioContent = async (
