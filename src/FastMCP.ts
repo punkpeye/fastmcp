@@ -1,5 +1,3 @@
-import type { JsonSchema } from "xsschema";
-
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -65,7 +63,7 @@ import type {
 } from "./auth/providers/AuthProvider.js";
 
 import { cancelResponseBody } from "./cancelResponseBody.js";
-import { strictInputSchema } from "./strictInputSchema.js";
+import { strictInputSchema, zodInputSchema } from "./strictInputSchema.js";
 
 export interface Logger {
   debug(...args: unknown[]): void;
@@ -2738,20 +2736,7 @@ export class FastMCPSession<
               ? strictInputSchema(
                   tool.parameters["~standard"].vendor === "zod" &&
                     "_zod" in tool.parameters
-                    ? (z.toJSONSchema(tool.parameters as z.ZodType, {
-                        io: "input",
-                        override: ({ jsonSchema, zodSchema }) => {
-                          const def = zodSchema._zod.def;
-                          if (
-                            def.type === "object" &&
-                            !def.catchall &&
-                            jsonSchema.additionalProperties === undefined
-                          ) {
-                            jsonSchema.additionalProperties = false;
-                          }
-                        },
-                        target: "draft-7",
-                      }) as JsonSchema)
+                    ? zodInputSchema(tool.parameters as z.ZodType, "draft-7")
                     : await toJsonSchema(tool.parameters),
                 )
               : {

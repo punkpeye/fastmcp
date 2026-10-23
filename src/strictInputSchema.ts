@@ -1,5 +1,7 @@
 import type { JsonSchema } from "xsschema";
 
+import { z } from "zod";
+
 /**
  * Closes tool input objects to undeclared keys, like xsschema's
  * `strictJsonSchema`, except for objects made only of additional properties.
@@ -45,4 +47,33 @@ export function strictInputSchema(
       ),
     }),
   };
+}
+
+/**
+ * Converts Zod 4 tool parameters by what a call may send (`io: "input"`), so a
+ * transformed field advertises the type it parses and a defaulted one is
+ * optional. Input-side conversion leaves a plain `z.object()` open, since it
+ * strips undeclared keys rather than rejecting them; this closes it, as
+ * output-side conversion did, at any depth — including inside arrays, unions
+ * and record values, which `strictInputSchema` does not reach. Explicit
+ * catchalls (`z.looseObject()`, `.catchall()`) keep what they declare.
+ */
+export function zodInputSchema(
+  schema: z.ZodType,
+  target?: "draft-7",
+): JsonSchema {
+  return z.toJSONSchema(schema, {
+    io: "input",
+    override: ({ jsonSchema, zodSchema }) => {
+      const def = zodSchema._zod.def;
+      if (
+        def.type === "object" &&
+        !def.catchall &&
+        jsonSchema.additionalProperties === undefined
+      ) {
+        jsonSchema.additionalProperties = false;
+      }
+    },
+    target,
+  }) as JsonSchema;
 }
