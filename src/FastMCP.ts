@@ -30,6 +30,7 @@ import {
   ListToolsResult,
   McpError,
   ReadResourceRequestSchema,
+  RequestId,
   ResourceLink,
   ResourceLinkSchema,
   Root,
@@ -1946,6 +1947,23 @@ export class FastMCPSession<
   }
 
   /**
+   * When `start()` streams responses, an elicitation goes out on its request's
+   * own SSE stream, as the SDK's `extra.sendRequest` does, so it reaches a
+   * client that never opened the optional standalone GET stream. A JSON
+   * response cannot carry it, and a transport passed to `connect()` does not
+   * say which mode it uses, so those keep the session's standalone stream.
+   */
+  #createElicit(requestId: RequestId): Context<T>["elicit"] {
+    return (params, options) =>
+      this.#server.elicitInput(
+        params,
+        this.#enableJsonResponse === false
+          ? { ...options, relatedRequestId: requestId }
+          : options,
+      );
+  }
+
+  /**
    * Builds the context object passed as the third argument to
    * `resource.load` / `resourceTemplate.load` / `prompt.load`.
    *
@@ -1958,25 +1976,13 @@ export class FastMCPSession<
   #createLoadContext(
     meta: Record<string, unknown> | undefined,
     sendNotification: SendNotification,
-    requestId: RequestHandlerExtra<
-      ServerRequest,
-      ServerNotification
-    >["requestId"],
+    requestId: RequestId,
   ): LoadContext<T> {
     return {
       client: {
         version: this.#server.getClientVersion(),
       },
-      elicit: (
-        params: ElicitRequestFormParams | ElicitRequestURLParams,
-        options?: RequestOptions,
-      ) =>
-        this.#server.elicitInput(
-          params,
-          this.#enableJsonResponse === false
-            ? { ...options, relatedRequestId: requestId }
-            : options,
-        ),
+      elicit: this.#createElicit(requestId),
       log: this.#createLog(sendNotification),
       requestId:
         typeof meta?.requestId === "string" ? meta.requestId : undefined,
@@ -3017,16 +3023,7 @@ export class FastMCPSession<
               client: {
                 version: this.#server.getClientVersion(),
               },
-              elicit: (
-                params: ElicitRequestFormParams | ElicitRequestURLParams,
-                options?: RequestOptions,
-              ) =>
-                this.#server.elicitInput(
-                  params,
-                  this.#enableJsonResponse === false
-                    ? { ...options, relatedRequestId: extra.requestId }
-                    : options,
-                ),
+              elicit: this.#createElicit(extra.requestId),
               log,
               reportProgress,
               requestId:
