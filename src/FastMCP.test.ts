@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CreateMessageRequestSchema,
   ElicitRequestSchema,
@@ -13,6 +14,7 @@ import {
   Root,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createEventSource, EventSourceClient } from "eventsource-client";
+import { createServer } from "node:http";
 import { setTimeout as delay } from "timers/promises";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
@@ -25,6 +27,7 @@ import {
   FastMCPError,
   FastMCPSession,
   imageContent,
+  type LoadContext,
   SessionError,
   type TextContent,
   UnexpectedStateError,
@@ -3081,6 +3084,179 @@ test("makes a sampling request", async () => {
     },
   });
 });
+
+const contextualRequestPaths = [
+  "tool",
+  "resource",
+  "template",
+  "prompt",
+] as const;
+
+// Exercise elicitation through the real HTTP handlers for all four contexts.
+const addContextualRequestHandlers = (
+  server: FastMCP,
+  run: (
+    context: Pick<LoadContext<undefined>, "elicit" | "requestId">,
+  ) => Promise<string>,
+) => {
+  server.addTool({
+    execute: async (_args, context) => run(context),
+    name: "context",
+  });
+  server.addResource({
+    load: async (_auth, context) => ({ text: await run(context!) }),
+    name: "context",
+    uri: "context://resource",
+  });
+  server.addResourceTemplate({
+    arguments: [{ name: "id", required: true }],
+    load: async (_args, _auth, context) => ({ text: await run(context!) }),
+    name: "context-template",
+    uriTemplate: "context://template/{id}",
+  });
+  server.addPrompt({
+    load: async (_args, _auth, context) => await run(context!),
+    name: "context",
+  });
+};
+
+const callContextualRequest = async (
+  client: Client,
+  path: (typeof contextualRequestPaths)[number],
+  requestId?: string,
+) => {
+  const _meta = requestId === undefined ? undefined : { requestId };
+  switch (path) {
+    case "prompt":
+      return (await client.getPrompt({ _meta, name: "context" })).messages;
+    case "resource":
+      return (await client.readResource({ _meta, uri: "context://resource" }))
+        .contents;
+    case "template":
+      return (await client.readResource({ _meta, uri: "context://template/1" }))
+        .contents;
+    case "tool":
+      return (await client.callTool({ _meta, name: "context" })).content;
+  }
+};
+
+test.each(
+  contextualRequestPaths.flatMap((path) =>
+    [
+      { connect: false, enableJsonResponse: false, standaloneGet: false },
+      { connect: false, enableJsonResponse: false, standaloneGet: true },
+      { connect: false, enableJsonResponse: true, standaloneGet: true },
+      { connect: true, enableJsonResponse: true, standaloneGet: true },
+    ].flatMap((config) =>
+      [undefined, "client-metadata-id"].map((requestId) => ({
+        path,
+        requestId,
+        ...config,
+      })),
+    ),
+  ),
+)(
+  "httpStream contextual elicitation returns the answer: $path, connect=$connect, standaloneGet=$standaloneGet, requestId=$requestId, enableJsonResponse=$enableJsonResponse",
+  async ({ connect, enableJsonResponse, path, requestId, standaloneGet }) => {
+    const port = await getTestPort();
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    addContextualRequestHandlers(server, async (context) => {
+      expect(context.requestId).toBe(requestId);
+      const result = await context.elicit(
+        {
+          message: "What is your name?",
+          requestedSchema: {
+            properties: { name: { type: "string" } },
+            required: ["name"],
+            type: "object",
+          },
+        },
+        { timeout: 1000 },
+      );
+      return JSON.stringify(result);
+    });
+    const client = new Client(
+      { name: "Test client", version: "1.0.0" },
+      { capabilities: { elicitation: { form: {} } } },
+    );
+    const onElicit = vi.fn(() => ({
+      action: "accept" as const,
+      content: { name: "Alice" },
+    }));
+    client.setRequestHandler(ElicitRequestSchema, onElicit);
+    // Omit the optional GET stream through the public fetch option while
+    // leaving POST request streams available for contextual elicitation.
+    const onStandaloneGet = vi.fn();
+    const clientFetch: typeof fetch = async (input, init) => {
+      if (!standaloneGet && init?.method === "GET") {
+        return new Response(null, { status: 405 });
+      }
+      const response = await fetch(input, init);
+      if (init?.method === "GET") onStandaloneGet(response);
+      return response;
+    };
+    let httpServer: ReturnType<typeof createServer> | undefined;
+    let session: FastMCPSession | undefined;
+    try {
+      if (connect) {
+        const transport = new StreamableHTTPServerTransport({
+          enableJsonResponse,
+          sessionIdGenerator: () => "context-session",
+        });
+        session = await server.connect(transport);
+        httpServer = createServer((request, response) => {
+          transport.handleRequest(request, response).catch((error: Error) => {
+            response.destroy(error);
+          });
+        });
+        await new Promise<void>((resolve, reject) => {
+          httpServer!.once("error", reject);
+          httpServer!.listen(port, "localhost", resolve);
+        });
+      } else {
+        await server.start({
+          httpStream: { enableJsonResponse, port },
+          transportType: "httpStream",
+        });
+      }
+      await client.connect(
+        new StreamableHTTPClientTransport(
+          new URL(`http://localhost:${port}/mcp`),
+          { fetch: clientFetch },
+        ),
+      );
+      if (standaloneGet) {
+        await vi.waitFor(() =>
+          expect(onStandaloneGet).toHaveBeenCalledTimes(1),
+        );
+        const response: Response = onStandaloneGet.mock.calls[0][0];
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-type")).toContain(
+          "text/event-stream",
+        );
+      }
+      const result = await callContextualRequest(client, path, requestId);
+      const text = JSON.stringify({
+        action: "accept",
+        content: { name: "Alice" },
+      });
+      expect(result).toMatchObject(
+        path === "prompt" ? [{ content: { text, type: "text" } }] : [{ text }],
+      );
+      expect(onElicit).toHaveBeenCalledTimes(1);
+      if (!standaloneGet) expect(onStandaloneGet).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+      await session?.close();
+      if (httpServer) {
+        await new Promise<void>((resolve, reject) => {
+          httpServer!.close((error) => (error ? reject(error) : resolve()));
+        });
+      }
+      await server.stop();
+    }
+  },
+);
 
 const elicitationTestClient = async () => {
   const client = new Client(
