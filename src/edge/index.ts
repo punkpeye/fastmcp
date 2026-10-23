@@ -37,7 +37,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-import { strictInputSchema } from "../strictInputSchema.js";
+import { strictInputSchema, zodInputSchema } from "../strictInputSchema.js";
 import { unsupportedProtocolVersion } from "./WebStreamableHTTPServerTransport.js";
 
 export { WebStreamableHTTPServerTransport } from "./WebStreamableHTTPServerTransport.js";
@@ -704,7 +704,7 @@ export class EdgeFastMCP {
         // (effect, sury, ...) into edge bundles, which then fail to build.
         const jsonSchema =
           "_zod" in schema
-            ? z.toJSONSchema(schema as z.ZodType)
+            ? zodInputSchema(schema as z.ZodType)
             : zodToJsonSchema(schema as Parameters<typeof zodToJsonSchema>[0]);
         return strictInputSchema(jsonSchema as JsonSchema) as Record<
           string,

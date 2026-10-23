@@ -63,7 +63,7 @@ import type {
 } from "./auth/providers/AuthProvider.js";
 
 import { cancelResponseBody } from "./cancelResponseBody.js";
-import { strictInputSchema } from "./strictInputSchema.js";
+import { strictInputSchema, zodInputSchema } from "./strictInputSchema.js";
 
 export interface Logger {
   debug(...args: unknown[]): void;
@@ -2836,7 +2836,12 @@ export class FastMCPSession<
             annotations: tool.annotations,
             description: tool.description,
             inputSchema: (tool.parameters
-              ? strictInputSchema(await toJsonSchema(tool.parameters))
+              ? strictInputSchema(
+                  tool.parameters["~standard"].vendor === "zod" &&
+                    "_zod" in tool.parameters
+                    ? zodInputSchema(tool.parameters as z.ZodType, "draft-7")
+                    : await toJsonSchema(tool.parameters),
+                )
               : {
                   additionalProperties: false,
                   properties: {},
