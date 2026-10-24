@@ -15,6 +15,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { createEventSource, EventSourceClient } from "eventsource-client";
 import { createServer } from "node:http";
+import { createConnection } from "node:net";
 import { setTimeout as delay } from "timers/promises";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
@@ -3634,6 +3635,110 @@ test("able to close server immediately after starting it", async () => {
   // Therefore, this would have caused error 'Server is not running.'.
   await server.stop();
 });
+
+test.each([false, true])(
+  "HTTP lifecycle: double stop resolves (stateless=%s)",
+  async (stateless) => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const port = await getTestPort();
+    await server.start({
+      httpStream: { host: "127.0.0.1", port, stateless },
+      transportType: "httpStream",
+    });
+
+    await server.stop();
+    await expect(server.stop()).resolves.toBeUndefined();
+  },
+);
+
+test.each([false, true])(
+  "HTTP lifecycle: rejects a second start and closes all listeners (stateless=%s)",
+  async (stateless) => {
+    const isListening = (port: number) =>
+      new Promise<boolean>((resolve) => {
+        const socket = createConnection({ host: "127.0.0.1", port });
+        socket.once("connect", () => {
+          socket.destroy();
+          resolve(true);
+        });
+        socket.once("error", () => resolve(false));
+      });
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const firstPort = await getTestPort();
+    await server.start({
+      httpStream: { host: "127.0.0.1", port: firstPort, stateless },
+      transportType: "httpStream",
+    });
+    const secondPort = await getTestPort();
+
+    try {
+      expect(await isListening(firstPort)).toBe(true);
+      const startError = await server
+        .start({
+          httpStream: { host: "127.0.0.1", port: secondPort, stateless },
+          transportType: "httpStream",
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      expect
+        .soft(startError)
+        .toEqual(new Error("HTTP server is already running"));
+    } finally {
+      await server.stop();
+    }
+
+    expect.soft(await isListening(firstPort)).toBe(false);
+    expect.soft(await isListening(secondPort)).toBe(false);
+  },
+);
+
+test.each([false, true])(
+  "HTTP lifecycle: restarts and preserves caller-owned transports (stateless=%s)",
+  async (stateless) => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    server.addTool({ execute: async () => "hello", name: "greet" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const externalClient = new Client({ name: "external", version: "1.0.0" });
+    const [externalSession] = await Promise.all([
+      server.connect(serverTransport),
+      externalClient.connect(clientTransport),
+    ]);
+    const port = await getTestPort();
+
+    try {
+      for (let run = 0; run < 2; run++) {
+        const client = new Client({ name: "http-client", version: "1.0.0" });
+        await server.start({
+          httpStream: { host: "127.0.0.1", port, stateless },
+          transportType: "httpStream",
+        });
+
+        try {
+          await client.connect(
+            new StreamableHTTPClientTransport(
+              new URL(`http://127.0.0.1:${port}/mcp`),
+              { requestInit: { headers: { Connection: "close" } } },
+            ),
+          );
+          await expect(client.callTool({ name: "greet" })).resolves.toEqual({
+            content: [{ text: "hello", type: "text" }],
+          });
+        } finally {
+          await client.close();
+          await server.stop();
+        }
+
+        await expect(externalClient.ping()).resolves.toEqual({});
+      }
+    } finally {
+      await externalSession.close();
+      await externalClient.close();
+    }
+  },
+);
 
 test("closing event source does not produce error", async () => {
   const port = await getTestPort();
