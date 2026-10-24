@@ -563,6 +563,8 @@ test("handles UserError errors", async () => {
 test("handles UserError errors with extras", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
+      await client.listTools();
+
       // Should include structuredContent if extras is present
       expect(
         await client.callTool({
@@ -614,6 +616,63 @@ test("handles UserError errors with extras", async () => {
     },
   });
 });
+
+test.each([
+  {
+    extras: { code: "E1" },
+    name: "incompatible extras",
+    structuredContent: undefined,
+  },
+  {
+    extras: { ok: false },
+    name: "compatible extras",
+    structuredContent: { ok: false },
+  },
+  {
+    extras: undefined,
+    name: "no extras",
+    structuredContent: undefined,
+  },
+])(
+  "handles UserError errors with outputSchema and $name",
+  async ({ extras, structuredContent }) => {
+    await runWithTestServer({
+      run: async ({ client }) => {
+        // Discovery installs the SDK's output-schema validator.
+        await client.listTools();
+
+        expect(
+          await client.callTool({
+            arguments: {},
+            name: "fail",
+          }),
+        ).toStrictEqual({
+          content: [{ text: "Something went wrong", type: "text" }],
+          isError: true,
+          ...(structuredContent ? { structuredContent } : {}),
+        });
+      },
+      server: async () => {
+        const server = new FastMCP({
+          name: "Test",
+          version: "1.0.0",
+        });
+
+        server.addTool({
+          description: "Throws UserError with an output schema",
+          execute: async () => {
+            throw new UserError("Something went wrong", extras);
+          },
+          name: "fail",
+          outputSchema: z.object({ ok: z.boolean() }),
+          parameters: z.object({}),
+        });
+
+        return server;
+      },
+    });
+  },
+);
 
 test("calling an unknown tool answers -32602 (Invalid params), as the specification's example does", async () => {
   await runWithTestServer({

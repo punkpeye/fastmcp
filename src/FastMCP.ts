@@ -3150,10 +3150,25 @@ export class FastMCPSession<
           }
         } catch (error) {
           if (error instanceof UserError) {
+            let structuredContent = error.extras;
+            if (structuredContent && tool.outputSchema) {
+              try {
+                structuredContent = await this.#validateStructuredContent(
+                  tool,
+                  structuredContent,
+                  request.params.name,
+                );
+              } catch {
+                // Preserve the original error message if its extras cannot be
+                // validated: clients validate structured content even for errors.
+                structuredContent = undefined;
+              }
+            }
+
             return {
               content: [{ text: error.message, type: "text" }],
               isError: true,
-              ...(error.extras ? { structuredContent: error.extras } : {}),
+              ...(structuredContent ? { structuredContent } : {}),
             };
           }
 
