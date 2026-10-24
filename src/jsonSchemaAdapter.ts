@@ -6,7 +6,7 @@ import { StandardSchemaV1 } from "@standard-schema/spec";
 export type JsonSchemaObject = {
   [key: string]: unknown;
   $schema?: string;
-  additionalProperties?: boolean;
+  additionalProperties?: boolean | Record<string, unknown>;
   properties?: Record<string, unknown>;
   required?: string[];
   type: string;
