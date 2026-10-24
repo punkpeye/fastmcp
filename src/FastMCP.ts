@@ -64,7 +64,11 @@ import type {
 } from "./auth/providers/AuthProvider.js";
 
 import { cancelResponseBody } from "./cancelResponseBody.js";
-import { strictInputSchema, zodInputSchema } from "./strictInputSchema.js";
+import {
+  normalizeObjectUnion,
+  strictInputSchema,
+  zodInputSchema,
+} from "./strictInputSchema.js";
 
 export interface Logger {
   debug(...args: unknown[]): void;
@@ -2873,9 +2877,9 @@ export class FastMCPSession<
                 }) as SDKTool["inputSchema"],
             name: tool.name,
             ...(tool.outputSchema && {
-              outputSchema: (await toJsonSchema(
-                tool.outputSchema,
-              )) as SDKTool["outputSchema"],
+              outputSchema: normalizeObjectUnion(
+                await toJsonSchema(tool.outputSchema),
+              ) as SDKTool["outputSchema"],
             }),
             // Pass through _meta for MCP ext-apps UI support (issue #229)
             ...(tool._meta && { _meta: tool._meta }),
