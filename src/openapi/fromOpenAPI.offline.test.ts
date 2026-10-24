@@ -2053,3 +2053,68 @@ test("preserves replacement tokens in server variable defaults when calling a to
     await server.stop();
   }
 });
+
+test.each(["3.0.3", "3.1.0"])(
+  "a $ref into a component sub-schema keeps the component in OpenAPI %s",
+  async (openapi) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("pet"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        components: {
+          schemas: {
+            Pet: {
+              properties: {
+                age: { type: "integer" },
+                name: { type: "string" },
+              },
+              required: ["name"],
+              type: "object",
+            },
+          },
+        },
+        info: { title: "Sub-schema refs", version: "1.0.0" },
+        openapi,
+        paths: {
+          "/pets": {
+            get: {
+              operationId: "listPets",
+              parameters: [
+                {
+                  in: "query",
+                  name: "name",
+                  required: true,
+                  schema: { $ref: "#/components/schemas/Pet/properties/name" },
+                },
+              ],
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const { tools } = await client.listTools();
+      // The definition the ref points into has to travel with the schema, or the
+      // reference cannot be resolved when the tool is called.
+      expect(tools[0].inputSchema).toMatchObject({
+        $defs: { Pet: expect.any(Object) },
+      });
+      const result = await client.callTool({
+        arguments: { name: "Rex" },
+        name: "listPets",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledWith(
+        "https://api.example.com/pets?name=Rex",
+        expect.objectContaining({ method: "GET" }),
+      );
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);

@@ -555,7 +555,9 @@ function filterReferencedDefs(
         typeof value === "string" &&
         value.startsWith("#/$defs/")
       ) {
-        const name = value.slice("#/$defs/".length);
+        // A ref may point into a definition (`#/$defs/Pet/properties/name`),
+        // not just at its root, so the definition is the first pointer segment.
+        const [name = ""] = value.slice("#/$defs/".length).split("/");
 
         if (allDefs[name] && !referenced.has(name)) {
           referenced.add(name);
