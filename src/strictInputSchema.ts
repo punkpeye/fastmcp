@@ -2,6 +2,110 @@ import type { JsonSchema } from "xsschema";
 
 import { z } from "zod";
 
+const isNestedResource = (root: JsonSchema, value: object): boolean =>
+  value !== root && typeof (value as Record<string, unknown>).$id === "string";
+
+/** Resolve only document-local JSON Pointers; never fetch external schemas. */
+const resolvePointer = (root: JsonSchema, ref: string): unknown => {
+  if (!ref.startsWith("#")) {
+    return undefined;
+  }
+
+  let pointer: string;
+  try {
+    pointer = decodeURIComponent(ref.slice(1));
+  } catch {
+    return undefined;
+  }
+  if (pointer !== "" && !pointer.startsWith("/")) {
+    return undefined;
+  }
+
+  let value: unknown = root;
+  for (const part of pointer === "" ? [] : pointer.slice(1).split("/")) {
+    if (/~(?:[^01]|$)/.test(part)) {
+      return undefined;
+    }
+    const key = part.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      isNestedResource(root, value) ||
+      !Object.hasOwn(value, key)
+    ) {
+      return undefined;
+    }
+    value = (value as Record<string, unknown>)[key];
+  }
+  return value;
+};
+
+const isObjectUnion = (root: JsonSchema): boolean => {
+  if (root.anyOf === undefined && root.oneOf === undefined) {
+    return false;
+  }
+
+  // Draft-07 ignores $ref siblings. Later drafts apply them as constraints.
+  // Treat an unspecified/unknown dialect conservatively as draft-07.
+  const refSiblingsApply =
+    root.$schema?.includes("/draft/2020-12/") === true ||
+    root.$schema?.includes("/draft/2019-09/") === true;
+  const visiting = new Set<object>();
+  const provesObject = (candidate: unknown): boolean => {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      Array.isArray(candidate) ||
+      isNestedResource(root, candidate) ||
+      visiting.has(candidate)
+    ) {
+      return false;
+    }
+
+    visiting.add(candidate);
+    try {
+      const schema = candidate as Record<string, unknown>;
+      let referencedObject = false;
+      if (schema.$ref !== undefined) {
+        if (typeof schema.$ref !== "string") {
+          return false;
+        }
+        const referenced = resolvePointer(root, schema.$ref);
+        if (referenced === undefined) {
+          return false;
+        }
+        referencedObject = provesObject(referenced);
+        if (!refSiblingsApply) {
+          return referencedObject;
+        }
+      }
+
+      if (schema.type !== undefined && schema.type !== "object") {
+        return false;
+      }
+      return (
+        schema.type === "object" ||
+        referencedObject ||
+        [schema.anyOf, schema.oneOf].some(
+          (branches) =>
+            Array.isArray(branches) &&
+            branches.length > 0 &&
+            branches.every(provesObject),
+        )
+      );
+    } finally {
+      visiting.delete(candidate);
+    }
+  };
+
+  return provesObject(root);
+};
+
+/** MCP requires an explicit object root even when a union implies it. */
+export function normalizeObjectUnion(schema: JsonSchema): JsonSchema {
+  return isObjectUnion(schema) ? { ...schema, type: "object" } : schema;
+}
+
 /**
  * Closes tool input objects to undeclared keys, like xsschema's
  * `strictJsonSchema`, except for objects made only of additional properties.
@@ -26,6 +130,12 @@ export function strictInputSchema(
   schema: JsonSchema,
   nested = false,
 ): JsonSchema {
+  // Branches already describe their own properties and strictness. Closing
+  // the union root without root properties would reject every branch's keys.
+  if (isObjectUnion(schema)) {
+    return { ...schema, type: "object" };
+  }
+
   const { additionalProperties, properties } = schema;
   const keepsAdditionalProperties =
     Object.keys(properties ?? {}).length === 0 &&
