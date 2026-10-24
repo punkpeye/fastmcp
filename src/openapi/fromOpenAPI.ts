@@ -183,26 +183,15 @@ function registerResource(
 }
 
 /**
- * Decides whether a tool call returns the parsed response object (letting
- * FastMCP populate `structuredContent` against `outputSchema`) or the plain
- * text fallback that always works.
+ * Returns the parsed response object when it matches the advertised output
+ * schema, letting FastMCP populate `structuredContent`. Otherwise, preserves
+ * the response text in a tool error so clients that have listed the tool can
+ * accept the result without structured content. Tools without an output
+ * schema keep their plain-text success result.
  *
- * Real API responses commonly drift from their declared OpenAPI schema, and
- * FastMCP treats an `outputSchema` mismatch as a hard tool error (not a
- * silent fallback) — so a successful HTTP call could otherwise turn into a
- * failed MCP tool call purely from schema drift. This pre-validates against
- * the *exact same* schema instance that's attached as `Tool.outputSchema`
- * (AJV compilation is memoized and deterministic, so this agrees with
- * FastMCP's own re-validation), and only returns the object when it passes.
- *
- * The `Array.isArray` guard is required independently of AJV validation: a
- * schema describing array-shaped data can validate successfully, but
- * FastMCP's `structuredContent` is a plain-object field (`z.record(...)`)
- * that rejects an array at the `ContentResultZodSchema.parse` step — a
- * *different* check than AJV's, positioned after our pre-validation would
- * already have said "fine." Without this guard, an array-typed response
- * schema reintroduces exactly the failure mode this function exists to
- * prevent.
+ * Pre-validation uses the same schema instance as `Tool.outputSchema` so it
+ * agrees with FastMCP's own validation. Arrays are excluded independently
+ * because MCP structured content must be an object.
  */
 async function resolveToolResult(
   result: ExecuteRequestResult,
@@ -210,18 +199,19 @@ async function resolveToolResult(
 ): Promise<unknown> {
   const { json, text } = result;
 
-  if (
-    !outputSchema ||
-    json === null ||
-    typeof json !== "object" ||
-    Array.isArray(json)
-  ) {
+  if (!outputSchema) {
     return text;
   }
 
-  const validation = await outputSchema["~standard"].validate(json);
+  if (json !== null && typeof json === "object" && !Array.isArray(json)) {
+    const validation = await outputSchema["~standard"].validate(json);
 
-  return validation.issues ? text : json;
+    if (!validation.issues) {
+      return json;
+    }
+  }
+
+  return { content: [{ text, type: "text" }], isError: true };
 }
 
 function wrapAsResourceResult({ text }: ExecuteRequestResult): ResourceResult {
