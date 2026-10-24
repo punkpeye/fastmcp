@@ -5,7 +5,10 @@ import { toJsonSchema } from "xsschema";
 
 import { FastMCP } from "./FastMCP.js";
 import { getTestPort } from "./getTestPort.js";
-import { jsonSchemaAdapter } from "./jsonSchemaAdapter.js";
+import {
+  jsonSchemaAdapter,
+  type JsonSchemaObject,
+} from "./jsonSchemaAdapter.js";
 
 const personSchema = {
   properties: {
@@ -15,6 +18,77 @@ const personSchema = {
   required: ["name"],
   type: "object",
 };
+
+test("validates schema-valued additional properties without type assertions", async () => {
+  const dictionary: JsonSchemaObject = {
+    additionalProperties: { type: "string" },
+    type: "object",
+  };
+  const schema = jsonSchemaAdapter(dictionary);
+
+  expect(
+    (await schema["~standard"].validate({ team: "infra" })).issues,
+  ).toBeUndefined();
+  expect((await schema["~standard"].validate({ team: 42 })).issues).toEqual([
+    expect.objectContaining({ path: ["team"] }),
+  ]);
+  await expect(toJsonSchema(schema)).resolves.toEqual(dictionary);
+});
+
+test.each([true, false, undefined])(
+  "preserves additionalProperties: %s validation",
+  async (additionalProperties) => {
+    const schema = jsonSchemaAdapter({ additionalProperties, type: "object" });
+    const result = await schema["~standard"].validate({ team: "infra" });
+
+    if (additionalProperties === false) {
+      expect(result.issues?.length).toBeGreaterThan(0);
+    } else {
+      expect(result.issues).toBeUndefined();
+    }
+  },
+);
+
+test("preserves dictionary schemas through tool discovery and calls", async () => {
+  const dictionary = {
+    additionalProperties: { type: "string" },
+    type: "object",
+  };
+  const server = new FastMCP({ name: "Dictionary server", version: "1.0.0" });
+  const execute = vi.fn(async () => ({ team: "infra" }));
+  server.addTool({
+    execute,
+    name: "dictionary",
+    outputSchema: jsonSchemaAdapter(dictionary),
+    parameters: jsonSchemaAdapter(dictionary),
+  });
+  const port = await getTestPort();
+  const client = new Client({ name: "Dictionary client", version: "1.0.0" });
+  await server.start({ httpStream: { port }, transportType: "httpStream" });
+
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(
+        new URL(`http://localhost:${port}/mcp`),
+      ),
+    );
+    const { tools } = await client.listTools();
+    expect(tools[0]?.inputSchema).toEqual(dictionary);
+    expect(tools[0]?.outputSchema).toEqual(dictionary);
+    const result = await client.callTool({
+      arguments: { team: "infra" },
+      name: "dictionary",
+    });
+    expect(result.structuredContent).toEqual({ team: "infra" });
+    await expect(
+      client.callTool({ arguments: { team: 42 }, name: "dictionary" }),
+    ).rejects.toThrow(/team: must be string/);
+    expect(execute).toHaveBeenCalledTimes(1);
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});
 
 test("accepts input matching the schema", async () => {
   const schema = jsonSchemaAdapter({ ...personSchema });
