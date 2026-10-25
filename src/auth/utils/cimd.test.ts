@@ -119,6 +119,11 @@ describe("resolveCimdClient", () => {
     "https://[fd12:3456::1]/client.json",
     "https://[::ffff:127.0.0.1]/client.json",
     "https://[::ffff:169.254.169.254]/client.json",
+    "https://127.0.0.2/client.json",
+    "https://127.255.255.254/client.json",
+    "https://[::ffff:127.1.2.3]/client.json",
+    "https://localhost./client.json",
+    "https://client.localhost/client.json",
   ])(
     "rejects a loopback or private-range host without fetching it (%s)",
     async (loopbackClientId) => {
