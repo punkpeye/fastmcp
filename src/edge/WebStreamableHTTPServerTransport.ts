@@ -706,8 +706,12 @@ export class WebStreamableHTTPServerTransport implements Transport {
     }
 
     // Process messages through the transport
+    const requestInfo = { headers: Object.fromEntries(request.headers) };
     for (const message of messages) {
-      this.onmessage?.(message, { authInfo: undefined });
+      this.onmessage?.(message, {
+        authInfo: undefined,
+        requestInfo,
+      });
     }
 
     // Nothing to answer: the batch was only notifications and/or responses

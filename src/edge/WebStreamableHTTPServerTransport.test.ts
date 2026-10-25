@@ -223,6 +223,58 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(body.result.serverInfo.name).toBe("TestServer");
   });
 
+  it.each([false, true])(
+    "passes each POST's headers to SDK request handlers (JSON mode: %s)",
+    async (enableJsonResponse) => {
+      const transport = new WebStreamableHTTPServerTransport({
+        enableJsonResponse,
+        sessionIdGenerator: undefined,
+      });
+      const server = new Server(
+        { name: "TestServer", version: "1.0.0" },
+        { capabilities: { tools: {} } },
+      );
+      server.setRequestHandler(
+        CallToolRequestSchema,
+        async (_request, extra) => ({
+          content: [
+            {
+              text: extra.requestInfo?.headers["x-tenant-id"] ?? "missing",
+              type: "text",
+            },
+          ],
+        }),
+      );
+      await server.connect(transport);
+
+      try {
+        await Promise.all(
+          ["tenant-a", "tenant-b"].map(async (tenant, id) => {
+            const request = createPostRequest(
+              createToolCall(id, "tenant"),
+              "application/json, text/event-stream",
+            );
+            request.headers.set("X-Tenant-Id", tenant);
+            const response = await transport.handleRequest(request);
+            expect(response.status).toBe(200);
+            const text = await readSSEBody(response);
+            expect(text).not.toBeNull();
+            const body: JsonResponse = JSON.parse(
+              enableJsonResponse ? text! : text!.split("data: ")[1].trim(),
+            );
+            expect(body).toEqual({
+              id,
+              jsonrpc: "2.0",
+              result: { content: [{ text: tenant, type: "text" }] },
+            });
+          }),
+        );
+      } finally {
+        await server.close();
+      }
+    },
+  );
+
   it("answers 400 for an unsupported MCP-Protocol-Version header", async () => {
     const transport = new WebStreamableHTTPServerTransport({
       enableJsonResponse: true,
