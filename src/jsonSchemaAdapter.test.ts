@@ -28,6 +28,37 @@ test("accepts input matching the schema", async () => {
   });
 });
 
+test.each([
+  "https://json-schema.org/draft/2020-12/schema",
+  "https://json-schema.org/draft/2020-12/schema#",
+])("validates draft 2020-12 schemas (%s)", async ($schema) => {
+  const schema = jsonSchemaAdapter({
+    $schema,
+    properties: {
+      pair: {
+        items: false,
+        prefixItems: [{ type: "string" }, { type: "number" }],
+        type: "array",
+      },
+    },
+    required: ["pair"],
+    type: "object",
+    unevaluatedProperties: false,
+  });
+
+  const valid = await schema["~standard"].validate({ pair: ["answer", 42] });
+  expect(valid.issues).toBeUndefined();
+
+  for (const input of [
+    { pair: [42, "answer"] },
+    { pair: ["answer", 42, true] },
+    { extra: true, pair: ["answer", 42] },
+  ]) {
+    const invalid = await schema["~standard"].validate(input);
+    expect(invalid.issues?.length).toBeGreaterThan(0);
+  }
+});
+
 test("reports issues for input that does not match", async () => {
   const schema = jsonSchemaAdapter({ ...personSchema });
 

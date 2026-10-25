@@ -124,7 +124,11 @@ async function compileSchema(
   let ajvModule;
 
   try {
-    ajvModule = await import("ajv");
+    ajvModule =
+      schema.$schema?.replace(/#$/, "") ===
+      "https://json-schema.org/draft/2020-12/schema"
+        ? await import("ajv/dist/2020.js")
+        : await import("ajv");
   } catch {
     throw new Error(
       'The "ajv" package is required to validate JSON Schema tool parameters. ' +
