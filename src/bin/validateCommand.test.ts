@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { pathToFileURL } from "node:url";
+import ts from "typescript";
 import { afterAll, describe, expect, it } from "vitest";
 
 import {
@@ -82,12 +83,67 @@ describe("buildTypeCheckProject", () => {
         buildTypeCheckProject("/app/tsconfig.json", "/app/src/server.ts"),
       ),
     ).toEqual({
-      compilerOptions: { composite: false, incremental: false },
+      compilerOptions: {
+        composite: false,
+        declarationMap: false,
+        emitDeclarationOnly: false,
+        incremental: false,
+      },
       extends: "./tsconfig.json",
       files: ["/app/src/server.ts"],
       include: [],
     });
   });
+
+  it.each(["declarationMap", "emitDeclarationOnly"])(
+    "type-checks a composite project with implicit declarations and %s",
+    async (option) => {
+      const dir = await makeTemporaryDirectory();
+      const file = join(dir, "server.ts");
+      const tsconfig = join(dir, "tsconfig.json");
+      await writeFile(file, "export const port = 8080;\n", "utf8");
+      await writeFile(
+        tsconfig,
+        JSON.stringify({
+          compilerOptions: { composite: true, [option]: true },
+          files: [file],
+        }),
+        "utf8",
+      );
+
+      const diagnostics = (config: unknown) => {
+        const parsed = ts.parseJsonConfigFileContent(config, ts.sys, dir);
+        const program = ts.createProgram(parsed.fileNames, {
+          ...parsed.options,
+          noEmit: true,
+          skipLibCheck: true,
+          types: [],
+        });
+        return [...parsed.errors, ...ts.getPreEmitDiagnostics(program)].map(
+          (diagnostic) =>
+            ts.flattenDiagnosticMessageText(diagnostic.messageText, " "),
+        );
+      };
+
+      expect(
+        diagnostics(ts.readConfigFile(tsconfig, ts.sys.readFile).config),
+      ).toEqual([]);
+      await withTypeCheckProject(file, async (project) => {
+        const config = ts.readConfigFile(project!, ts.sys.readFile).config;
+        expect(diagnostics(config)).toEqual([]);
+        expect(config.compilerOptions.composite).toBe(false);
+        expect(config.compilerOptions.incremental).toBe(false);
+        await writeFile(file, 'export const port: number = "8080";\n', "utf8");
+        expect(diagnostics(config)).toContain(
+          "Type 'string' is not assignable to type 'number'.",
+        );
+      });
+      expect((await readdir(dir)).sort()).toEqual([
+        "server.ts",
+        "tsconfig.json",
+      ]);
+    },
+  );
 });
 
 describe("findTsconfig", () => {

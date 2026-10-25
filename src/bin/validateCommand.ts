@@ -87,11 +87,18 @@ export const buildTypeCheckCommand = (
  * project rather than the one being validated. Extending the project's config
  * and listing just `file` gets both right. A project that is `incremental` or
  * `composite` still writes a `.tsbuildinfo` under `--noEmit`, so both are
- * switched off: validating a file should leave the project untouched.
+ * switched off: validating a file should leave the project untouched. Disable
+ * declaration output options too, since they may rely on composite's implicit
+ * `declaration: true`.
  */
 export const buildTypeCheckProject = (tsconfig: string, file: string): string =>
   JSON.stringify({
-    compilerOptions: { composite: false, incremental: false },
+    compilerOptions: {
+      composite: false,
+      declarationMap: false,
+      emitDeclarationOnly: false,
+      incremental: false,
+    },
     extends: `./${basename(tsconfig)}`,
     files: [file],
     include: [],
