@@ -3519,7 +3519,9 @@ export class FastMCP<
    * Adds a resource to the server.
    */
   public addResource(resource: Resource<T>) {
-    this.#resources = this.#resources.filter((r) => r.name !== resource.name);
+    this.#resources = this.#resources.filter(
+      (r) => r.name !== resource.name && r.uri !== resource.uri,
+    );
 
     this.#resources.push(resource);
     if (this.#serverState === ServerState.Running) {
@@ -3534,10 +3536,13 @@ export class FastMCP<
     const newResourceNames = new Set(
       resources.map((resource) => resource.name),
     );
-    this.#resources = this.#resources.filter(
-      (r) => !newResourceNames.has(r.name),
+    const resourcesByUri = new Map(
+      resources.map((resource) => [resource.uri, resource]),
     );
-    this.#resources.push(...resources);
+    this.#resources = this.#resources.filter(
+      (r) => !newResourceNames.has(r.name) && !resourcesByUri.has(r.uri),
+    );
+    this.#resources.push(...resourcesByUri.values());
 
     if (this.#serverState === ServerState.Running) {
       this.#resourcesListChanged(this.#resources);

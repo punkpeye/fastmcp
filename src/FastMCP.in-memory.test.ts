@@ -268,6 +268,99 @@ describe("FastMCP in-memory transport", () => {
     await client.close();
   });
 
+  it("uses a re-registered resource consistently for reads and embedded tool results", async () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const uri = "file:///report.txt";
+    server.addResource({
+      load: async () => ({ text: "Previous report" }),
+      name: "Previous report",
+      uri,
+    });
+    server.addTool({
+      execute: async () => ({
+        resource: await server.embedded(uri),
+        type: "resource",
+      }),
+      name: "embedReport",
+    });
+
+    const { client, session } = await connectInMemory(server);
+    try {
+      server.addResource({
+        load: async () => ({ text: "Current report" }),
+        name: "Current report",
+        uri,
+      });
+
+      expect(await client.readResource({ uri })).toMatchObject({
+        contents: [{ text: "Current report", uri }],
+      });
+      expect(await client.callTool({ name: "embedReport" })).toEqual({
+        content: [
+          { resource: { text: "Current report", uri }, type: "resource" },
+        ],
+      });
+
+      server.removeResource("Current report");
+      expect((await client.listResources()).resources).toEqual([]);
+    } finally {
+      await client.close();
+      await session.close();
+    }
+  });
+
+  it.each([false, true])(
+    "uses the last resource in a batch for each URI (replacing existing: %s)",
+    async (replaceExisting) => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      const uri = "file:///report.txt";
+      if (replaceExisting) {
+        server.addResource({
+          load: async () => ({ text: "Previous report" }),
+          name: "Previous report",
+          uri,
+        });
+      }
+      server.addResources([
+        {
+          load: async () => ({ text: "Intermediate report" }),
+          name: "Intermediate report",
+          uri,
+        },
+        {
+          load: async () => ({ text: "Current report" }),
+          name: "Current report",
+          uri,
+        },
+      ]);
+      server.addTool({
+        execute: async () => ({
+          resource: await server.embedded(uri),
+          type: "resource",
+        }),
+        name: "embedReport",
+      });
+
+      const { client, session } = await connectInMemory(server);
+      try {
+        expect(await client.readResource({ uri })).toMatchObject({
+          contents: [{ text: "Current report", uri }],
+        });
+        expect(await client.callTool({ name: "embedReport" })).toEqual({
+          content: [
+            { resource: { text: "Current report", uri }, type: "resource" },
+          ],
+        });
+
+        server.removeResources(["Current report"]);
+        expect((await client.listResources()).resources).toEqual([]);
+      } finally {
+        await client.close();
+        await session.close();
+      }
+    },
+  );
+
   it("completes enum arguments whose names match Object.prototype properties", async () => {
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
     server.addPrompt({
