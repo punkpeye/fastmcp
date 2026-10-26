@@ -29,6 +29,8 @@ test("accepts input matching the schema", async () => {
 });
 
 test.each([
+  "http://json-schema.org/draft/2020-12/schema",
+  "http://json-schema.org/draft/2020-12/schema#",
   "https://json-schema.org/draft/2020-12/schema",
   "https://json-schema.org/draft/2020-12/schema#",
 ])("validates draft 2020-12 schemas (%s)", async ($schema) => {
@@ -48,6 +50,7 @@ test.each([
 
   const valid = await schema["~standard"].validate({ pair: ["answer", 42] });
   expect(valid.issues).toBeUndefined();
+  await expect(toJsonSchema(schema)).resolves.toMatchObject({ $schema });
 
   for (const input of [
     { pair: [42, "answer"] },
