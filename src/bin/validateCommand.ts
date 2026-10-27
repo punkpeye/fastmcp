@@ -89,12 +89,13 @@ export const buildTypeCheckCommand = (
  * `composite` still writes a `.tsbuildinfo` under `--noEmit`, so both are
  * switched off: validating a file should leave the project untouched. Disable
  * declaration output options too, since they may rely on composite's implicit
- * `declaration: true`.
+ * `declaration: true`; `declarationDir` takes a path, so `null` unsets it.
  */
 export const buildTypeCheckProject = (tsconfig: string, file: string): string =>
   JSON.stringify({
     compilerOptions: {
       composite: false,
+      declarationDir: null,
       declarationMap: false,
       emitDeclarationOnly: false,
       incremental: false,

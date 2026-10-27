@@ -85,6 +85,7 @@ describe("buildTypeCheckProject", () => {
     ).toEqual({
       compilerOptions: {
         composite: false,
+        declarationDir: null,
         declarationMap: false,
         emitDeclarationOnly: false,
         incremental: false,
@@ -95,9 +96,13 @@ describe("buildTypeCheckProject", () => {
     });
   });
 
-  it.each(["declarationMap", "emitDeclarationOnly"])(
+  it.each([
+    ["declarationMap", true],
+    ["emitDeclarationOnly", true],
+    ["declarationDir", "types"],
+  ])(
     "type-checks a composite project with implicit declarations and %s",
-    async (option) => {
+    async (option, value) => {
       const dir = await makeTemporaryDirectory();
       const file = join(dir, "server.ts");
       const tsconfig = join(dir, "tsconfig.json");
@@ -105,7 +110,7 @@ describe("buildTypeCheckProject", () => {
       await writeFile(
         tsconfig,
         JSON.stringify({
-          compilerOptions: { composite: true, [option]: true },
+          compilerOptions: { composite: true, [option]: value },
           files: [file],
         }),
         "utf8",
