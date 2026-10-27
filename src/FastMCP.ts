@@ -3538,7 +3538,9 @@ export class FastMCP<
    * Adds a resource to the server.
    */
   public addResource(resource: Resource<T>) {
-    this.#resources = this.#resources.filter((r) => r.name !== resource.name);
+    this.#resources = this.#resources.filter(
+      (r) => r.name !== resource.name && r.uri !== resource.uri,
+    );
 
     this.#resources.push(resource);
     if (this.#serverState === ServerState.Running) {
@@ -3550,13 +3552,14 @@ export class FastMCP<
    * Adds resources to the server.
    */
   public addResources(resources: Resource<T>[]) {
-    const newResourceNames = new Set(
-      resources.map((resource) => resource.name),
-    );
-    this.#resources = this.#resources.filter(
-      (r) => !newResourceNames.has(r.name),
-    );
-    this.#resources.push(...resources);
+    // Replace exactly as addResource() would, one entry at a time, so a
+    // repeated name or URI within the batch also keeps only the last.
+    for (const resource of resources) {
+      this.#resources = this.#resources.filter(
+        (r) => r.name !== resource.name && r.uri !== resource.uri,
+      );
+      this.#resources.push(resource);
+    }
 
     if (this.#serverState === ServerState.Running) {
       this.#resourcesListChanged(this.#resources);
