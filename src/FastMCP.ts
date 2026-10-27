@@ -3599,9 +3599,13 @@ export class FastMCP<
   public addTools<Params extends ToolParameters>(tools: Tool<T, Params>[]) {
     tools.forEach(assertToolSchemas);
 
-    const newToolNames = new Set(tools.map((tool) => tool.name));
-    this.#tools = this.#tools.filter((t) => !newToolNames.has(t.name));
-    this.#tools.push(...(tools as unknown as Tool<T>[]));
+    const toolsByName = new Map(this.#tools.map((tool) => [tool.name, tool]));
+    for (const tool of tools) {
+      // Match sequential addTool() calls, including the last occurrence's order.
+      toolsByName.delete(tool.name);
+      toolsByName.set(tool.name, tool as unknown as Tool<T>);
+    }
+    this.#tools = Array.from(toolsByName.values());
 
     if (this.#serverState === ServerState.Running) {
       this.#toolsListChanged(this.#tools);
