@@ -65,7 +65,7 @@ import type {
 
 import { cancelResponseBody } from "./cancelResponseBody.js";
 import {
-  normalizeObjectUnion,
+  objectRootSchema,
   strictInputSchema,
   zodInputSchema,
 } from "./strictInputSchema.js";
@@ -2877,7 +2877,7 @@ export class FastMCPSession<
                 }) as SDKTool["inputSchema"],
             name: tool.name,
             ...(tool.outputSchema && {
-              outputSchema: normalizeObjectUnion(
+              outputSchema: objectRootSchema(
                 await toJsonSchema(tool.outputSchema),
               ) as SDKTool["outputSchema"],
             }),

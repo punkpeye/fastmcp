@@ -2,108 +2,16 @@ import type { JsonSchema } from "xsschema";
 
 import { z } from "zod";
 
-const isNestedResource = (root: JsonSchema, value: object): boolean =>
-  value !== root && typeof (value as Record<string, unknown>).$id === "string";
-
-/** Resolve only document-local JSON Pointers; never fetch external schemas. */
-const resolvePointer = (root: JsonSchema, ref: string): unknown => {
-  if (!ref.startsWith("#")) {
-    return undefined;
-  }
-
-  let pointer: string;
-  try {
-    pointer = decodeURIComponent(ref.slice(1));
-  } catch {
-    return undefined;
-  }
-  if (pointer !== "" && !pointer.startsWith("/")) {
-    return undefined;
-  }
-
-  let value: unknown = root;
-  for (const part of pointer === "" ? [] : pointer.slice(1).split("/")) {
-    if (/~(?:[^01]|$)/.test(part)) {
-      return undefined;
-    }
-    const key = part.replace(/~1/g, "/").replace(/~0/g, "~");
-    if (
-      typeof value !== "object" ||
-      value === null ||
-      isNestedResource(root, value) ||
-      !Object.hasOwn(value, key)
-    ) {
-      return undefined;
-    }
-    value = (value as Record<string, unknown>)[key];
-  }
-  return value;
-};
-
-const isObjectUnion = (root: JsonSchema): boolean => {
-  if (root.anyOf === undefined && root.oneOf === undefined) {
-    return false;
-  }
-
-  // Draft-07 ignores $ref siblings. Later drafts apply them as constraints.
-  // Treat an unspecified/unknown dialect conservatively as draft-07.
-  const refSiblingsApply =
-    root.$schema?.includes("/draft/2020-12/") === true ||
-    root.$schema?.includes("/draft/2019-09/") === true;
-  const visiting = new Set<object>();
-  const provesObject = (candidate: unknown): boolean => {
-    if (
-      typeof candidate !== "object" ||
-      candidate === null ||
-      Array.isArray(candidate) ||
-      isNestedResource(root, candidate) ||
-      visiting.has(candidate)
-    ) {
-      return false;
-    }
-
-    visiting.add(candidate);
-    try {
-      const schema = candidate as Record<string, unknown>;
-      let referencedObject = false;
-      if (schema.$ref !== undefined) {
-        if (typeof schema.$ref !== "string") {
-          return false;
-        }
-        const referenced = resolvePointer(root, schema.$ref);
-        if (referenced === undefined) {
-          return false;
-        }
-        referencedObject = provesObject(referenced);
-        if (!refSiblingsApply) {
-          return referencedObject;
-        }
-      }
-
-      if (schema.type !== undefined && schema.type !== "object") {
-        return false;
-      }
-      return (
-        schema.type === "object" ||
-        referencedObject ||
-        [schema.anyOf, schema.oneOf].some(
-          (branches) =>
-            Array.isArray(branches) &&
-            branches.length > 0 &&
-            branches.every(provesObject),
-        )
-      );
-    } finally {
-      visiting.delete(candidate);
-    }
-  };
-
-  return provesObject(root);
-};
-
-/** MCP requires an explicit object root even when a union implies it. */
-export function normalizeObjectUnion(schema: JsonSchema): JsonSchema {
-  return isObjectUnion(schema) ? { ...schema, type: "object" } : schema;
+/**
+ * Gives a tool's input or output schema the `type: "object"` MCP requires at
+ * its root, unless it states a type of its own. A union of objects converts to
+ * a bare `anyOf` or `oneOf`, and the SDK client rejects a whole `tools/list`
+ * that contains one, so a single such tool would hide every other. Arguments
+ * and structured content are always objects, so this only rules out values a
+ * tool can never be sent or return.
+ */
+export function objectRootSchema(schema: JsonSchema): JsonSchema {
+  return schema.type === undefined ? { ...schema, type: "object" } : schema;
 }
 
 /**
@@ -121,7 +29,12 @@ export function normalizeObjectUnion(schema: JsonSchema): JsonSchema {
  *
  * An object that declares an empty `properties`, or a bare one at the top of
  * the input, is still closed: that is how a schema says "no keys" —
- * `z.object({})`, or a tool without arguments.
+ * `z.object({})`, or a tool without arguments. A union at the top, though —
+ * `anyOf` or `oneOf` with no `properties` of its own — is left as it is: its
+ * branches declare its keys, and how strict they are, so closing the root
+ * would reject every one of them.
+ *
+ * The root is given an object type (see `objectRootSchema`).
  *
  * Shared by both runtimes, so a tool's advertised input schema does not depend
  * on whether it is served by `FastMCP` or `EdgeFastMCP`.
@@ -130,20 +43,19 @@ export function strictInputSchema(
   schema: JsonSchema,
   nested = false,
 ): JsonSchema {
-  // Branches already describe their own properties and strictness. Closing
-  // the union root without root properties would reject every branch's keys.
-  if (isObjectUnion(schema)) {
-    return { ...schema, type: "object" };
+  const { additionalProperties, anyOf, oneOf, properties } = schema;
+
+  if (!nested && !properties && (anyOf || oneOf)) {
+    return objectRootSchema(schema);
   }
 
-  const { additionalProperties, properties } = schema;
   const keepsAdditionalProperties =
     Object.keys(properties ?? {}).length === 0 &&
     (typeof additionalProperties === "object" ||
       additionalProperties === true ||
       (nested && additionalProperties === undefined && !properties));
 
-  return {
+  const strict = {
     ...schema,
     ...(keepsAdditionalProperties ? {} : { additionalProperties: false }),
     ...(properties && {
@@ -157,6 +69,8 @@ export function strictInputSchema(
       ),
     }),
   };
+
+  return nested ? strict : objectRootSchema(strict);
 }
 
 /**

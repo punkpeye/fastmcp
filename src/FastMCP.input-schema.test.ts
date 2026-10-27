@@ -1,5 +1,4 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import type { JsonSchema } from "xsschema";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -11,10 +10,7 @@ import { z } from "zod";
 import { z as z3 } from "zod/v3";
 
 import { FastMCP, jsonSchemaAdapter } from "./FastMCP.js";
-import {
-  normalizeObjectUnion,
-  strictInputSchema,
-} from "./strictInputSchema.js";
+import { objectRootSchema } from "./strictInputSchema.js";
 
 const objectBranches = [
   z.object({ kind: z.literal("a"), n: z.number() }),
@@ -237,168 +233,24 @@ const acceptsArguments = (schema: object, args: unknown) =>
   new Ajv({ strict: false }).validate(schema, args);
 
 test.each([
-  { name: "an array", parameters: z.array(z.string()) },
   {
-    name: "a mixed object/string union",
-    parameters: z.union([objectBranches[0], z.string()]),
-  },
-  {
-    name: "a nested mixed union",
-    parameters: z.union([
-      objectBranches[0],
-      z.union([objectBranches[1], z.string()]),
-    ]),
+    name: "a union that also admits a string",
+    parameters: z.union([...objectBranches, z.string()]),
   },
   {
     name: "a nullable union",
     parameters: z.union(objectBranches).nullable(),
   },
-  {
-    name: "an unresolved $ref union",
-    parameters: unionAdapter({
-      anyOf: [{ type: "object" }, { $ref: "#/$defs/missing" }],
-    }),
-  },
-])("still rejects $name root in tools/list", async ({ parameters }) => {
-  await expect(listInputSchema(parameters)).rejects.toThrow(
-    'Invalid input: expected \\"object\\"',
-  );
+])("lists $name with an object root", async ({ parameters }) => {
+  const schema = await listInputSchema(parameters);
+  expect(schema.type).toBe("object");
+  for (const value of objectValues) {
+    expect(acceptsArguments(schema, value)).toBe(true);
+  }
 });
 
-test.each([
-  {
-    name: "a nested oneOf",
-    normalized: true,
-    schema: { oneOf: [{ oneOf: [{ minProperties: 1, type: "object" }] }] },
-  },
-  ...["$defs", "definitions"].map((definitions) => ({
-    name: `an escaped pointer into ${definitions}`,
-    normalized: true,
-    schema: {
-      anyOf: [{ $ref: `#/${definitions}/a~1b~0c%20d` }],
-      [definitions]: { "a/b~c d": { minProperties: 1, type: "object" } },
-    },
-  })),
-  {
-    name: "an unresolved reference with an object sibling",
-    normalized: false,
-    schema: { anyOf: [{ $ref: "#/$defs/missing", type: "object" }] },
-  },
-  {
-    name: "an external reference",
-    normalized: false,
-    schema: { anyOf: [{ $ref: "https://example.com/schema", type: "object" }] },
-  },
-  {
-    name: "a reference cycle",
-    normalized: false,
-    schema: {
-      $defs: { loop: { $ref: "#/$defs/loop" } },
-      anyOf: [{ $ref: "#/$defs/loop" }],
-    },
-  },
-  {
-    name: "a reference to the union root",
-    normalized: false,
-    schema: { anyOf: [{ $ref: "#" }] },
-  },
-  {
-    name: "a draft-07 reference with an ignored object sibling",
-    normalized: false,
-    schema: {
-      $schema: "http://json-schema.org/draft-07/schema#",
-      anyOf: [{ $ref: "#/definitions/anything", type: "object" }],
-      definitions: { anything: {} },
-    },
-  },
-  {
-    name: "a 2020-12 reference with an object sibling",
-    normalized: true,
-    schema: {
-      $defs: { anything: {} },
-      $schema: "https://json-schema.org/draft/2020-12/schema",
-      anyOf: [{ $ref: "#/$defs/anything", type: "object" }],
-    },
-  },
-  {
-    name: "a draft-07 reference with ignored mixed-union siblings",
-    normalized: true,
-    schema: {
-      $schema: "http://json-schema.org/draft-07/schema#",
-      anyOf: [{ $ref: "#/definitions/object", anyOf: [{ type: "string" }] }],
-      definitions: { object: { type: "object" } },
-    },
-  },
-  {
-    name: "a mixed oneOf beside an object-only anyOf",
-    normalized: true,
-    schema: {
-      anyOf: [{ type: "object" }],
-      oneOf: [{ type: "object" }, { type: "string" }],
-    },
-  },
-  {
-    name: "an object-only oneOf beside a mixed anyOf",
-    normalized: true,
-    schema: {
-      anyOf: [{ type: "object" }, { type: "string" }],
-      oneOf: [{ type: "object" }],
-    },
-  },
-  {
-    name: "a percent-encoded pointer with a leading slash",
-    normalized: true,
-    schema: {
-      anyOf: [{ $ref: "#%2Fdefinitions%2Fobject" }],
-      definitions: { object: { type: "object" } },
-    },
-  },
-  {
-    name: "a reference inside a nested $id resource",
-    normalized: false,
-    schema: {
-      $id: "https://example.com/root",
-      anyOf: [
-        {
-          $id: "inner",
-          anyOf: [{ $ref: "#/definitions/thing" }],
-          definitions: { thing: { type: "string" } },
-        },
-      ],
-      definitions: { thing: { type: "object" } },
-    },
-  },
-  {
-    name: "a reference beneath a nested $id resource",
-    normalized: false,
-    schema: {
-      $id: "https://example.com/root",
-      anyOf: [{ $ref: "#/definitions/inner/anyOf/0" }],
-      definitions: { inner: { $id: "inner", anyOf: [{ type: "object" }] } },
-    },
-  },
-  {
-    name: "a nested nullable union",
-    normalized: false,
-    schema: {
-      anyOf: [
-        { type: "object" },
-        { oneOf: [{ type: "object" }, { type: "null" }] },
-      ],
-    },
-  },
-])("proves objectness conservatively for $name", ({ normalized, schema }) => {
-  const original = structuredClone(schema);
-  expect(normalizeObjectUnion(schema as JsonSchema)).toEqual(
-    normalized ? { ...schema, type: "object" } : schema,
-  );
-  if (normalized) {
-    expect(strictInputSchema(schema as JsonSchema)).toEqual({
-      ...schema,
-      type: "object",
-    });
-  }
-  expect(schema).toEqual(original);
+test("keeps a root type the schema states", () => {
+  expect(objectRootSchema({ type: "array" })).toEqual({ type: "array" });
 });
 
 test.each(

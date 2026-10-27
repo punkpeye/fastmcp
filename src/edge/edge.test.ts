@@ -148,36 +148,6 @@ describe("EdgeFastMCP", () => {
     },
   );
 
-  it.each([
-    {
-      name: "a nested mixed union",
-      parameters: z.union([
-        z.object({ kind: z.literal("a") }),
-        z.union([z.object({ kind: z.literal("b") }), z.string()]),
-      ]),
-    },
-    {
-      name: "a nullable object union",
-      parameters: z
-        .union([
-          z.object({ kind: z.literal("a") }),
-          z.object({ kind: z.literal("b") }),
-        ])
-        .nullable(),
-    },
-  ])("leaves $name unnormalized", async ({ parameters }) => {
-    const server = new EdgeFastMCP({ name: "Mixed", version: "1.0.0" });
-    server.addTool({
-      description: "Keep mixed and nullable roots excluded",
-      execute: async () => "ok",
-      name: "mixed",
-      parameters,
-    });
-    const result = await postResult(server, "tools/list");
-    expect(result.tools[0].inputSchema.type).toBeUndefined();
-    expect(() => ListToolsResultSchema.parse(result)).toThrow();
-  });
-
   it.each(
     [
       {
