@@ -181,9 +181,14 @@ function expandIPv6(host: string): null | number[] {
  * complete SSRF mitigation (does not defend against DNS rebinding).
  */
 function isPrivateOrLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  // A trailing dot names the same host (`localhost.`), and every name under
+  // `.localhost` resolves to loopback (RFC 6761, section 6.3).
+  const host = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "");
 
-  if (host === "localhost" || host === "0.0.0.0") {
+  if (host === "localhost" || host.endsWith(".localhost")) {
     return true;
   }
 
@@ -192,7 +197,11 @@ function isPrivateOrLoopbackHost(hostname: string): boolean {
   }
 
   return (
-    host === "127.0.0.1" ||
+    /^0\./.test(host) || // 0.0.0.0/8, "this network"
+    /^127\./.test(host) || // 127.0.0.0/8, all of it loopback
+    // 100.64.0.0/10, shared (CGNAT) space — Alibaba Cloud's metadata
+    // endpoint is 100.100.100.200.
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) ||
     /^169\.254\./.test(host) ||
     /^10\./.test(host) ||
     /^192\.168\./.test(host) ||
