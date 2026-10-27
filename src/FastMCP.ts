@@ -3981,6 +3981,10 @@ export class FastMCP<
         this.#serverState = ServerState.Running;
       }
     } else if (config.transportType === "httpStream") {
+      if (this.#httpStreamServer) {
+        throw new Error("HTTP server is already running");
+      }
+
       const httpConfig = config.httpStream;
       const protocol =
         httpConfig.sslCert || httpConfig.sslKey ? "https" : "http";
@@ -4151,6 +4155,7 @@ export class FastMCP<
 
     if (this.#httpStreamServer) {
       await this.#httpStreamServer.close();
+      this.#httpStreamServer = null;
     }
     this.#serverState = ServerState.Stopped;
   }
