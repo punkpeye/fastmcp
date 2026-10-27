@@ -124,6 +124,10 @@ describe("resolveCimdClient", () => {
     "https://[::ffff:127.1.2.3]/client.json",
     "https://localhost./client.json",
     "https://client.localhost/client.json",
+    "https://0.1.2.3/client.json",
+    "https://100.64.0.1/client.json",
+    "https://100.100.100.200/client.json",
+    "https://100.127.255.254/client.json",
   ])(
     "rejects a loopback or private-range host without fetching it (%s)",
     async (loopbackClientId) => {
@@ -140,6 +144,18 @@ describe("resolveCimdClient", () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    "https://100.63.255.255/client.json",
+    "https://100.128.0.1/client.json",
+  ])("fetches a host just outside 100.64.0.0/10 (%s)", async (clientId) => {
+    const fetchSpy = vi.fn(async () => new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await resolveCimdClient(clientId, REDIRECT_URI, alwaysAllow);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
 
   it("rejects when the fetch fails", async () => {
     vi.stubGlobal(
