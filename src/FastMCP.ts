@@ -3588,13 +3588,12 @@ export class FastMCP<
   public addResourceTemplates<
     const Args extends InputResourceTemplateArgument[],
   >(resources: InputResourceTemplate<T, Args>[]) {
-    const newResourceTemplateNames = new Set(
-      resources.map((resource) => resource.name),
-    );
-    this.#resourcesTemplates = this.#resourcesTemplates.filter(
-      (t) => !newResourceTemplateNames.has(t.name),
-    );
-    this.#resourcesTemplates.push(...resources);
+    for (const resource of resources) {
+      this.#resourcesTemplates = this.#resourcesTemplates.filter(
+        (template) => template.name !== resource.name,
+      );
+      this.#resourcesTemplates.push(resource);
+    }
 
     if (this.#serverState === ServerState.Running) {
       this.#resourceTemplatesListChanged(this.#resourcesTemplates);
