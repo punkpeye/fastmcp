@@ -2,6 +2,11 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import {
+  ErrorCode,
+  ToolListChangedNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { afterAll, beforeAll, describe, expect, it, test } from "vitest";
 import { z } from "zod";
 
@@ -116,6 +121,136 @@ const runWithTestServer = async ({
 
   return port;
 };
+
+test.each([false, true])(
+  "keeps the last tool with a repeated name in a batch (connected: %s)",
+  async (connected) => {
+    const server = new FastMCP({ name: "Batch tools", version: "1.0.0" });
+    server.addTool({ execute: async () => "keep", name: "keep" });
+    server.addTool({ execute: async () => "old", name: "replace" });
+
+    const client = new Client({ name: "batch-client", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const notifications: unknown[] = [];
+    client.setNotificationHandler(
+      ToolListChangedNotificationSchema,
+      (notification) => {
+        notifications.push(notification);
+      },
+    );
+    const connect = () =>
+      Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+
+    try {
+      if (connected) {
+        await connect();
+        await client.listTools();
+      }
+
+      server.addTools([
+        {
+          description: "superseded",
+          execute: async () => ({ value: "obsolete" }),
+          name: "replace",
+          outputSchema: z.object({ value: z.literal("obsolete") }),
+          parameters: z.object({ value: z.string().min(5) }),
+        },
+        { execute: async () => "new tool", name: "added" },
+        {
+          description: "current",
+          execute: async ({ value }) => ({ value }),
+          name: "replace",
+          outputSchema: z.object({ value: z.string().max(4) }),
+          parameters: z.object({ value: z.string().max(4) }),
+        },
+      ]);
+
+      if (!connected) {
+        await connect();
+      }
+      const { tools } = await client.listTools();
+      expect(tools.map((tool) => tool.name)).toEqual([
+        "keep",
+        "added",
+        "replace",
+      ]);
+      expect(tools[2].description).toBe("current");
+      expect(tools[2].inputSchema.properties?.value).toMatchObject({
+        maxLength: 4,
+        type: "string",
+      });
+      expect(tools[2].outputSchema?.properties?.value).toMatchObject({
+        maxLength: 4,
+        type: "string",
+      });
+      expect(
+        await client.callTool({ arguments: { value: "new" }, name: "replace" }),
+      ).toMatchObject({ structuredContent: { value: "new" } });
+      await expect(
+        client.callTool({ arguments: { value: "too long" }, name: "replace" }),
+      ).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
+      expect(await client.callTool({ name: "keep" })).toMatchObject({
+        content: [{ text: "keep", type: "text" }],
+      });
+      expect(await client.callTool({ name: "added" })).toMatchObject({
+        content: [{ text: "new tool", type: "text" }],
+      });
+      expect(notifications).toHaveLength(connected ? 1 : 0);
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each(["parameters", "outputSchema"] as const)(
+  "rejects an invalid batch %s without replacing existing tools",
+  async (schemaField) => {
+    const server = new FastMCP({ name: "Batch tools", version: "1.0.0" });
+    server.addTool({ execute: async () => "original", name: "replace" });
+    const client = new Client({ name: "batch-client", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const notifications: unknown[] = [];
+    client.setNotificationHandler(
+      ToolListChangedNotificationSchema,
+      (notification) => {
+        notifications.push(notification);
+      },
+    );
+
+    try {
+      await Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+      const originalTools = await client.listTools();
+      expect(() =>
+        server.addTools([
+          { execute: async () => "new", name: "added" },
+          { execute: async () => "replacement", name: "replace" },
+          {
+            execute: async () => "invalid",
+            name: "invalid",
+            [schemaField]: {} as never,
+          },
+        ]),
+      ).toThrow(`Tool 'invalid' ${schemaField} must implement Standard Schema`);
+      expect(await client.listTools()).toEqual(originalTools);
+      expect(await client.callTool({ name: "replace" })).toMatchObject({
+        content: [{ text: "original", type: "text" }],
+      });
+      expect(notifications).toHaveLength(0);
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);
 
 describe("FastMCP Batch Methods", () => {
   const createTestServer = () => {
