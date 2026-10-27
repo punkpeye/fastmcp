@@ -3,6 +3,18 @@ import type { JsonSchema } from "xsschema";
 import { z } from "zod";
 
 /**
+ * Gives a tool's input or output schema the `type: "object"` MCP requires at
+ * its root, unless it states a type of its own. A union of objects converts to
+ * a bare `anyOf` or `oneOf`, and the SDK client rejects a whole `tools/list`
+ * that contains one, so a single such tool would hide every other. Arguments
+ * and structured content are always objects, so this only rules out values a
+ * tool can never be sent or return.
+ */
+export function objectRootSchema(schema: JsonSchema): JsonSchema {
+  return schema.type === undefined ? { ...schema, type: "object" } : schema;
+}
+
+/**
  * Closes tool input objects to undeclared keys, like xsschema's
  * `strictJsonSchema`, except for objects made only of additional properties.
  * Closing one of those advertises an object that accepts nothing but `{}`,
@@ -17,7 +29,12 @@ import { z } from "zod";
  *
  * An object that declares an empty `properties`, or a bare one at the top of
  * the input, is still closed: that is how a schema says "no keys" —
- * `z.object({})`, or a tool without arguments.
+ * `z.object({})`, or a tool without arguments. A union at the top, though —
+ * `anyOf` or `oneOf` with no `properties` of its own — is left as it is: its
+ * branches declare its keys, and how strict they are, so closing the root
+ * would reject every one of them.
+ *
+ * The root is given an object type (see `objectRootSchema`).
  *
  * Shared by both runtimes, so a tool's advertised input schema does not depend
  * on whether it is served by `FastMCP` or `EdgeFastMCP`.
@@ -26,14 +43,19 @@ export function strictInputSchema(
   schema: JsonSchema,
   nested = false,
 ): JsonSchema {
-  const { additionalProperties, properties } = schema;
+  const { additionalProperties, anyOf, oneOf, properties } = schema;
+
+  if (!nested && !properties && (anyOf || oneOf)) {
+    return objectRootSchema(schema);
+  }
+
   const keepsAdditionalProperties =
     Object.keys(properties ?? {}).length === 0 &&
     (typeof additionalProperties === "object" ||
       additionalProperties === true ||
       (nested && additionalProperties === undefined && !properties));
 
-  return {
+  const strict = {
     ...schema,
     ...(keepsAdditionalProperties ? {} : { additionalProperties: false }),
     ...(properties && {
@@ -47,6 +69,8 @@ export function strictInputSchema(
       ),
     }),
   };
+
+  return nested ? strict : objectRootSchema(strict);
 }
 
 /**

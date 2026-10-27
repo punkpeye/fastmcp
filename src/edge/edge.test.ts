@@ -1,8 +1,10 @@
 import {
   CallToolResultSchema,
   LATEST_PROTOCOL_VERSION,
+  ListToolsResultSchema,
   SUPPORTED_PROTOCOL_VERSIONS,
 } from "@modelcontextprotocol/sdk/types.js";
+import { Ajv } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -33,7 +35,119 @@ const postResult = async (
   return body.result;
 };
 
+const unionValues = [
+  { kind: "a", n: 1 },
+  { kind: "b", s: "ok" },
+];
+const repeatedUnionBranch = z3.object({
+  kind: z3.literal("a"),
+  n: z3.number(),
+});
+
 describe("EdgeFastMCP", () => {
+  it.each(
+    [
+      {
+        name: "a discriminated union",
+        parameters: z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("a"), n: z.number() }),
+          z.object({ kind: z.literal("b"), s: z.string() }),
+        ]),
+      },
+      {
+        name: "an object union",
+        parameters: z.union([
+          z.object({ kind: z.literal("a"), n: z.number() }),
+          z.object({ kind: z.literal("b"), s: z.string() }),
+        ]),
+      },
+      {
+        name: "a Zod 3 object union",
+        parameters: z3.union([
+          z3.object({ kind: z3.literal("a"), n: z3.number() }),
+          z3.object({ kind: z3.literal("b"), s: z3.string() }),
+        ]),
+      },
+      {
+        expectedBranches: [
+          { type: "object" },
+          { anyOf: [{ type: "object" }, { type: "object" }] },
+        ],
+        name: "a nested Zod 4 object union",
+        parameters: z.union([
+          z.object({ kind: z.literal("a"), n: z.number() }),
+          z.union([
+            z.object({ kind: z.literal("b"), s: z.string() }),
+            z.object({ flag: z.boolean(), kind: z.literal("c") }),
+          ]),
+        ]),
+        values: [...unionValues, { flag: true, kind: "c" }],
+      },
+      {
+        expectedBranches: [
+          { type: "object" },
+          { anyOf: [{ type: "object" }, { type: "object" }] },
+        ],
+        name: "a nested Zod 3 object union",
+        parameters: z3.union([
+          repeatedUnionBranch,
+          z3.union([
+            z3.object({ kind: z3.literal("b"), s: z3.string() }),
+            z3.object({ flag: z3.boolean(), kind: z3.literal("c") }),
+          ]),
+        ]),
+        values: [...unionValues, { flag: true, kind: "c" }],
+      },
+      {
+        expectedBranches: [{ type: "object" }, { $ref: "#/anyOf/0" }],
+        name: "a Zod 3 local $ref branch union",
+        parameters: z3.union([repeatedUnionBranch, repeatedUnionBranch]),
+        values: [unionValues[0]],
+      },
+    ].map((entry) => ({ ...entry, values: entry.values ?? unionValues })),
+  )(
+    "lists and calls $name parameters",
+    async ({ expectedBranches, parameters, values }) => {
+      const server = new EdgeFastMCP({ name: "Unions", version: "1.0.0" });
+      server.addTool({
+        description: "Accept either branch",
+        execute: async (args) => JSON.stringify(args),
+        name: "union",
+        parameters,
+      });
+      const { tools } = ListToolsResultSchema.parse(
+        await postResult(server, "tools/list"),
+      );
+      const schema = tools[0].inputSchema;
+      expect(schema.type).toBe("object");
+      expect(schema.properties).toBeUndefined();
+      expect(schema.additionalProperties).toBeUndefined();
+      if (expectedBranches) {
+        expect(schema.anyOf).toMatchObject(expectedBranches);
+      }
+      const validator =
+        schema.$schema === "http://json-schema.org/draft-07/schema#"
+          ? new Ajv({ strict: false })
+          : new Ajv2020({ strict: false });
+      const validate = validator.compile(schema);
+      for (const value of values) {
+        expect(validate(value)).toBe(true);
+        expect(validate({ ...value, extra: true })).toBe(false);
+        const result = CallToolResultSchema.parse(
+          await postResult(server, "tools/call", {
+            arguments: value,
+            name: "union",
+          }),
+        );
+        expect(result.isError).toBeFalsy();
+        expect(result.content).toEqual([
+          { text: JSON.stringify(value), type: "text" },
+        ]);
+      }
+      expect(validate({ kind: "a", n: "wrong" })).toBe(false);
+    },
+  );
+
   it.each(
     [
       {
