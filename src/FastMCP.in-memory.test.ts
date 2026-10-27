@@ -361,6 +361,32 @@ describe("FastMCP in-memory transport", () => {
     },
   );
 
+  it("uses the last resource in a batch for each name", async () => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    server.addResources([
+      {
+        load: async () => ({ text: "Previous report" }),
+        name: "Report",
+        uri: "file:///previous.txt",
+      },
+      {
+        load: async () => ({ text: "Current report" }),
+        name: "Report",
+        uri: "file:///current.txt",
+      },
+    ]);
+
+    const { client, session } = await connectInMemory(server);
+    try {
+      expect((await client.listResources()).resources).toEqual([
+        { name: "Report", uri: "file:///current.txt" },
+      ]);
+    } finally {
+      await client.close();
+      await session.close();
+    }
+  });
+
   it("completes enum arguments whose names match Object.prototype properties", async () => {
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
     server.addPrompt({
