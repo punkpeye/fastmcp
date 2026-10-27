@@ -263,11 +263,13 @@ test.each([
   async ({ connected, replacementUri }) => {
     const server = new FastMCP({ name: "Batch templates", version: "1.0.0" });
     server.addResourceTemplate({
+      arguments: [{ name: "id", required: true }],
       load: async () => ({ text: "keep" }),
       name: "keep",
       uriTemplate: "keep://{id}",
     });
     server.addResourceTemplate({
+      arguments: [{ name: "id", required: true }],
       load: async () => ({ text: "original" }),
       name: "replace",
       uriTemplate: "original://{id}",
@@ -304,22 +306,26 @@ test.each([
 
       server.addResourceTemplates([
         {
+          arguments: [{ name: "id", required: true }],
           description: "superseded",
           load: async () => ({ text: "obsolete" }),
           name: "replace",
           uriTemplate: "docs://{id}",
         },
         {
+          arguments: [{ name: "id", required: true }],
           load: async () => ({ text: "added" }),
           name: "added",
           uriTemplate: "added://{id}",
         },
         {
+          arguments: [{ name: "id", required: true }],
           load: async () => ({ text: "shared" }),
           name: "shared",
           uriTemplate: "keep://{id}",
         },
         {
+          arguments: [{ name: "id", required: true }],
           description: "current",
           load: async ({ id }) => ({ text: "current " + id }),
           name: "replace",
