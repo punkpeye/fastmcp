@@ -1937,31 +1937,59 @@ test.each(["Application/JSON", "APPLICATION/JSON; charset=utf-8"])(
   },
 );
 
-test("outputSchema: a real response that doesn't match the wired schema falls back to plain text, not an error", async () => {
-  const fetchImpl = vi.fn<typeof fetch>(
-    async () =>
-      new Response(JSON.stringify({ unexpected: true }), {
-        headers: { "content-type": "application/json" },
-      }),
-  );
+test.each([
+  {
+    body: JSON.stringify({ unexpected: true }, null, 2),
+    label: "schema drift",
+  },
+  { body: JSON.stringify(["a", "b"], null, 2), label: "an array" },
+  { body: "null", label: "null" },
+  { body: "42", label: "a number" },
+  { body: "true", label: "a boolean" },
+  { body: '"sprocket"', label: "a string" },
+  { body: "invalid JSON", label: "invalid JSON" },
+  {
+    body: '{"id":"w1","name":"sprocket"}',
+    contentType: "text/plain",
+    label: "conforming JSON served as text/plain",
+  },
+  { body: "", label: "an empty body" },
+])(
+  "outputSchema: $label returns a tool error preserving the response text",
+  async ({ body, contentType = "application/json" }) => {
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(body, {
+          headers: { "content-type": contentType },
+        }),
+    );
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: WIDGETS_TYPED_SPEC,
+    });
+    const client = await connect(server);
 
-  const server = await fromOpenAPI({
-    fetch: fetchImpl,
-    spec: WIDGETS_TYPED_SPEC,
-  });
-  const client = await connect(server);
+    try {
+      const { tools } = await client.listTools();
+      expect(
+        tools.find((tool) => tool.name === "createTypedWidget")?.outputSchema,
+      ).toBeDefined();
 
-  const result = await client.callTool({
-    arguments: { name: "sprocket" },
-    name: "createTypedWidget",
-  });
+      const result = await client.callTool({
+        arguments: { name: "sprocket" },
+        name: "createTypedWidget",
+      });
 
-  expect(result.isError).toBeFalsy();
-  expect(result.structuredContent).toBeUndefined();
-  expect((result.content as { text: string }[])[0].text).toContain(
-    "unexpected",
-  );
-});
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toBeUndefined();
+      expect(result.content).toEqual([{ text: body, type: "text" }]);
+    } finally {
+      await Promise.all(server.sessions.map((session) => session.close()));
+      await client.close();
+      await server.stop();
+    }
+  },
+);
 
 test("outputSchema: an array-shaped response schema is never wired, and a real array response stays plain text", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
