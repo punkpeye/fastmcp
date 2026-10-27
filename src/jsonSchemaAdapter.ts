@@ -121,10 +121,17 @@ export function jsonSchemaAdapter(
 async function compileSchema(
   schema: JsonSchemaObject,
 ): Promise<AjvValidateFunction> {
+  const dialect = schema.$schema
+    ?.replace(/^http:\/\//, "https://")
+    .replace(/#$/, "");
+  const isDraft2020 =
+    dialect === "https://json-schema.org/draft/2020-12/schema";
   let ajvModule;
 
   try {
-    ajvModule = await import("ajv");
+    ajvModule = isDraft2020
+      ? await import("ajv/dist/2020.js")
+      : await import("ajv");
   } catch {
     throw new Error(
       'The "ajv" package is required to validate JSON Schema tool parameters. ' +
@@ -153,7 +160,9 @@ async function compileSchema(
     // ajv-formats is optional; `format` keywords are simply not enforced.
   }
 
-  return ajv.compile(schema);
+  // AJV registers the 2020-12 meta-schema under its canonical HTTPS URI.
+  // Normalize only the compiled copy, preserving the caller's advertised schema.
+  return ajv.compile(isDraft2020 ? { ...schema, $schema: dialect } : schema);
 }
 
 function toIssue(error: AjvErrorObject): StandardSchemaV1.Issue {
