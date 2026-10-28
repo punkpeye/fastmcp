@@ -5,10 +5,7 @@ import { z } from "zod";
 
 import { FastMCP } from "./FastMCP.js";
 
-const callDiscoveredTool = async (
-  outputSchema: z.ZodType,
-  output: Record<string, unknown>,
-) => {
+const callDiscoveredTool = async (outputSchema: z.ZodType, output: unknown) => {
   const server = new FastMCP({ name: "Inventory", version: "1.0.0" });
   server.addTool({
     execute: async () => output,
@@ -95,4 +92,41 @@ test.each([
       type: "text",
     },
   ]);
+});
+
+test.each([
+  { name: "a string", output: "12 in stock" },
+  { name: "undefined", output: undefined },
+  {
+    name: "content without structuredContent",
+    output: { content: [{ text: "12 in stock", type: "text" }] },
+  },
+])("returns a tool error for $name after tools/list", async ({ output }) => {
+  const { result } = await callDiscoveredTool(
+    z.object({ warehouse_a: z.number() }),
+    output,
+  );
+
+  expect(result).toEqual({
+    content: [
+      {
+        text: "Tool 'getInventory' returned no structured content. Please return a value that matches the tool's outputSchema.",
+        type: "text",
+      },
+    ],
+    isError: true,
+  });
+});
+
+test("keeps a tool's own error result after tools/list", async () => {
+  const output = {
+    content: [{ text: "warehouse offline", type: "text" }],
+    isError: true,
+  };
+  const { result } = await callDiscoveredTool(
+    z.object({ warehouse_a: z.number() }),
+    output,
+  );
+
+  expect(result).toEqual(output);
 });
