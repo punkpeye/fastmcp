@@ -1406,6 +1406,46 @@ type FastMCPSessionAuth = Record<string, unknown> | undefined;
 
 class FastMCPSessionEventEmitter extends FastMCPSessionEventEmitterBase {}
 
+/**
+ * Wraps a Node.js request body in a web stream that only starts reading the
+ * request once something actually consumes the body.
+ *
+ * Handing the IncomingMessage itself to `new Request()` lets the runtime take
+ * over the Node stream up front: on Node.js 26 its "data"/"end" events no
+ * longer reach listeners attached later. Requests that Hono does not match
+ * fall through to handlers (such as the OAuth proxy endpoints) that read the
+ * body straight from the IncomingMessage, so it must stay untouched until a
+ * Hono route reads it. `highWaterMark: 0` stops the stream from pre-pulling
+ * a chunk when it is created.
+ */
+const lazyRequestBody = (
+  req: http.IncomingMessage,
+): ReadableStream<Uint8Array> => {
+  let iterator: AsyncIterator<Buffer | string> | undefined;
+
+  return new ReadableStream<Uint8Array>(
+    {
+      async cancel(reason) {
+        await iterator?.return?.(reason);
+      },
+      async pull(controller) {
+        iterator ??= req[Symbol.asyncIterator]();
+        const { done, value } = await iterator.next();
+        if (done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(
+          typeof value === "string"
+            ? Buffer.from(value)
+            : new Uint8Array(value),
+        );
+      },
+    },
+    { highWaterMark: 0 },
+  );
+};
+
 export class FastMCPSession<
   T extends FastMCPSessionAuth = FastMCPSessionAuth,
 > extends FastMCPSessionEventEmitter {
@@ -5009,8 +5049,7 @@ export class FastMCP<
 
     if (hasBody) {
       return new Request(url.toString(), {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        body: req as any, // Node.js IncomingMessage is readable stream
+        body: lazyRequestBody(req),
         duplex: "half", // Required for streaming bodies
         headers,
         method,
