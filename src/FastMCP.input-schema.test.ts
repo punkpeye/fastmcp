@@ -234,6 +234,117 @@ const acceptsArguments = (schema: object, args: unknown) =>
 
 test.each([
   {
+    acceptsExtra: true,
+    name: "allOf",
+    schema: {
+      allOf: [
+        { properties: { name: { type: "string" } }, required: ["name"] },
+        {
+          properties: { age: { minimum: 0, type: "integer" } },
+          required: ["age"],
+        },
+      ],
+      type: "object",
+    },
+  },
+  {
+    acceptsExtra: false,
+    name: "a root $ref",
+    schema: {
+      $defs: {
+        person: {
+          additionalProperties: false,
+          properties: {
+            age: { minimum: 0, type: "integer" },
+            name: { type: "string" },
+          },
+          required: ["name", "age"],
+          type: "object",
+        },
+      },
+      $ref: "#/$defs/person",
+      type: "object",
+    },
+  },
+  ...(["allOf", "anyOf", "oneOf"] as const).map((keyword) => ({
+    acceptsExtra: true,
+    name: `${keyword} with root properties`,
+    schema: {
+      [keyword]: [
+        {
+          properties: { age: { minimum: 0, type: "integer" } },
+          required: ["age"],
+        },
+      ],
+      properties: { name: { type: "string" } },
+      required: ["name"],
+      type: "object",
+    },
+  })),
+  {
+    acceptsExtra: true,
+    name: "a root $ref with root properties",
+    schema: {
+      $defs: {
+        extension: {
+          properties: { age: { minimum: 0, type: "integer" } },
+          required: ["age"],
+          type: "object",
+        },
+      },
+      $ref: "#/$defs/extension",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+      type: "object",
+    },
+  },
+])("advertises usable $name parameters", async ({ acceptsExtra, schema }) => {
+  const server = new FastMCP({ name: "Composed inputs", version: "1.0.0" });
+  server.addTool({
+    execute: async (args) => JSON.stringify(args),
+    name: "person",
+    parameters: jsonSchemaAdapter(schema),
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const client = new Client({
+    name: "composed-inputs-client",
+    version: "1.0.0",
+  });
+
+  try {
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+    const advertised = (await client.listTools()).tools[0].inputSchema;
+    const args = { age: 20, name: "Alice" };
+    expect(acceptsArguments(advertised, args)).toBe(true);
+    expect(acceptsArguments(advertised, { ...args, extra: true })).toBe(
+      acceptsExtra,
+    );
+    for (const invalid of [
+      { name: "Alice" },
+      { age: -1, name: "Alice" },
+      { age: 20, name: 42 },
+    ]) {
+      expect(acceptsArguments(advertised, invalid)).toBe(false);
+      await expect(
+        client.callTool({ arguments: invalid, name: "person" }),
+      ).rejects.toMatchObject({ code: -32602 });
+    }
+    expect(await client.callTool({ arguments: args, name: "person" })).toEqual({
+      content: [{ text: JSON.stringify(args), type: "text" }],
+    });
+    expect(advertised).toEqual(schema);
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});
+
+test.each([
+  {
     name: "a union that also admits a string",
     parameters: z.union([...objectBranches, z.string()]),
   },
