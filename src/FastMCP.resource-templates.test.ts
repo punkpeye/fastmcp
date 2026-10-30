@@ -179,6 +179,74 @@ describe("resource template matching", () => {
     }
   });
 
+  it.each([
+    {
+      expected: { path: "a,b/c" },
+      uri: "file:///docs/a,b/c",
+      uriTemplate: "file:///docs/{+path}",
+    },
+    {
+      expected: { path: "a,b" },
+      uri: "file:///logs/a%2Cb.log",
+      uriTemplate: "file:///logs/{path}.log",
+    },
+    {
+      expected: { path: ",a%2Cb,,c%252C/," },
+      uri: "file:///docs/,a%2Cb,,c%252C/,",
+      uriTemplate: "file:///docs/{+path}",
+    },
+    {
+      expected: { fields: ["name", "email"], format: "json", path: "a,b/c" },
+      uri: "file:///docs/a,b/c?fields=name,email&format=json",
+      uriTemplate: "file:///docs/{+path}{?fields,format}",
+    },
+    {
+      expected: { fields: ["name", "email"], format: "json", path: "a,b/c" },
+      uri: "file:///docs/a,b/c?fixed=1&fields=name,email&format=json",
+      uriTemplate: "file:///docs/{+path}?fixed=1{&fields,format}",
+    },
+    {
+      expected: { path: ["a", "b"] },
+      uri: "file:///docs/a,b",
+      uriTemplate: "file:///docs/{path*}",
+    },
+    {
+      expected: { path: ["a", "b"] },
+      uri: "file:///docs/a/b",
+      uriTemplate: "file:///docs{/path*}",
+    },
+  ])(
+    "preserves scalar and list captures for $uri",
+    async ({ expected, uri, uriTemplate }) => {
+      const received: unknown[] = [];
+      const server = new FastMCP({ name: "T", version: "1.0.0" });
+      server.addResourceTemplate({
+        arguments: [{ name: "path", required: true }],
+        load: async (args) => {
+          received.push(args);
+          return { text: "ok" };
+        },
+        name: "Documents",
+        uriTemplate,
+      });
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "c", version: "0.0.0" });
+      const [session] = await Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+      try {
+        await client.readResource({ uri });
+        await server.embedded(uri);
+        expect(received).toEqual([expected, expected]);
+      } finally {
+        await client.close();
+        await session.close();
+      }
+    },
+  );
+
   it("applies the same matching in embedded()", async () => {
     const server = new FastMCP({ name: "T", version: "1.0.0" });
     const load = vi.fn(async ({ name }: { name: string }) => ({
