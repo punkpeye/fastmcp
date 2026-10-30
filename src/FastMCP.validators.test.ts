@@ -1,9 +1,14 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { type } from "arktype";
 import { setTimeout as delay } from "timers/promises";
 import * as v from "valibot";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import { FastMCP, FastMCPSession } from "./FastMCP.js";
 import { getTestPort } from "./getTestPort.js";
@@ -315,5 +320,147 @@ describe("tool parameters via Valibot", () => {
       },
       server,
     });
+  });
+});
+
+describe("Standard Schema issue paths", () => {
+  const schemaWithIssue = (issue: StandardSchemaV1.Issue) => {
+    const schema = z.object({});
+    Object.assign(schema["~standard"], {
+      validate: () => ({ issues: [issue] }),
+    });
+    return schema;
+  };
+
+  const invalidArgumentDiagnostic = async (
+    server: FastMCP,
+    args: Record<string, unknown>,
+  ) => {
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+
+    try {
+      await Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+      await client.listTools();
+
+      return await client.callTool({ arguments: args, name: "check" }).then(
+        (response) => {
+          const result = CallToolResultSchema.parse(response);
+          expect(result.isError).toBe(true);
+          return result.content
+            .filter((content) => content.type === "text")
+            .map((content) => content.text)
+            .join("\n");
+        },
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      await client.close();
+      await serverTransport.close();
+      await server.stop();
+    }
+  };
+
+  const cases: {
+    args: Record<string, unknown>;
+    expected: string;
+    name: string;
+    parameters: StandardSchemaV1;
+  }[] = [
+    {
+      args: { user: { age: "x" } },
+      expected: 'user.age: Invalid type: Expected number but received "x"',
+      name: "Valibot nested fields",
+      parameters: v.object({ user: v.object({ age: v.number() }) }),
+    },
+    {
+      args: { ages: ["x"] },
+      expected: 'ages.0: Invalid type: Expected number but received "x"',
+      name: "Valibot array indices",
+      parameters: v.object({ ages: v.array(v.number()) }),
+    },
+    {
+      args: { user: { age: "x" } },
+      expected: "user.age: Invalid input: expected number, received string",
+      name: "Zod nested fields",
+      parameters: z.object({ user: z.object({ age: z.number() }) }),
+    },
+    {
+      args: { user: { age: "x" } },
+      expected: "user.age: user.age must be a number (was a string)",
+      name: "ArkType nested fields",
+      parameters: type({ user: { age: "number" } }),
+    },
+    {
+      args: {},
+      expected: "Symbol(field): Invalid value",
+      name: "symbol keys",
+      parameters: schemaWithIssue({
+        message: "Invalid value",
+        path: [Symbol("field")],
+      }),
+    },
+    {
+      args: {},
+      expected: "users.0.Symbol(field): Invalid value",
+      name: "mixed primitive and object keys",
+      parameters: schemaWithIssue({
+        message: "Invalid value",
+        path: ["users", 0, { key: Symbol("field") }],
+      }),
+    },
+    {
+      args: {},
+      expected: "root: Invalid value",
+      name: "missing paths",
+      parameters: schemaWithIssue({ message: "Invalid value" }),
+    },
+    {
+      args: {},
+      expected: "root: Invalid value",
+      name: "empty paths",
+      parameters: schemaWithIssue({ message: "Invalid value", path: [] }),
+    },
+  ];
+
+  it.each(cases)("formats $name", async ({ args, expected, parameters }) => {
+    const server = new FastMCP({ name: "Test", version: "1.0.0" });
+    const execute = vi.fn(async () => "ok");
+    server.addTool({ execute, name: "check", parameters });
+
+    const diagnostic = await invalidArgumentDiagnostic(server, args);
+
+    expect(diagnostic).toContain(expected);
+    expect(diagnostic).not.toContain("[object Object]");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("passes original Valibot issues to the custom formatter", async () => {
+    const formatInvalidParamsErrorMessage = vi.fn<
+      (issues: readonly StandardSchemaV1.Issue[]) => string
+    >(() => "custom validation message");
+    const server = new FastMCP({
+      name: "Test",
+      utils: { formatInvalidParamsErrorMessage },
+      version: "1.0.0",
+    });
+    server.addTool({
+      execute: async () => "ok",
+      name: "check",
+      parameters: v.object({ user: v.object({ age: v.number() }) }),
+    });
+
+    expect(
+      await invalidArgumentDiagnostic(server, { user: { age: "x" } }),
+    ).toContain("custom validation message");
+    expect(formatInvalidParamsErrorMessage).toHaveBeenCalledOnce();
+    expect(
+      formatInvalidParamsErrorMessage.mock.calls[0][0][0].path,
+    ).toMatchObject([{ key: "user" }, { key: "age" }]);
   });
 });
