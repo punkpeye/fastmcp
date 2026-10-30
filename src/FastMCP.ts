@@ -3266,6 +3266,21 @@ function matchUriTemplate(
     return undefined;
   }
 
+  // Normalize scalar captures without changing query lists or exploded values.
+  const scalarNames = new Set(template.varNames);
+  for (const [expression] of template.template.matchAll(/\{[^}]*\}/g)) {
+    if (/^\{[?&]/.test(expression) || expression.includes("*")) {
+      for (const name of parseURITemplate(expression).varNames) {
+        scalarNames.delete(name);
+      }
+    }
+  }
+  for (const [name, value] of Object.entries(match)) {
+    if (scalarNames.has(name) && Array.isArray(value)) {
+      match[name] = value.join(",");
+    }
+  }
+
   const checksQuery = !/\{[?&]/.test(template.template);
   const checksFragment = !template.template.includes("{#");
   const shape = (value: string) =>
