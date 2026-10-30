@@ -2043,7 +2043,7 @@ export class FastMCPSession<
   }
 
   /**
-   * Fetches the client's roots if it advertised `roots.listChanged`.
+   * Fetches the client's roots if it advertised the `roots` capability.
    *
    * Over Streamable HTTP a server-initiated request travels on the client's
    * standalone GET stream, which the client opens only after initialization,
@@ -2053,7 +2053,7 @@ export class FastMCPSession<
   async #loadRoots(streamableHttp: boolean) {
     if (
       this.#rootsConfig?.enabled === false ||
-      !this.#clientCapabilities?.roots?.listChanged ||
+      !this.#clientCapabilities?.roots ||
       typeof this.#server.listRoots !== "function"
     ) {
       return;
