@@ -266,6 +266,38 @@ test.each([
       type: "object",
     },
   },
+  ...(["allOf", "anyOf", "oneOf"] as const).map((keyword) => ({
+    acceptsExtra: true,
+    name: `${keyword} with root properties`,
+    schema: {
+      [keyword]: [
+        {
+          properties: { age: { minimum: 0, type: "integer" } },
+          required: ["age"],
+        },
+      ],
+      properties: { name: { type: "string" } },
+      required: ["name"],
+      type: "object",
+    },
+  })),
+  {
+    acceptsExtra: true,
+    name: "a root $ref with root properties",
+    schema: {
+      $defs: {
+        extension: {
+          properties: { age: { minimum: 0, type: "integer" } },
+          required: ["age"],
+          type: "object",
+        },
+      },
+      $ref: "#/$defs/extension",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+      type: "object",
+    },
+  },
 ])("advertises usable $name parameters", async ({ acceptsExtra, schema }) => {
   const server = new FastMCP({ name: "Composed inputs", version: "1.0.0" });
   server.addTool({
@@ -291,7 +323,11 @@ test.each([
     expect(acceptsArguments(advertised, { ...args, extra: true })).toBe(
       acceptsExtra,
     );
-    for (const invalid of [{ name: "Alice" }, { age: -1, name: "Alice" }]) {
+    for (const invalid of [
+      { name: "Alice" },
+      { age: -1, name: "Alice" },
+      { age: 20, name: 42 },
+    ]) {
       expect(acceptsArguments(advertised, invalid)).toBe(false);
       await expect(
         client.callTool({ arguments: invalid, name: "person" }),
