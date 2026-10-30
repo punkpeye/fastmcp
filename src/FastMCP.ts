@@ -2274,7 +2274,7 @@ export class FastMCPSession<
   ): () => void {
     const config = this.#streamKeepaliveConfig;
 
-    if (!config?.enabled) {
+    if (!config?.enabled || extra.signal?.aborted) {
       return () => {};
     }
 
@@ -2306,7 +2306,10 @@ export class FastMCPSession<
 
     timer.unref?.();
 
-    const stop = () => clearInterval(timer);
+    const stop = () => {
+      clearInterval(timer);
+      extra.signal?.removeEventListener("abort", stop);
+    };
 
     // A cancelled or disconnected request stops waiting for the tool, so the
     // keepalive must not outlive the abort.
@@ -2933,6 +2936,41 @@ export class FastMCPSession<
 
         let result: ContentResult;
 
+        // Aborted when this call times out. Kept separate from the sources
+        // below so the timer that drives it can still be cleared the moment
+        // the tool settles — a fired-and-forgotten timeout would abort the
+        // signal after a successful call and run the tool's cleanup for it.
+        const timeoutAbort = new AbortController();
+
+        // Composed rather than forwarded by hand: `AbortSignal.any()` needs
+        // no listener bookkeeping, so nothing leaks when `execute` throws
+        // synchronously, and Node holds the composite through a WeakRef, so
+        // a per-call signal cannot pin the session-scoped one.
+        const signal = AbortSignal.any([
+          timeoutAbort.signal,
+          this.#abortController.signal,
+          // Only ever aborted for an explicit `notifications/cancelled`; the
+          // session signal above is what covers a client that simply left.
+          ...(extra.signal ? [extra.signal] : []),
+        ]);
+
+        const sendNotification: typeof extra.sendNotification = async (
+          notification,
+        ) => {
+          if (signal.aborted) {
+            return;
+          }
+
+          try {
+            await extra.sendNotification(notification);
+          } catch (error) {
+            // Do not retry a log on the standalone stream after an abort.
+            if (!signal.aborted) {
+              throw error;
+            }
+          }
+        };
+
         try {
           const reportProgress = async (progress: Progress) => {
             // Progress notifications must reference the progressToken supplied by
@@ -2948,7 +2986,7 @@ export class FastMCPSession<
               // this call's relatedRequestId. Without it, the notification has no request
               // to attach to and falls back to the standalone GET SSE stream — which
               // doesn't exist for stateless HTTP transports, so it's silently dropped.
-              await extra.sendNotification({
+              await sendNotification({
                 method: "notifications/progress",
                 params: {
                   ...progress,
@@ -2969,7 +3007,7 @@ export class FastMCPSession<
             }
           };
 
-          const log = this.#createLog(extra.sendNotification);
+          const log = this.#createLog(sendNotification);
 
           // Create a promise for tool execution
           // Streams partial results while a tool is still executing
@@ -2981,7 +3019,7 @@ export class FastMCPSession<
               // Request-scoped for the same reason as reportProgress above:
               // without a relatedRequestId this falls back to the standalone
               // GET SSE stream, which stateless HTTP transports never have.
-              await extra.sendNotification({
+              await sendNotification({
                 method: "notifications/tool/streamContent",
                 params: {
                   content: contentArray,
@@ -3009,24 +3047,6 @@ export class FastMCPSession<
             });
           }
 
-          // Aborted when this call times out. Kept separate from the sources
-          // below so the timer that drives it can still be cleared the moment
-          // the tool settles — a fired-and-forgotten timeout would abort the
-          // signal after a successful call and run the tool's cleanup for it.
-          const timeoutAbort = new AbortController();
-
-          // Composed rather than forwarded by hand: `AbortSignal.any()` needs
-          // no listener bookkeeping, so nothing leaks when `execute` throws
-          // synchronously, and Node holds the composite through a WeakRef, so
-          // a per-call signal cannot pin the session-scoped one.
-          const signal = AbortSignal.any([
-            timeoutAbort.signal,
-            this.#abortController.signal,
-            // Only ever aborted for an explicit `notifications/cancelled`; the
-            // session signal above is what covers a client that simply left.
-            ...(extra.signal ? [extra.signal] : []),
-          ]);
-
           const executeToolPromise = Promise.resolve(
             tool.execute(args, {
               client: {
@@ -3049,37 +3069,40 @@ export class FastMCPSession<
           // Started only once execute has returned a promise, so a tool that
           // throws synchronously cannot leave a timer behind.
           const stopStreamKeepalive = this.#startStreamKeepalive(
-            extra,
+            { sendNotification, signal },
             request.params.name,
           );
 
-          // Handle timeout if specified
-          const maybeStringResult = (await (
-            tool.timeoutMs
-              ? Promise.race([
-                  executeToolPromise,
-                  new Promise<never>((_, reject) => {
-                    const timeoutId = setTimeout(() => {
-                      const timedOut = new UserError(
-                        `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
-                      );
+          let timeoutId: ReturnType<typeof setTimeout> | undefined;
+          let stopWaitingForAbort = () => {};
+          const aborted = new Promise<never>((_, reject) => {
+            const onAbort = () => reject(signal.reason);
+            stopWaitingForAbort = () =>
+              signal.removeEventListener("abort", onAbort);
+            signal.addEventListener("abort", onAbort, { once: true });
+            if (signal.aborted) {
+              onAbort();
+            }
+          });
 
-                      // Abort before rejecting: the tool learns it lost the
-                      // race while its own frame is still the reason, rather
-                      // than after the error has already gone back out.
-                      timeoutAbort.abort(timedOut);
-                      reject(timedOut);
-                    }, tool.timeoutMs);
+          if (tool.timeoutMs && !signal.aborted) {
+            timeoutId = setTimeout(() => {
+              timeoutAbort.abort(
+                new UserError(
+                  `Tool '${request.params.name}' timed out after ${tool.timeoutMs}ms. Consider increasing timeoutMs or optimizing the tool implementation.`,
+                ),
+              );
+            }, tool.timeoutMs);
+          }
 
-                    // If promise resolves first
-                    executeToolPromise.then(
-                      () => clearTimeout(timeoutId),
-                      () => clearTimeout(timeoutId),
-                    );
-                  }),
-                ])
-              : executeToolPromise
-          ).finally(stopStreamKeepalive)) as
+          const maybeStringResult = (await Promise.race([
+            executeToolPromise,
+            aborted,
+          ]).finally(() => {
+            clearTimeout(timeoutId);
+            stopWaitingForAbort();
+            stopStreamKeepalive();
+          })) as
             | AudioContent
             | ContentResult
             | ImageContent
