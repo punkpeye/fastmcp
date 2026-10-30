@@ -1,9 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { IncomingMessage } from "node:http";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { UpstreamTokenSet } from "../types.js";
 import type { AuthProviderConfig } from "./AuthProvider.js";
 
+import { PKCEUtils } from "../utils/pkce.js";
 import { AzureProvider } from "./AzureProvider.js";
 import { GitHubProvider } from "./GitHubProvider.js";
 import { GoogleProvider } from "./GoogleProvider.js";
@@ -370,5 +373,84 @@ describe("forwarded proxy options", () => {
       expect(metadata.authorizationResponseIssParameterSupported).toBe(true);
       provider.getProxy().destroy();
     }
+  });
+});
+
+describe("session expiresAt", () => {
+  const baseConfig = {
+    allowedRedirectUriPatterns: ["https://client.example.com/*"],
+    authorizationEndpoint: "https://auth.example.com/authorize",
+    baseUrl: "http://localhost:8000",
+    clientId: "test-client-id",
+    clientSecret: "test-client-secret",
+    consentRequired: false,
+    tokenEndpoint: "https://auth.example.com/token",
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("counts from when the upstream token was issued, not from the request", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const issuedAt = new Date("2026-01-01T10:00:00Z");
+    vi.setSystemTime(issuedAt);
+
+    const provider = new OAuthProvider(baseConfig);
+    const proxy = provider.getProxy();
+    const upstreamTokens: UpstreamTokenSet = {
+      accessToken: "upstream-access-token",
+      expiresIn: 3600,
+      issuedAt,
+      scope: ["openid"],
+      tokenType: "Bearer",
+    };
+    const client = await proxy.registerClient({
+      redirect_uris: ["https://client.example.com/callback"],
+    });
+    const pkce = PKCEUtils.generatePair("S256");
+    const transaction = await (proxy as any).createTransaction({
+      client_id: client.client_id,
+      code_challenge: pkce.challenge,
+      code_challenge_method: "S256",
+      redirect_uri: "https://client.example.com/callback",
+      response_type: "code",
+      scope: "openid",
+    });
+    const code = await (proxy as any).generateAuthorizationCode(
+      transaction,
+      upstreamTokens,
+    );
+    const { access_token } = await proxy.exchangeAuthorizationCode({
+      client_id: client.client_id,
+      code,
+      code_verifier: pkce.verifier,
+      grant_type: "authorization_code",
+      redirect_uri: "https://client.example.com/callback",
+    });
+
+    // A request 50 minutes later: the upstream token has 10 minutes left
+    vi.setSystemTime(new Date("2026-01-01T10:50:00Z"));
+    const session = await provider.authenticate({
+      headers: { authorization: `Bearer ${access_token}` },
+    } as IncomingMessage);
+
+    expect(session?.expiresAt).toBe(Date.parse("2026-01-01T11:00:00Z") / 1000);
+
+    proxy.destroy();
+  });
+
+  it("falls back to the current time when issuedAt can't be read", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-01T10:50:00Z"));
+
+    const provider = new OAuthProvider(baseConfig);
+    const session = (provider as any).createSession({
+      accessToken: "upstream-access-token",
+      expiresIn: 3600,
+      scope: ["openid"],
+    });
+
+    expect(session.expiresAt).toBe(Date.parse("2026-01-01T11:50:00Z") / 1000);
   });
 });
