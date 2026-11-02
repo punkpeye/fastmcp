@@ -2723,8 +2723,6 @@ export class FastMCPSession<
                 continue;
               }
 
-              const uri = uriTemplate.fill(match);
-
               const result = await resourceTemplate.load(
                 match,
                 this.#auth,
@@ -2742,7 +2740,9 @@ export class FastMCPSession<
                   description: resourceTemplate.description,
                   mimeType: resource.mimeType ?? resourceTemplate.mimeType,
                   name: resourceTemplate.name,
-                  uri: resource.uri ?? uri,
+                  // The URI asked for. Refilling the template from `match` can
+                  // spell it differently: `{path}` refills `a,b` as `a%2Cb`.
+                  uri: resource.uri ?? request.params.uri,
                 })),
               };
             }
@@ -3349,6 +3349,21 @@ function matchUriTemplate(
 
   if (!match) {
     return undefined;
+  }
+
+  // Normalize scalar captures without changing query lists or exploded values.
+  const scalarNames = new Set(template.varNames);
+  for (const [expression] of template.template.matchAll(/\{[^}]*\}/g)) {
+    if (/^\{[?&]/.test(expression) || expression.includes("*")) {
+      for (const name of parseURITemplate(expression).varNames) {
+        scalarNames.delete(name);
+      }
+    }
+  }
+  for (const [name, value] of Object.entries(match)) {
+    if (scalarNames.has(name) && Array.isArray(value)) {
+      match[name] = value.join(",");
+    }
   }
 
   const checksQuery = !/\{[?&]/.test(template.template);
