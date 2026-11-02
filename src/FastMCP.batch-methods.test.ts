@@ -5,6 +5,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   ErrorCode,
+  ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { afterAll, beforeAll, describe, expect, it, test } from "vitest";
@@ -245,6 +246,141 @@ test.each(["parameters", "outputSchema"] as const)(
         content: [{ text: "original", type: "text" }],
       });
       expect(notifications).toHaveLength(0);
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each([
+  { connected: false, replacementUri: "docs://{id}" },
+  { connected: true, replacementUri: "docs://{id}" },
+  { connected: false, replacementUri: "updated://{id}" },
+  { connected: true, replacementUri: "updated://{id}" },
+])(
+  "uses the last batch template for resource reads and embeddings (%j)",
+  async ({ connected, replacementUri }) => {
+    const server = new FastMCP({ name: "Batch templates", version: "1.0.0" });
+    server.addResourceTemplate({
+      arguments: [{ name: "id", required: true }],
+      load: async () => ({ text: "keep" }),
+      name: "keep",
+      uriTemplate: "keep://{id}",
+    });
+    server.addResourceTemplate({
+      arguments: [{ name: "id", required: true }],
+      load: async () => ({ text: "original" }),
+      name: "replace",
+      uriTemplate: "original://{id}",
+    });
+    const uri = replacementUri.replace("{id}", "x");
+    server.addTool({
+      execute: async () => ({
+        content: [{ resource: await server.embedded(uri), type: "resource" }],
+      }),
+      name: "embed",
+    });
+
+    const client = new Client({ name: "batch-client", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const notifications: unknown[] = [];
+    client.setNotificationHandler(
+      ResourceListChangedNotificationSchema,
+      (notification) => {
+        notifications.push(notification);
+      },
+    );
+    const connect = () =>
+      Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+
+    try {
+      if (connected) {
+        await connect();
+        await client.listResourceTemplates();
+      }
+
+      server.addResourceTemplates([
+        {
+          arguments: [{ name: "id", required: true }],
+          description: "superseded",
+          load: async () => ({ text: "obsolete" }),
+          name: "replace",
+          uriTemplate: "docs://{id}",
+        },
+        {
+          arguments: [{ name: "id", required: true }],
+          load: async () => ({ text: "added" }),
+          name: "added",
+          uriTemplate: "added://{id}",
+        },
+        {
+          arguments: [{ name: "id", required: true }],
+          load: async () => ({ text: "shared" }),
+          name: "shared",
+          uriTemplate: "keep://{id}",
+        },
+        {
+          arguments: [{ name: "id", required: true }],
+          description: "current",
+          load: async ({ id }) => ({ text: "current " + id }),
+          name: "replace",
+          uriTemplate: replacementUri,
+        },
+      ]);
+
+      if (!connected) {
+        await connect();
+      }
+      const { resourceTemplates } = await client.listResourceTemplates();
+      expect(resourceTemplates).toHaveLength(4);
+      expect(resourceTemplates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "keep", uriTemplate: "keep://{id}" }),
+          expect.objectContaining({
+            name: "added",
+            uriTemplate: "added://{id}",
+          }),
+          expect.objectContaining({
+            name: "shared",
+            uriTemplate: "keep://{id}",
+          }),
+          expect.objectContaining({
+            description: "current",
+            name: "replace",
+            uriTemplate: replacementUri,
+          }),
+        ]),
+      );
+      expect(await client.readResource({ uri })).toMatchObject({
+        contents: [{ text: "current x", uri }],
+      });
+      expect(await client.callTool({ name: "embed" })).toMatchObject({
+        content: [{ resource: { text: "current x", uri }, type: "resource" }],
+      });
+      expect(await server.embedded("keep://x")).toMatchObject({ text: "keep" });
+      expect(await client.readResource({ uri: "keep://x" })).toMatchObject({
+        contents: [{ text: "keep" }],
+      });
+      expect(await server.embedded("added://x")).toMatchObject({
+        text: "added",
+      });
+      await expect(server.embedded("original://x")).rejects.toThrow(
+        "Resource not found",
+      );
+      if (replacementUri !== "docs://{id}") {
+        await expect(server.embedded("docs://x")).rejects.toThrow(
+          "Resource not found",
+        );
+        await expect(
+          client.readResource({ uri: "docs://x" }),
+        ).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
+      }
+      expect(notifications).toHaveLength(connected ? 1 : 0);
     } finally {
       await client.close();
       await server.stop();
