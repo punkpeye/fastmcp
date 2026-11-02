@@ -9,6 +9,16 @@
 export const DEFAULT_ACCESS_TOKEN_TTL = 3600; // 1 hour
 export const DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH = 31536000; // 1 year
 export const DEFAULT_REFRESH_TOKEN_TTL = 2592000; // 30 days
+
+/**
+ * The token endpoint authentication methods the proxy can verify, and so the
+ * only ones a client may register with.
+ */
+export const TOKEN_ENDPOINT_AUTH_METHODS = [
+  "client_secret_basic",
+  "client_secret_post",
+  "none",
+] as const;
 export const DEFAULT_AUTHORIZATION_CODE_TTL = 300; // 5 minutes
 export const DEFAULT_TRANSACTION_TTL = 600; // 10 minutes
 
@@ -393,6 +403,17 @@ export interface ProxyDCRClient {
    * Absent for a Dynamic Client Registration.
    */
   source?: "cimd";
+  /**
+   * How the client authenticates at the token endpoint, as it registered.
+   * `"none"` is a public client: it is issued no secret and must use S256
+   * PKCE. Either secret method obliges it to authenticate on every token
+   * request.
+   *
+   * Absent on registrations written before this was recorded, when every
+   * client was issued a secret whatever it asked for. Those are treated as
+   * public clients that may still authenticate with that secret.
+   */
+  tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
 }
 
 /**
@@ -407,10 +428,24 @@ export interface RefreshRequest {
 }
 
 /**
+ * Token endpoint authentication methods a Dynamic Client Registration may ask
+ * for (RFC 7591 §2).
+ */
+export type TokenEndpointAuthMethod =
+  (typeof TOKEN_ENDPOINT_AUTH_METHODS)[number];
+
+/**
  * Token mapping for JWT swap pattern
  * Maps JTI to upstream token reference
  */
 export interface TokenMapping {
+  /**
+   * Whether the client authenticated with its secret when this token was
+   * issued. A refresh token issued that way is only redeemed by a client that
+   * authenticates again; otherwise omitting the secret would turn it back into
+   * a bearer token.
+   */
+  clientAuthenticated?: boolean;
   /** Client ID */
   clientId: string;
   /** Creation timestamp */

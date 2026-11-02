@@ -367,6 +367,40 @@ When enabled, `/.well-known/oauth-authorization-server` advertises
 
 Off by default: leaving it off means only DCR-registered clients are accepted.
 
+### Client authentication at the token endpoint
+
+A DCR client chooses with `token_endpoint_auth_method`:
+
+| Method                          | Secret issued | At `/oauth/token`                                                    |
+| ------------------------------- | ------------- | -------------------------------------------------------------------- |
+| `client_secret_basic` (default) | yes           | Must authenticate with it, via HTTP Basic or the body — either works |
+| `client_secret_post`            | yes           | Same                                                                 |
+| `none`                          | no            | Sends `client_id` only; S256 PKCE required, as for CIMD clients      |
+
+Any other method is refused at registration with `invalid_client_metadata`. A
+failed client authentication is a `401` with `WWW-Authenticate: Basic`, and
+sending credentials in both the header and the body is refused.
+
+Codes and refresh tokens are bound to the client they were issued to. Anyone
+can register a client, so a valid secret alone proves nothing about whose
+token is being presented: another client presenting it gets `invalid_grant`.
+
+Registrations made before the auth method was recorded were issued a secret
+whatever they asked for. The proxy checks that secret when one is sent; a
+client that leaves it out is treated as public, may only redeem a code bound
+by S256 PKCE, and cannot refresh a token it obtained by authenticating.
+
+Issued JWTs carry `token_use` — `"access"` or `"refresh"`. The proxy accepts
+only access tokens as bearer credentials and only refresh tokens at
+`/oauth/token`. Tokens issued before `token_use` existed are refused as both,
+so their holders sign in once more after upgrading.
+
+In passthrough mode (`enableTokenSwap: false`) the client holds the upstream
+refresh token itself, and the upstream sees every refresh as coming from the
+proxy's own client. The proxy therefore records which client each upstream
+refresh token went to, keyed by its hash, and forwards a refresh only for that
+client. Refresh tokens handed out before this was recorded are refused.
+
 ### Issuer identification (RFC 9207)
 
 Authorization responses carry `iss` (your `baseUrl`), and the metadata
@@ -588,7 +622,7 @@ server.addTool({
 **Key features:**
 
 - Extracts from both access tokens and ID tokens
-- Protected claims (aud, iss, exp, iat, nbf, jti, client_id) never copied
+- Protected claims (aud, iss, exp, iat, nbf, jti, client_id, scope, token_use) never copied
 - Access token claims take precedence over ID token claims
 - Size limits and type validation for security
 - Supports allowlist/blocklist filtering
@@ -737,11 +771,14 @@ The bundled `MemoryTokenStorage` and `DiskStore` both implement it —
 `DiskStore` claims entries with an atomic `rename()`, so several processes
 sharing one directory are safe.
 
-Because codes are consumed at the start of the exchange, a token request that
-then fails validation — wrong `client_id`, bad PKCE `code_verifier` — spends
-the code. The client has to restart at `/oauth/authorize` rather than retry the
-same code. That is deliberate: a code presented without the matching verifier
-has most likely leaked, so it should not stay redeemable.
+A token request whose client authentication fails — unknown `client_id`, wrong
+or missing secret — is refused before the code is touched, so it cannot spend
+one. Past that point codes are consumed at the start of the exchange, so a
+request that then fails validation — a code issued to another client, a bad
+PKCE `code_verifier` — spends the code. The client has to restart at
+`/oauth/authorize` rather than retry the same code. That is deliberate: a code
+presented by the wrong client, or without its matching verifier, has most
+likely leaked, so it should not stay redeemable.
 
 ### JWKS Token Verification
 
@@ -1292,8 +1329,9 @@ http://localhost:3000/oauth/authorize?client_id=<client_id>&response_type=code&r
 
 ```bash
 curl -X POST http://localhost:3000/oauth/token \
+  -u "<client_id>:<client_secret>" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=authorization_code&code=<auth_code>&redirect_uri=http://localhost:8080/callback&code_verifier=<verifier>&client_id=<client_id>"
+  -d "grant_type=authorization_code&code=<auth_code>&redirect_uri=http://localhost:8080/callback&code_verifier=<verifier>"
 ```
 
 ## Next Steps

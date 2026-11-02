@@ -34,6 +34,14 @@ export interface JWTClaims {
   jti: string;
   /** Scopes */
   scope: string[];
+  /**
+   * Which kind of token this is. Access and refresh tokens share a signing
+   * key, audience and claim set, so without this either one verifies as the
+   * other: an access token — sent on every request — could be redeemed for a
+   * refresh token, and a refresh token presented as a bearer credential.
+   * Absent from tokens issued before it existed; those are refused as both.
+   */
+  token_use?: "access" | "refresh";
 }
 
 /**
@@ -126,6 +134,9 @@ export class JWTIssuer {
       scope,
       // Merge additional claims (custom claims from upstream)
       ...(additionalClaims || {}),
+      // After the spread: what kind of token this is is the proxy's call, and
+      // no additional claim may change it.
+      token_use: "access",
     };
 
     return this.signToken(claims);
@@ -153,6 +164,8 @@ export class JWTIssuer {
       scope,
       // Merge additional claims (custom claims from upstream)
       ...(additionalClaims || {}),
+      // After the spread — see issueAccessToken.
+      token_use: "refresh",
     };
 
     return this.signToken(claims);

@@ -2,6 +2,52 @@
 import { describe, expect, it } from "vitest";
 
 import { OAuthProxy } from "./OAuthProxy.js";
+import { PKCEUtils } from "./utils/pkce.js";
+
+/**
+ * A passthrough-mode refresh request the proxy will forward: the upstream
+ * refresh token is handed out by a code exchange, which binds it to the
+ * client. No upstream call is made, so `fetch` can be mocked to fail first.
+ */
+const issuePassthroughRefreshRequest = async (
+  proxy: OAuthProxy,
+  refreshToken: string,
+) => {
+  const redirectUri = "http://localhost:3000/callback";
+  const dcr = await proxy.registerClient({ redirect_uris: [redirectUri] });
+  const pkce = PKCEUtils.generatePair("S256");
+  const transaction = await (proxy as any).createTransaction({
+    client_id: dcr.client_id,
+    code_challenge: pkce.challenge,
+    code_challenge_method: "S256",
+    redirect_uri: redirectUri,
+    response_type: "code",
+  });
+  const code = await (proxy as any).generateAuthorizationCode(transaction, {
+    accessToken: "upstream-access-token",
+    expiresIn: 3600,
+    issuedAt: new Date(),
+    refreshToken,
+    scope: [],
+    tokenType: "Bearer",
+  });
+
+  await proxy.exchangeAuthorizationCode({
+    client_id: dcr.client_id,
+    client_secret: dcr.client_secret,
+    code,
+    code_verifier: pkce.verifier,
+    grant_type: "authorization_code",
+    redirect_uri: redirectUri,
+  });
+
+  return {
+    client_id: dcr.client_id,
+    client_secret: dcr.client_secret,
+    grant_type: "refresh_token" as const,
+    refresh_token: refreshToken,
+  };
+};
 
 describe("OAuthProxy - Token Response Parsing", () => {
   const baseConfig = {
@@ -423,6 +469,11 @@ describe("OAuthProxy - Token Response Parsing", () => {
         enableTokenSwap: false,
       });
 
+      const request = await issuePassthroughRefreshRequest(
+        proxy,
+        "test-refresh-token",
+      );
+
       // Mock global fetch to return an HTML error page (e.g. load balancer 502)
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () =>
@@ -435,11 +486,7 @@ describe("OAuthProxy - Token Response Parsing", () => {
       try {
         // For HTTP-level errors (non-OAuth), description contains the HTTP status.
         const err = await proxy
-          .exchangeRefreshToken({
-            client_id: "test-client",
-            grant_type: "refresh_token",
-            refresh_token: "test-refresh-token",
-          })
+          .exchangeRefreshToken(request)
           .catch((e: any) => e);
 
         expect(err.name).toBe("OAuthProxyError");
@@ -455,6 +502,11 @@ describe("OAuthProxy - Token Response Parsing", () => {
         ...baseConfig,
         enableTokenSwap: false,
       });
+
+      const request = await issuePassthroughRefreshRequest(
+        proxy,
+        "expired-token",
+      );
 
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () =>
@@ -472,11 +524,7 @@ describe("OAuthProxy - Token Response Parsing", () => {
 
       try {
         const err = await proxy
-          .exchangeRefreshToken({
-            client_id: "test-client",
-            grant_type: "refresh_token",
-            refresh_token: "expired-token",
-          })
+          .exchangeRefreshToken(request)
           .catch((e: any) => e);
 
         expect(err.name).toBe("OAuthProxyError");

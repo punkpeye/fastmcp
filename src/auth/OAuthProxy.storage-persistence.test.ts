@@ -181,6 +181,7 @@ describe("OAuthProxy TokenStorage persistence", () => {
     const authorizationCode = getRequiredSearchParam(clientRedirectUrl, "code");
     const tokenResponse = await tokenProxy.exchangeAuthorizationCode({
       client_id: dcr.client_id,
+      client_secret: dcr.client_secret,
       code: authorizationCode,
       grant_type: "authorization_code",
       redirect_uri: CALLBACK_URL,
@@ -294,6 +295,7 @@ describe("OAuthProxy TokenStorage persistence", () => {
       return {
         request: {
           client_id: dcr.client_id,
+          client_secret: dcr.client_secret,
           code,
           grant_type: "authorization_code" as const,
           redirect_uri: CALLBACK_URL,
@@ -391,6 +393,7 @@ describe("OAuthProxy TokenStorage persistence", () => {
 
       await proxy.exchangeAuthorizationCode({
         client_id: dcr.client_id,
+        client_secret: dcr.client_secret,
         code,
         grant_type: "authorization_code",
         redirect_uri: CALLBACK_URL,

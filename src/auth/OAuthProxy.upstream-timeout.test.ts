@@ -76,12 +76,23 @@ describe("OAuthProxy - Upstream Request Timeout", () => {
     const proxy = new OAuthProxy({ ...baseConfig, enableTokenSwap: false });
     const fetchSpy = mockHungUpstream();
 
+    // Only a refresh token bound to the calling client is forwarded upstream.
+    const caller = { authenticated: true, client: { clientId: "client-id" } };
+    await (proxy as any).savePassthroughRefreshBinding(
+      "upstream-refresh-token",
+      { clientAuthenticated: true, clientId: "client-id" },
+      undefined,
+    );
+
     await expect(
-      (proxy as any).handlePassthroughRefresh({
-        client_id: "client-id",
-        grant_type: "refresh_token",
-        refresh_token: "upstream-refresh-token",
-      }),
+      (proxy as any).handlePassthroughRefresh(
+        {
+          client_id: "client-id",
+          grant_type: "refresh_token",
+          refresh_token: "upstream-refresh-token",
+        },
+        caller,
+      ),
     ).rejects.toMatchObject({
       code: "server_error",
       description: "Upstream request timed out",

@@ -26,6 +26,7 @@ export {
   DEFAULT_AUTHORIZATION_CODE_TTL,
   DEFAULT_REFRESH_TOKEN_TTL,
   DEFAULT_TRANSACTION_TTL,
+  TOKEN_ENDPOINT_AUTH_METHODS,
 } from "./types.js";
 
 // Types
@@ -43,6 +44,7 @@ export type {
   PKCEPair,
   ProxyDCRClient,
   RefreshRequest,
+  TokenEndpointAuthMethod,
   TokenMapping,
   TokenRequest,
   TokenResponse,

@@ -141,6 +141,7 @@ interface JWTClaims {
   exp: number; // Expiration time (seconds since epoch)
   iat: number; // Issued at time (seconds since epoch)
   jti: string; // JWT ID (unique identifier)
+  token_use: "access" | "refresh"; // Only access tokens are bearer credentials; only refresh tokens are redeemed at /oauth/token
 }
 ```
 

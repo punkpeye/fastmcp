@@ -21,6 +21,8 @@ export class ClaimsExtractor {
     "jti",
     "nbf",
     "scope",
+    // Whether a proxy token is an access or a refresh token.
+    "token_use",
   ]);
 
   constructor(config: boolean | CustomClaimsPassthroughConfig) {

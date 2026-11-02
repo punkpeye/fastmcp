@@ -8,6 +8,8 @@ import type {
   UpstreamTokenSet,
 } from "./types.js";
 
+import { TOKEN_ENDPOINT_AUTH_METHODS } from "./types.js";
+
 const STORAGE_KEY_PREFIX = {
   client: "client:",
   code: "code:",
@@ -53,6 +55,10 @@ const proxyDcrClientStorageSchema: z.ZodType<ProxyDCRClient> = z.object({
   redirectUris: z.array(z.string()),
   registeredAt: storedDateSchema,
   source: z.literal("cimd").optional(),
+  // Optional: registrations written before it was recorded do not carry it.
+  // Listed so that it survives a read — an unlisted key is stripped, which
+  // would quietly turn every confidential client back into a legacy one.
+  tokenEndpointAuthMethod: z.enum(TOKEN_ENDPOINT_AUTH_METHODS).optional(),
 });
 
 const upstreamTokenSetStorageSchema: z.ZodType<UpstreamTokenSet> = z.object({

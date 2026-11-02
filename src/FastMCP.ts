@@ -3394,22 +3394,31 @@ function normalizePath(path: string): `/${string}` {
 }
 
 /**
- * Parses Basic auth header (RFC 6749 Section 2.3.1)
+ * Reads client credentials from an HTTP Basic `Authorization` header (RFC 6749
+ * §2.3.1): `client_id:client_secret`, each form-urlencoded, then base64.
+ *
+ * Returns `null` when there is no Basic header, and `"malformed"` for one that
+ * does not decode to that shape — a failed authentication, not an absent one.
  */
 function parseBasicAuthHeader(
   authHeader: string | undefined,
-): { clientId: string; clientSecret: string } | null {
-  const basicMatch = authHeader?.match(/^Basic\s+(.+)$/);
+): "malformed" | { clientId: string; clientSecret: string } | null {
+  const basicMatch = authHeader?.match(/^Basic\s+(.*)$/i);
   if (!basicMatch) return null;
 
-  try {
-    const credentials = Buffer.from(basicMatch[1], "base64").toString("utf-8");
-    const credMatch = credentials.match(/^([^:]+):(.*)$/);
-    if (!credMatch) return null;
+  const credentials = Buffer.from(basicMatch[1].trim(), "base64").toString(
+    "utf-8",
+  );
+  const separator = credentials.indexOf(":");
+  if (separator <= 0) return "malformed";
 
-    return { clientId: credMatch[1], clientSecret: credMatch[2] };
+  try {
+    return {
+      clientId: decodeURIComponent(credentials.slice(0, separator)),
+      clientSecret: decodeURIComponent(credentials.slice(separator + 1)),
+    };
   } catch {
-    return null;
+    return "malformed";
   }
 }
 
@@ -3501,6 +3510,18 @@ const OAUTH_CREDENTIAL_RESPONSE_HEADERS = {
   "Cache-Control": "no-store",
   "Content-Type": "application/json",
   Pragma: "no-cache",
+} as const;
+
+/**
+ * RFC 6749 §5.2: a client authentication failure is a 401 when the client
+ * tried the Authorization header, and RFC 9110 §15.5.2 requires every 401 to
+ * carry a challenge. Sent for every `invalid_client` from the token endpoint,
+ * which the spec allows, so the status does not depend on where the
+ * credentials were.
+ */
+const OAUTH_INVALID_CLIENT_RESPONSE_HEADERS = {
+  ...OAUTH_CREDENTIAL_RESPONSE_HEADERS,
+  "WWW-Authenticate": 'Basic realm="oauth", charset="UTF-8"',
 } as const;
 
 function stripBasePath(
@@ -4950,18 +4971,59 @@ export class FastMCP<
                 );
                 const grantType = params.get("grant_type");
 
-                // Parse Basic auth header (RFC 6749 Section 2.3.1)
+                // RFC 6749 §2.3.1: credentials may arrive via HTTP Basic
+                // instead of the body. The proxy verifies whichever was sent.
                 const basicAuth = parseBasicAuthHeader(
                   req.headers.authorization,
                 );
 
-                // Use Basic auth credentials if present, otherwise fall back to POST body
-                const clientId =
-                  basicAuth?.clientId || params.get("client_id") || "";
-                const clientSecret =
-                  basicAuth?.clientSecret ??
-                  params.get("client_secret") ??
-                  undefined;
+                if (basicAuth === "malformed") {
+                  throw {
+                    toJSON: () => ({
+                      error: "invalid_client",
+                      error_description: "Malformed Basic Authorization header",
+                    }),
+                  };
+                }
+
+                if (basicAuth) {
+                  // RFC 6749 §2.3: one authentication method per request.
+                  // Merging the two would let the body supply a client_id
+                  // the header's secret is then tried against.
+                  if (params.has("client_secret")) {
+                    throw {
+                      statusCode: 400,
+                      toJSON: () => ({
+                        error: "invalid_request",
+                        error_description:
+                          "Send client credentials in the Authorization header or the request body, not both",
+                      }),
+                    };
+                  }
+
+                  const bodyClientId = params.get("client_id");
+
+                  if (
+                    bodyClientId !== null &&
+                    bodyClientId !== basicAuth.clientId
+                  ) {
+                    throw {
+                      statusCode: 400,
+                      toJSON: () => ({
+                        error: "invalid_request",
+                        error_description:
+                          "client_id in the request body does not match the Authorization header",
+                      }),
+                    };
+                  }
+                }
+
+                const clientId = basicAuth
+                  ? basicAuth.clientId
+                  : params.get("client_id") || "";
+                const clientSecret = basicAuth
+                  ? basicAuth.clientSecret
+                  : (params.get("client_secret") ?? undefined);
 
                 let response;
                 if (grantType === "authorization_code") {
@@ -4992,17 +5054,23 @@ export class FastMCP<
                   .writeHead(200, OAUTH_CREDENTIAL_RESPONSE_HEADERS)
                   .end(JSON.stringify(response));
               } catch (error) {
-                const statusCode =
-                  (error as { statusCode?: number }).statusCode || 400;
-                res
-                  .writeHead(statusCode, OAUTH_CREDENTIAL_RESPONSE_HEADERS)
-                  .end(
-                    JSON.stringify(
-                      (error as { toJSON?: () => unknown }).toJSON?.() || {
-                        error: "invalid_request",
-                      },
-                    ),
-                  );
+                const body = (
+                  error as { toJSON?: () => unknown }
+                ).toJSON?.() || {
+                  error: "invalid_request",
+                };
+
+                if ((body as { error?: unknown }).error === "invalid_client") {
+                  res
+                    .writeHead(401, OAUTH_INVALID_CLIENT_RESPONSE_HEADERS)
+                    .end(JSON.stringify(body));
+                } else {
+                  const statusCode =
+                    (error as { statusCode?: number }).statusCode || 400;
+                  res
+                    .writeHead(statusCode, OAUTH_CREDENTIAL_RESPONSE_HEADERS)
+                    .end(JSON.stringify(body));
+                }
               }
               resolve();
             });

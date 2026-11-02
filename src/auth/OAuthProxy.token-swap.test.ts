@@ -123,6 +123,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
       // Exchange authorization code
       const tokenRequest: TokenRequest = {
         client_id: dcr.client_id,
+        client_secret: dcr.client_secret,
         code: authCode,
         code_verifier: pkce.verifier,
         grant_type: "authorization_code",
@@ -182,6 +183,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
 
       const response = await proxy.exchangeAuthorizationCode({
         client_id: dcr.client_id,
+        client_secret: dcr.client_secret,
         code: authCode,
         code_verifier: pkce.verifier,
         grant_type: "authorization_code",
@@ -248,6 +250,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
 
       const response = await proxy.exchangeAuthorizationCode({
         client_id: dcr.client_id,
+        client_secret: dcr.client_secret,
         code: authCode,
         code_verifier: pkce.verifier,
         grant_type: "authorization_code",
@@ -347,6 +350,7 @@ describe("OAuthProxy - Token Swap Pattern", () => {
 
       const response = await proxy.exchangeAuthorizationCode({
         client_id: dcr.client_id,
+        client_secret: dcr.client_secret,
         code: authCode,
         code_verifier: pkce.verifier,
         grant_type: "authorization_code",
@@ -568,6 +572,7 @@ describe("OAuthProxy - Upstream Token Storage TTL", () => {
 
     return proxy.exchangeAuthorizationCode({
       client_id: dcr.client_id,
+      client_secret: dcr.client_secret,
       code: authCode,
       code_verifier: pkce.verifier,
       grant_type: "authorization_code",
@@ -857,13 +862,30 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
       defaultUpstreamTokens,
     );
 
-    return proxy.exchangeAuthorizationCode({
+    const tokens = await proxy.exchangeAuthorizationCode({
       client_id: dcr.client_id,
+      client_secret: dcr.client_secret,
       code: authCode,
       code_verifier: pkce.verifier,
       grant_type: "authorization_code",
       redirect_uri: "https://client.example.com/callback",
     });
+
+    // The credentials a refresh has to present: tokens are bound to the
+    // client they were issued to.
+    return {
+      ...tokens,
+      client: { client_id: dcr.client_id, client_secret: dcr.client_secret! },
+    };
+  }
+
+  /** A registered client, for tests that mint their own refresh tokens. */
+  async function registerTestClient(proxy: OAuthProxy) {
+    const dcr = await proxy.registerClient({
+      redirect_uris: ["https://client.example.com/callback"],
+    });
+
+    return { client_id: dcr.client_id, client_secret: dcr.client_secret! };
   }
 
   it("should refresh FastMCP tokens using swap mode flow", async () => {
@@ -879,7 +901,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     // Refresh using the FastMCP refresh token
     const refreshedTokens = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: initialTokens.refresh_token!,
     });
@@ -919,7 +941,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     // First refresh should succeed
     const refreshedTokens = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: initialTokens.refresh_token!,
     });
@@ -928,7 +950,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     // Second refresh with SAME token should fail (one-time use)
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...initialTokens.client,
         grant_type: "refresh_token",
         refresh_token: initialTokens.refresh_token!,
       }),
@@ -939,10 +961,11 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
   it("should reject invalid refresh token", async () => {
     const proxy = new OAuthProxy(baseConfig);
+    const client = await registerTestClient(proxy);
 
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...client,
         grant_type: "refresh_token",
         refresh_token: "invalid.jwt.token",
       }),
@@ -963,10 +986,11 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
       ...baseConfig,
       tokenStorage,
     });
+    const client = await registerTestClient(proxy);
 
     // Create an expired refresh token (TTL of -1 second)
     const expiredToken = jwtIssuer.issueRefreshToken(
-      "client-123",
+      client.client_id,
       ["read"],
       undefined,
       -1, // Expired
@@ -974,7 +998,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...client,
         grant_type: "refresh_token",
         refresh_token: expiredToken,
       }),
@@ -995,17 +1019,22 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
       ...baseConfig,
       tokenStorage,
     });
+    const client = await registerTestClient(proxy);
 
-    // Create a valid but unregistered refresh token (no mapping)
-    const orphanToken = jwtIssuer.issueRefreshToken("client-123", ["read"]);
+    // A validly signed refresh token for this client that has no mapping —
+    // issued for the presenting client, so it is the mapping check that fails.
+    const orphanToken = jwtIssuer.issueRefreshToken(client.client_id, ["read"]);
 
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...client,
         grant_type: "refresh_token",
         refresh_token: orphanToken,
       }),
-    ).rejects.toThrow("invalid_grant");
+    ).rejects.toMatchObject({
+      code: "invalid_grant",
+      description: "Refresh token already used or expired",
+    });
 
     proxy.destroy();
   });
@@ -1054,7 +1083,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...initialTokens.client,
         grant_type: "refresh_token",
         refresh_token: initialTokens.refresh_token!,
       }),
@@ -1090,7 +1119,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     );
 
     const refreshedTokens = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: initialTokens.refresh_token!,
     });
@@ -1116,7 +1145,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     );
 
     const secondRefresh = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: refreshedTokens.refresh_token!,
     });
@@ -1156,7 +1185,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     );
 
     const refreshedTokens = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: initialTokens.refresh_token!,
     });
@@ -1197,7 +1226,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     );
 
     await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: initialTokens.refresh_token!,
     });
@@ -1218,11 +1247,15 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
       enableTokenSwap: false, // Passthrough mode
     });
 
-    // In passthrough mode, refresh token is sent directly to upstream
+    // The client holds the upstream refresh token itself...
+    const initialTokens = await getInitialTokens(proxy);
+    expect(initialTokens.refresh_token).toBe("initial-upstream-refresh-token");
+
+    // ...and the proxy forwards it upstream when the client it went to asks.
     const response = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
-      refresh_token: "upstream-refresh-token",
+      refresh_token: initialTokens.refresh_token!,
     });
 
     // Should get upstream tokens directly
@@ -1243,7 +1276,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     const initialTokens = await getInitialTokens(proxy);
 
     await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: initialTokens.refresh_token!,
     });
@@ -1278,7 +1311,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     const initialTokens = await getInitialTokens(proxy);
 
     await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: initialTokens.refresh_token!,
     });
@@ -1309,7 +1342,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     // Refresh tokens
     const refreshedTokens = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: initialTokens.refresh_token!,
     });
@@ -1339,7 +1372,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     // First refresh
     let currentRefreshToken = initialTokens.refresh_token!;
     let refreshResponse = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: currentRefreshToken,
     });
@@ -1347,7 +1380,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     // Second refresh with new token
     currentRefreshToken = refreshResponse.refresh_token!;
     refreshResponse = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: currentRefreshToken,
     });
@@ -1355,7 +1388,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     // Third refresh with newer token
     currentRefreshToken = refreshResponse.refresh_token!;
     refreshResponse = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: currentRefreshToken,
     });
@@ -1367,7 +1400,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     // Verify old tokens are rejected (one-time use)
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...initialTokens.client,
         grant_type: "refresh_token",
         refresh_token: initialTokens.refresh_token!,
       }),
@@ -1415,7 +1448,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     const refresh = () =>
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...initialTokens.client,
         grant_type: "refresh_token",
         refresh_token: initialTokens.refresh_token!,
       });
@@ -1460,7 +1493,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...initialTokens.client,
         grant_type: "refresh_token",
         refresh_token: initialTokens.refresh_token!,
       }),
@@ -1468,7 +1501,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     // Retrying the same refresh token succeeds once the upstream recovers.
     const retried = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: initialTokens.refresh_token!,
     });
@@ -1479,7 +1512,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     // ...but only once: the successful rotation still consumes it.
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...initialTokens.client,
         grant_type: "refresh_token",
         refresh_token: initialTokens.refresh_token!,
       }),
@@ -1528,7 +1561,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...initialTokens.client,
         grant_type: "refresh_token",
         refresh_token: initialTokens.refresh_token!,
       }),
@@ -1585,7 +1618,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...initialTokens.client,
         grant_type: "refresh_token",
         refresh_token: initialTokens.refresh_token!,
       }),
@@ -1618,7 +1651,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     const initialTokens = await getInitialTokens(proxy);
 
     const refreshed = await proxy.exchangeRefreshToken({
-      client_id: "upstream-client-id",
+      ...initialTokens.client,
       grant_type: "refresh_token",
       refresh_token: initialTokens.refresh_token!,
     });
@@ -1627,7 +1660,7 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
 
     await expect(
       proxy.exchangeRefreshToken({
-        client_id: "upstream-client-id",
+        ...initialTokens.client,
         grant_type: "refresh_token",
         refresh_token: initialTokens.refresh_token!,
       }),

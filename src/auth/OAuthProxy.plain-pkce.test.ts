@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AuthorizationParams } from "./types.js";
 
-import { OAuthProxy, OAuthProxyError } from "./OAuthProxy.js";
+import { OAuthProxy } from "./OAuthProxy.js";
 import { PKCEUtils } from "./utils/pkce.js";
 import { MemoryTokenStorage } from "./utils/tokenStore.js";
 
@@ -237,12 +237,16 @@ describe("OAuthProxy allowPlainPkce", () => {
       await expect(
         strict.exchangeAuthorizationCode({
           client_id: dcr.client_id,
+          client_secret: dcr.client_secret,
           code,
           code_verifier: verifier,
           grant_type: "authorization_code",
           redirect_uri: CALLBACK_URL,
         }),
-      ).rejects.toBeInstanceOf(OAuthProxyError);
+      ).rejects.toMatchObject({
+        code: "invalid_grant",
+        description: "code_challenge_method 'plain' is not supported; use S256",
+      });
     });
 
     it("still redeems a plain code while plain is allowed", async () => {
@@ -279,6 +283,7 @@ describe("OAuthProxy allowPlainPkce", () => {
 
       const tokenResponse = await proxy.exchangeAuthorizationCode({
         client_id: dcr.client_id,
+        client_secret: dcr.client_secret,
         code,
         code_verifier: verifier,
         grant_type: "authorization_code",

@@ -69,6 +69,7 @@ When token swap is disabled (`enableTokenSwap: false`):
 - Returns upstream provider tokens directly to clients
 - Simpler architecture for trusted environments
 - Client manages token lifecycle
+- Forwards a refresh only for the client the upstream refresh token was issued to
 - Useful for debugging and development
 
 ### 6. JWT Token Issuance
@@ -94,7 +95,7 @@ Built-in JWT issuer for token swap pattern:
 
 #### Security Features
 
-- **Protected claims filtering**: Standard JWT claims (aud, iss, exp, iat, nbf, jti, client_id) are never copied
+- **Protected claims filtering**: Standard JWT claims (aud, iss, exp, iat, nbf, jti, client_id) and the proxy's own `scope` and `token_use` are never copied
 - **JWT detection**: Only extracts from JWT-format tokens (3-part base64url)
 - **Graceful handling**: Silently skips opaque tokens without errors
 - **Size limits**: Configurable claim value size limits (default: 2000 chars)
@@ -507,6 +508,7 @@ Built-in debugging capabilities:
 - **Confused Deputy**: User consent screen
 - **Code Interception**: Two-tier PKCE
 - **Token Theft**: Short-lived JWTs, encryption at rest
+- **Stolen Code/Token**: Client authentication; codes and refresh tokens bound to their client
 - **XSS**: HTML escaping in consent screen
 - **CSRF**: State parameter validation
 - **Replay Attacks**: One-time authorization codes
