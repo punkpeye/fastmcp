@@ -1,3 +1,7 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
+
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   CallToolResultSchema,
   LATEST_PROTOCOL_VERSION,
@@ -6,6 +10,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { Ajv } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { type } from "arktype";
+import * as v from "valibot";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { z as z3 } from "zod/v3";
@@ -42,6 +48,120 @@ const unionValues = [
 const repeatedUnionBranch = z3.object({
   kind: z3.literal("a"),
   n: z3.number(),
+});
+
+describe("EdgeFastMCP Standard Schema issue paths", () => {
+  const schemaWithIssue = (issue: StandardSchemaV1.Issue) => {
+    const schema = z.object({});
+    Object.assign(schema["~standard"], {
+      validate: () => ({ issues: [issue] }),
+    });
+    return schema;
+  };
+
+  const cases: {
+    args: Record<string, unknown>;
+    expected: string;
+    name: string;
+    parameters: StandardSchemaV1;
+  }[] = [
+    {
+      args: { user: { age: "x" } },
+      expected: 'user.age: Invalid type: Expected number but received "x"',
+      name: "Valibot nested fields",
+      parameters: v.object({ user: v.object({ age: v.number() }) }),
+    },
+    {
+      args: { ages: ["x"] },
+      expected: 'ages.0: Invalid type: Expected number but received "x"',
+      name: "Valibot array indices",
+      parameters: v.object({ ages: v.array(v.number()) }),
+    },
+    {
+      args: { user: { age: "x" } },
+      expected: "user.age: Invalid input: expected number, received string",
+      name: "Zod nested fields",
+      parameters: z.object({ user: z.object({ age: z.number() }) }),
+    },
+    {
+      args: { user: { age: "x" } },
+      expected: "user.age: user.age must be a number (was a string)",
+      name: "ArkType nested fields",
+      parameters: type({ user: { age: "number" } }),
+    },
+    {
+      args: {},
+      expected: "Symbol(field): Invalid value",
+      name: "symbol keys",
+      parameters: schemaWithIssue({
+        message: "Invalid value",
+        path: [Symbol("field")],
+      }),
+    },
+    {
+      args: {},
+      expected: "users.0.Symbol(field): Invalid value",
+      name: "mixed primitive and object keys",
+      parameters: schemaWithIssue({
+        message: "Invalid value",
+        path: ["users", 0, { key: Symbol("field") }],
+      }),
+    },
+    {
+      args: {},
+      expected: "root: Invalid value",
+      name: "missing paths",
+      parameters: schemaWithIssue({ message: "Invalid value" }),
+    },
+    {
+      args: {},
+      expected: "root: Invalid value",
+      name: "empty paths",
+      parameters: schemaWithIssue({ message: "Invalid value", path: [] }),
+    },
+  ];
+
+  it.each(cases)("formats $name", async ({ args, expected, parameters }) => {
+    const server = new EdgeFastMCP({ name: "Test", version: "1.0.0" });
+    const execute = vi.fn(async () => "ok");
+    server.addTool({
+      description: "Validate arguments",
+      execute,
+      name: "check",
+      parameters,
+    });
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL("http://localhost/mcp"),
+      { fetch: async (input, init) => server.fetch(new Request(input, init)) },
+    );
+
+    try {
+      await client.connect(transport);
+      await client.listTools();
+
+      const diagnostic = await client
+        .callTool({ arguments: args, name: "check" })
+        .then(
+          (response) => {
+            const result = CallToolResultSchema.parse(response);
+            expect(result.isError).toBe(true);
+            return result.content
+              .filter((content) => content.type === "text")
+              .map((content) => content.text)
+              .join("\n");
+          },
+          (error: unknown) =>
+            error instanceof Error ? error.message : String(error),
+        );
+
+      expect(diagnostic).toContain(expected);
+      expect(diagnostic).not.toContain("[object Object]");
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
 });
 
 describe("EdgeFastMCP", () => {

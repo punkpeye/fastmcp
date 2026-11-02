@@ -600,7 +600,16 @@ export class EdgeFastMCP {
       if (parsed.issues) {
         const friendlyErrors = parsed.issues
           .map((issue) => {
-            const path = issue.path?.join(".") || "root";
+            const path =
+              issue.path
+                ?.map((segment) =>
+                  String(
+                    typeof segment === "object" && segment !== null
+                      ? segment.key
+                      : segment,
+                  ),
+                )
+                .join(".") || "root";
             return `${path}: ${issue.message}`;
           })
           .join(", ");
