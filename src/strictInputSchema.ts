@@ -27,12 +27,12 @@ export function objectRootSchema(schema: JsonSchema): JsonSchema {
  *   argument, is a bare `{ type: "object" }` (OpenAPI's usual spelling), stays
  *   open.
  *
- * An object that declares an empty `properties`, or a bare one at the top of
- * the input, is still closed: that is how a schema says "no keys" —
- * `z.object({})`, or a tool without arguments. A union at the top, though —
- * `anyOf` or `oneOf` with no `properties` of its own — is left as it is: its
- * branches declare its keys, and how strict they are, so closing the root
- * would reject every one of them.
+ * A plain object that declares an empty `properties`, or a bare one at the
+ * top of the input, is still closed: that is how a schema says "no keys" —
+ * `z.object({})`, or a tool without arguments. Root schemas with `allOf`,
+ * `anyOf`, `oneOf`, or `$ref` are left as declared, even with their own
+ * `properties`: `additionalProperties` only sees adjacent properties, so
+ * adding it would reject keys declared by a branch or reference target.
  *
  * The root is given an object type (see `objectRootSchema`).
  *
@@ -43,9 +43,10 @@ export function strictInputSchema(
   schema: JsonSchema,
   nested = false,
 ): JsonSchema {
-  const { additionalProperties, anyOf, oneOf, properties } = schema;
+  const { $ref, additionalProperties, allOf, anyOf, oneOf, properties } =
+    schema;
 
-  if (!nested && !properties && (anyOf || oneOf)) {
+  if (!nested && ($ref || allOf || anyOf || oneOf)) {
     return objectRootSchema(schema);
   }
 
