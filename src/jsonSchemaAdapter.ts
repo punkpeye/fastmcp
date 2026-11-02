@@ -126,12 +126,18 @@ async function compileSchema(
     .replace(/#$/, "");
   const isDraft2020 =
     dialect === "https://json-schema.org/draft/2020-12/schema";
+  const isDraft2019 =
+    dialect === "https://json-schema.org/draft/2019-09/schema";
   let ajvModule;
 
   try {
-    ajvModule = isDraft2020
-      ? await import("ajv/dist/2020.js")
-      : await import("ajv");
+    if (isDraft2020) {
+      ajvModule = await import("ajv/dist/2020.js");
+    } else if (isDraft2019) {
+      ajvModule = await import("ajv/dist/2019.js");
+    } else {
+      ajvModule = await import("ajv");
+    }
   } catch {
     throw new Error(
       'The "ajv" package is required to validate JSON Schema tool parameters. ' +
@@ -160,9 +166,11 @@ async function compileSchema(
     // ajv-formats is optional; `format` keywords are simply not enforced.
   }
 
-  // AJV registers the 2020-12 meta-schema under its canonical HTTPS URI.
+  // AJV registers the 2019-09 and 2020-12 meta-schemas under canonical HTTPS URIs.
   // Normalize only the compiled copy, preserving the caller's advertised schema.
-  return ajv.compile(isDraft2020 ? { ...schema, $schema: dialect } : schema);
+  return ajv.compile(
+    isDraft2020 || isDraft2019 ? { ...schema, $schema: dialect } : schema,
+  );
 }
 
 function toIssue(error: AjvErrorObject): StandardSchemaV1.Issue {

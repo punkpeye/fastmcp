@@ -136,6 +136,47 @@ test.each([
   }
 });
 
+test.each([
+  "http://json-schema.org/draft/2019-09/schema",
+  "http://json-schema.org/draft/2019-09/schema#",
+  "https://json-schema.org/draft/2019-09/schema",
+  "https://json-schema.org/draft/2019-09/schema#",
+])("validates draft 2019-09 schemas (%s)", async ($schema) => {
+  const declaredSchema = {
+    $schema,
+    dependentRequired: { pair: ["label"] },
+    properties: {
+      label: { type: "string" },
+      pair: {
+        additionalItems: false,
+        items: [{ type: "string" }, { type: "number" }],
+        type: "array",
+      },
+    },
+    required: ["pair"],
+    type: "object",
+    unevaluatedProperties: false,
+  };
+  const schema = jsonSchemaAdapter(declaredSchema);
+  const valid = { label: "answer", pair: ["answer", 42] };
+
+  await expect(schema["~standard"].validate(valid)).resolves.toEqual({
+    value: valid,
+  });
+  await expect(toJsonSchema(schema)).resolves.toEqual(declaredSchema);
+  expect(declaredSchema.$schema).toBe($schema);
+
+  for (const input of [
+    { label: "answer", pair: [42, "answer"] },
+    { label: "answer", pair: ["answer", 42, true] },
+    { pair: ["answer", 42] },
+    { extra: true, label: "answer", pair: ["answer", 42] },
+  ]) {
+    const invalid = await schema["~standard"].validate(input);
+    expect(invalid.issues?.length).toBeGreaterThan(0);
+  }
+});
+
 test("reports issues for input that does not match", async () => {
   const schema = jsonSchemaAdapter({ ...personSchema });
 
