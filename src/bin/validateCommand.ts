@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -156,18 +157,52 @@ export const withTypeCheckProject = async <T>(
 };
 
 /**
+ * Find tsx in the project `file` belongs to, as the file: URL of its loader.
+ *
+ * `fastmcp dev` runs a server with tsx. Node alone only strips types: it
+ * cannot follow the `.js` import of a `.ts` file that TypeScript itself asks
+ * for, nor run syntax that has to be transformed, like `enum` — and since Node
+ * 26 no flag makes it. So the structure check loads the file through the
+ * project's tsx when there is one, the way `dev` runs it.
+ *
+ * Resolved here rather than by the child: `--import tsx` would resolve from
+ * the child's working directory, and fail the whole check wherever tsx is not
+ * installed. A URL, because `--import` reads a Windows path as a URL scheme.
+ */
+export const resolveTsxLoader = (file: string): string | undefined => {
+  try {
+    return pathToFileURL(createRequire(file).resolve("tsx")).href;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Printed when the structure check fails and the project has no tsx, so the
+ * file was loaded by Node alone (see `resolveTsxLoader`).
+ */
+export const TSX_HINT =
+  "[FastMCP] Hint: if the file imports .ts files with .js extensions, or uses TypeScript syntax Node cannot strip (such as enum), add tsx to your project's devDependencies. validate then loads the file through tsx, as `fastmcp dev` does.";
+
+/**
  * Build the argv for the structure-check step.
  *
  * As above, the file is passed as an argument rather than quoted into a shell
  * command. It is converted to a file URL by the parent process, so the child
  * receives the URL as-is and never has to reconstruct it. The child is the same
  * Node binary running the CLI, so no PATH lookup is involved.
+ *
+ * Given a `tsxLoader` (see `resolveTsxLoader`), the child loads it first.
  */
 export const buildStructureCheckCommand = (
   file: string,
-  execPath: string = process.execPath,
+  {
+    execPath = process.execPath,
+    tsxLoader,
+  }: { execPath?: string; tsxLoader?: string } = {},
 ): [string, ...string[]] => [
   execPath,
+  ...(tsxLoader ? ["--import", tsxLoader] : []),
   "-e",
   STRUCTURE_CHECK_SCRIPT,
   pathToFileURL(file).href,

@@ -1,7 +1,16 @@
 import { execa } from "execa";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, parse } from "node:path";
+import { dirname, join, parse } from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { afterAll, describe, expect, it } from "vitest";
@@ -13,6 +22,7 @@ import {
   DEFAULT_TYPE_CHECK_OPTIONS,
   findTsconfig,
   formatCommandFailure,
+  resolveTsxLoader,
   STRUCTURE_CHECK_SCRIPT,
   withTypeCheckProject,
 } from "./validateCommand.js";
@@ -279,6 +289,43 @@ describe("buildStructureCheckCommand", () => {
     expect(url).toMatch(/^file:\/\//);
     expect(url).toContain("%20");
   });
+
+  it("loads a tsx loader, if given one, before the script", () => {
+    const file = "/app/src/server.ts";
+    const tsxLoader = "file:///app/node_modules/tsx/dist/loader.mjs";
+
+    expect(
+      buildStructureCheckCommand(file, { execPath: "node", tsxLoader }),
+    ).toEqual([
+      "node",
+      "--import",
+      tsxLoader,
+      "-e",
+      STRUCTURE_CHECK_SCRIPT,
+      pathToFileURL(file).href,
+    ]);
+  });
+});
+
+describe("resolveTsxLoader", () => {
+  it("finds the tsx installed in the file's project, as a file: URL", async () => {
+    const project = await makeTemporaryDirectory();
+    const tsx = join(project, "node_modules", "tsx");
+    await mkdir(tsx, { recursive: true });
+    await mkdir(join(project, "src"));
+    await writeFile(
+      join(tsx, "package.json"),
+      JSON.stringify({ exports: "./loader.mjs", name: "tsx" }),
+      "utf8",
+    );
+    await writeFile(join(tsx, "loader.mjs"), "", "utf8");
+
+    expect(resolveTsxLoader(join(project, "src", "server.ts"))).toBe(
+      pathToFileURL(
+        join(await realpath(project), "node_modules", "tsx", "loader.mjs"),
+      ).href,
+    );
+  });
 });
 
 describe("the structure check script", () => {
@@ -352,6 +399,52 @@ describe("the structure check script", () => {
       });
 
       expect(result.timedOut).toBe(false);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Server structure validation passed");
+    },
+  );
+
+  it(
+    "loads a server file through the project's tsx, as `fastmcp dev` runs it",
+    { timeout: 30_000 },
+    async () => {
+      const project = await makeProject();
+      await writeFile(
+        join(project, "package.json"),
+        JSON.stringify({ type: "module" }),
+        "utf8",
+      );
+      await symlink(
+        dirname(createRequire(import.meta.url).resolve("tsx/package.json")),
+        join(project, "node_modules", "tsx"),
+        "junction",
+      );
+
+      // What Node alone cannot load: the `.js` import of a `.ts` file that
+      // TypeScript asks for, and syntax that has to be transformed.
+      await writeFile(
+        join(project, "tools.ts"),
+        "export const add = (a: number, b: number): number => a + b;\n",
+        "utf8",
+      );
+      const file = join(project, "server.ts");
+      await writeFile(
+        file,
+        'import { add } from "./tools.js";\n\nenum Operation {\n  Add,\n}\n\nexport default { [Operation.Add]: add };\n',
+        "utf8",
+      );
+
+      const tsxLoader = resolveTsxLoader(file);
+      expect(tsxLoader).toBeDefined();
+
+      const [command, ...args] = buildStructureCheckCommand(file, {
+        tsxLoader,
+      });
+      const result = await execa(command, args, {
+        cwd: project,
+        reject: false,
+      });
+
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("Server structure validation passed");
     },

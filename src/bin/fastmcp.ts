@@ -12,6 +12,8 @@ import {
   buildStructureCheckCommand,
   buildTypeCheckCommand,
   formatCommandFailure,
+  resolveTsxLoader,
+  TSX_HINT,
   withTypeCheckProject,
 } from "./validateCommand.js";
 
@@ -214,8 +216,11 @@ await yargs(hideBin(process.argv))
           process.exit(1);
         }
 
-        const [structureCommand, ...structureArgs] =
-          buildStructureCheckCommand(filePath);
+        const tsxLoader = resolveTsxLoader(filePath);
+        const [structureCommand, ...structureArgs] = buildStructureCheckCommand(
+          filePath,
+          { tsxLoader },
+        );
 
         try {
           await execa(structureCommand, structureArgs, {
@@ -235,6 +240,10 @@ await yargs(hideBin(process.argv))
             console.error(
               "Make sure the file properly imports and uses FastMCP",
             );
+          }
+
+          if (!tsxLoader) {
+            console.error(TSX_HINT);
           }
 
           process.exit(1);
