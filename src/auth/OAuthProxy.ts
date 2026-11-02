@@ -211,6 +211,20 @@ export class OAuthProxy {
       );
     }
 
+    // RFC 7636 §4.4.1: a method this proxy cannot verify MUST be refused
+    // here. The token endpoint knows no transformation for it, so the code
+    // could never be redeemed.
+    if (
+      params.code_challenge &&
+      params.code_challenge_method !== "S256" &&
+      params.code_challenge_method !== "plain"
+    ) {
+      throw new OAuthProxyError(
+        "invalid_request",
+        `code_challenge_method '${params.code_challenge_method}' is not supported; use S256`,
+      );
+    }
+
     // With `plain` the challenge is the verifier, so anyone who sees this
     // request can replay a stolen code (RFC 7636 §7.2). Refuse it here rather
     // than at the token endpoint so the client fails before a user is sent
