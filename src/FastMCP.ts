@@ -3152,6 +3152,18 @@ export class FastMCPSession<
           } else {
             result = ContentResultZodSchema.parse(maybeStringResult);
           }
+
+          // Clients reject a successful result without structuredContent once
+          // the tool advertises an outputSchema, so report it as a tool error.
+          if (
+            tool.outputSchema &&
+            result.structuredContent === undefined &&
+            !result.isError
+          ) {
+            throw new UserError(
+              `Tool '${request.params.name}' returned no structured content. Please return a value that matches the tool's outputSchema.`,
+            );
+          }
         } catch (error) {
           if (error instanceof UserError) {
             let structuredContent = error.extras;

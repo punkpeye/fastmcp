@@ -328,7 +328,9 @@ const withGreetServer = async (
 
   server.addTool({
     description: "Greet a user",
-    execute: async (args) => `Hello, ${(args as { name: string }).name}!`,
+    execute: async (args) => ({
+      greeting: `Hello, ${(args as { name: string }).name}!`,
+    }),
     name: "greet",
     outputSchema: jsonSchemaAdapter({
       properties: { greeting: { type: "string" } },
@@ -393,9 +395,7 @@ test("rejects a tool call whose arguments do not match", async () => {
       arguments: { name: "Alice" },
       name: "greet",
     });
-    expect(accepted.content).toMatchObject([
-      { text: "Hello, Alice!", type: "text" },
-    ]);
+    expect(accepted.structuredContent).toEqual({ greeting: "Hello, Alice!" });
   });
 });
 
