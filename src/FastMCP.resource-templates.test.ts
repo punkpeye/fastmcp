@@ -191,6 +191,11 @@ describe("resource template matching", () => {
       uriTemplate: "file:///logs/{path}.log",
     },
     {
+      expected: { path: "a,b" },
+      uri: "file:///logs/a,b.log",
+      uriTemplate: "file:///logs/{path}.log",
+    },
+    {
       expected: { path: ",a%2Cb,,c%252C/," },
       uri: "file:///docs/,a%2Cb,,c%252C/,",
       uriTemplate: "file:///docs/{+path}",
@@ -216,7 +221,7 @@ describe("resource template matching", () => {
       uriTemplate: "file:///docs{/path*}",
     },
   ])(
-    "preserves scalar and list captures for $uri",
+    "preserves scalar and list captures and the URI for $uri",
     async ({ expected, uri, uriTemplate }) => {
       const received: unknown[] = [];
       const server = new FastMCP({ name: "T", version: "1.0.0" });
@@ -237,9 +242,10 @@ describe("resource template matching", () => {
         client.connect(clientTransport),
       ]);
       try {
-        await client.readResource({ uri });
-        await server.embedded(uri);
+        const { contents } = await client.readResource({ uri });
+        const embedded = await server.embedded(uri);
         expect(received).toEqual([expected, expected]);
+        expect([contents[0].uri, embedded.uri]).toEqual([uri, uri]);
       } finally {
         await client.close();
         await session.close();

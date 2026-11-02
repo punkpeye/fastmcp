@@ -2670,8 +2670,6 @@ export class FastMCPSession<
                 continue;
               }
 
-              const uri = uriTemplate.fill(match);
-
               const result = await resourceTemplate.load(
                 match,
                 this.#auth,
@@ -2689,7 +2687,9 @@ export class FastMCPSession<
                   description: resourceTemplate.description,
                   mimeType: resource.mimeType ?? resourceTemplate.mimeType,
                   name: resourceTemplate.name,
-                  uri: resource.uri ?? uri,
+                  // The URI asked for. Refilling the template from `match` can
+                  // spell it differently: `{path}` refills `a,b` as `a%2Cb`.
+                  uri: resource.uri ?? request.params.uri,
                 })),
               };
             }
