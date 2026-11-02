@@ -906,7 +906,8 @@ type ServerOptions<T extends FastMCPSessionAuth> = {
   icons?: Icon[];
   instructions?: string;
   /**
-   * Custom logger instance. If not provided, defaults to console.
+   * Custom logger instance. Defaults to console, with stdio session diagnostics
+   * written to stderr.
    * Use this to integrate with your own logging system.
    */
   logger?: Logger;
@@ -3988,6 +3989,14 @@ export class FastMCP<
     const config = this.#parseRuntimeConfig(options);
 
     if (config.transportType === "stdio") {
+      // Session construction can log, and stdout is reserved for MCP messages.
+      const logger: Logger = this.#options.logger ?? {
+        debug: (...args) => console.error(...args),
+        error: (...args) => console.error(...args),
+        info: (...args) => console.error(...args),
+        log: (...args) => console.error(...args),
+        warn: (...args) => console.warn(...args),
+      };
       const transport = new StdioServerTransport();
 
       // For stdio transport, if authenticate function is provided, call it
@@ -4023,7 +4032,7 @@ export class FastMCP<
         hasTools: this.#tools.length > 0,
         icons: this.#options.icons,
         instructions: this.#options.instructions,
-        logger: this.#logger,
+        logger,
         name: this.#options.name,
         onToolCall: this.#options.onToolCall,
         ping: this.#options.ping,
