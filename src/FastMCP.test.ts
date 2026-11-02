@@ -2213,6 +2213,84 @@ test("session knows about roots", async () => {
   });
 });
 
+test.each([
+  {
+    capabilities: { roots: {} },
+    expectedRequests: 1,
+    name: "roots: {}",
+    rootsEnabled: true,
+  },
+  {
+    capabilities: { roots: { listChanged: false } },
+    expectedRequests: 1,
+    name: "roots: { listChanged: false }",
+    rootsEnabled: true,
+  },
+  {
+    capabilities: { roots: { listChanged: true } },
+    expectedRequests: 1,
+    name: "roots: { listChanged: true }",
+    rootsEnabled: true,
+  },
+  {
+    capabilities: {},
+    expectedRequests: 0,
+    name: "no roots capability",
+    rootsEnabled: true,
+  },
+  {
+    capabilities: { roots: { listChanged: true } },
+    expectedRequests: 0,
+    name: "server roots disabled",
+    rootsEnabled: false,
+  },
+])(
+  "session loads initial roots ($name)",
+  async ({ capabilities, expectedRequests, rootsEnabled }) => {
+    const server = new FastMCP({
+      name: "Test",
+      roots: { enabled: rootsEnabled },
+      version: "1.0.0",
+    });
+    const client = new Client(
+      { name: "example-client", version: "1.0.0" },
+      { capabilities },
+    );
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const send = vi.spyOn(serverTransport, "send");
+    const roots: Root[] = [
+      {
+        name: "Frontend Repository",
+        uri: "file:///home/user/projects/frontend",
+      },
+    ];
+
+    if (capabilities.roots) {
+      client.setRequestHandler(ListRootsRequestSchema, () => ({ roots }));
+    }
+
+    let session: FastMCPSession | undefined;
+
+    try {
+      [session] = await Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+
+      expect(
+        send.mock.calls.filter(
+          ([message]) => "method" in message && message.method === "roots/list",
+        ),
+      ).toHaveLength(expectedRequests);
+      expect(session.roots).toEqual(expectedRequests === 1 ? roots : []);
+    } finally {
+      await client.close();
+      await session?.close();
+    }
+  },
+);
+
 test("session listens to roots changes", async () => {
   const clientRoots: Root[] = [
     {
