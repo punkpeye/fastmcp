@@ -262,6 +262,32 @@ test("executeRequest replaces every occurrence of a repeated path parameter", as
   );
 });
 
+test.each([
+  { expected: "blue,black,brown", value: ["blue", "black", "brown"] },
+  { expected: "blue%2Cgreen,red%2Fwhite", value: ["blue,green", "red/white"] },
+  { expected: "0,false,null", value: [0, false, null] },
+  { expected: ",blue,", value: ["", "blue", ""] },
+  { expected: "", value: [] },
+  { expected: "%21%27%28%29%2A%3F%23%25%20%E6%96%87", value: ["!'()*?#% 文"] },
+])(
+  "simple path arrays encode items separately: $value",
+  async ({ expected, value }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+    await executeRequest({
+      args: { color: value },
+      fetchImpl,
+      parameterMap: { color: { in: "path", name: "color" } },
+      route: route({ path: "/colors/{color}/mirrors/{color}" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    expect(fetchImpl.mock.calls[0]![0]).toBe(
+      `https://api.example.com/colors/${expected}/mirrors/${expected}`,
+    );
+  },
+);
+
 test.each([false, true])(
   "simple path objects encode each key/value before adding separators (explode: %s)",
   async (explode) => {
@@ -336,10 +362,8 @@ test.each([
   { expected: "false", value: false },
   { expected: "null", value: null },
   { expected: "!'()*", value: "!'()*" },
-  { expected: "a%2Cb%2Cc%2Fd", value: ["a,b", "c/d"] },
-  { expected: "", value: [] },
 ])(
-  "scalar and array path values keep their existing encoding: $value",
+  "scalar path values keep their existing encoding: $value",
   async ({ expected, value }) => {
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
 
@@ -355,6 +379,25 @@ test.each([
 
     expect(fetchImpl.mock.calls[0]![0]).toBe(
       `https://api.example.com/colors/${expected}`,
+    );
+  },
+);
+
+test.each(["label", "matrix"])(
+  "unsupported %s path arrays keep their existing encoding",
+  async (style) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+    await executeRequest({
+      args: { color: ["a,b", "c/d"] },
+      fetchImpl,
+      parameterMap: { color: { in: "path", name: "color", style } },
+      route: route({ path: "/colors/{color}" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    expect(fetchImpl.mock.calls[0]![0]).toBe(
+      "https://api.example.com/colors/a%2Cb%2Cc%2Fd",
     );
   },
 );
@@ -399,6 +442,9 @@ test("an empty simple path object cannot turn a neighboring literal into a dot s
 });
 
 test.each([
+  { args: { id: [".."] }, path: "/v1/users/{id}/profile" },
+  { args: { id: ["."] }, path: "/v1/users/{id}/profile" },
+  { args: { id: [] }, path: "/v1/users/{id}./profile" },
   { args: { id: ".." }, path: "/v1/users/{id}/profile" },
   { args: { id: "." }, path: "/v1/users/{id}/profile" },
   { args: { id: ".." }, path: "/v1/users/{id}" },

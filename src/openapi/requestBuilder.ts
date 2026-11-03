@@ -379,9 +379,10 @@ function encodePathComponent(value: string): string {
 }
 
 /**
- * Simple-style flat objects use alternating keys/values, or key=value pairs
- * when exploded. Encode each component before adding separators so commas,
- * equals signs and slashes in the data cannot become serialization structure.
+ * Simple-style arrays use comma-separated items; flat objects use alternating
+ * keys/values, or key=value pairs when exploded. Encode each component before
+ * adding separators so commas, equals signs and slashes in the data cannot
+ * become serialization structure.
  * Other styles/shapes retain their existing whole-value encoding.
  */
 function encodePathValue(
@@ -389,6 +390,14 @@ function encodePathValue(
   style: string | undefined,
   explode: boolean | undefined,
 ): string {
+  if (
+    (style === undefined || style === "simple") &&
+    Array.isArray(value) &&
+    value.every((item) => item === null || typeof item !== "object")
+  ) {
+    return value.map((item) => encodePathComponent(String(item))).join(",");
+  }
+
   if (
     (style === undefined || style === "simple") &&
     value !== null &&

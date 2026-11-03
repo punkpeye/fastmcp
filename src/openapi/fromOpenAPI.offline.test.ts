@@ -408,6 +408,66 @@ test.each([
   },
 );
 
+test.each([
+  { explode: false, style: undefined },
+  { explode: false, style: "simple" },
+  { explode: true, style: undefined },
+  { explode: true, style: "simple" },
+  { explode: undefined, style: undefined },
+  { explode: undefined, style: "simple" },
+])(
+  "a referenced path array preserves item boundaries with style=$style, explode=$explode",
+  async ({ explode, style }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        components: {
+          parameters: {
+            Colors: {
+              explode,
+              in: "path",
+              name: "colors",
+              required: true,
+              schema: { items: { type: "string" }, type: "array" },
+              style,
+            },
+          },
+        },
+        info: { title: "Colors API", version: "1.0.0" },
+        openapi: "3.0.3",
+        paths: {
+          "/colors/{colors}": {
+            get: {
+              operationId: "getColors",
+              parameters: [{ $ref: "#/components/parameters/Colors" }],
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const result = await client.callTool({
+        arguments: { colors: ["blue,green", "red/white"] },
+        name: "getColors",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(fetchImpl.mock.calls[0]![0]).toBe(
+        "https://api.example.com/colors/blue%2Cgreen,red%2Fwhite",
+      );
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
 test("a path parameter that is a dot segment is rejected instead of rewriting the request path", async () => {
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
   const server = await fromOpenAPI({
