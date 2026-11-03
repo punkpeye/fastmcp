@@ -739,11 +739,11 @@ const LOGGING_LEVEL_SEVERITY: Record<LoggingLevel, number> = {
 };
 
 /**
- * JSON-RPC error code for a tool call the session's token lacks scopes for. It
- * matches the body of mcp-proxy's own `insufficient_scope` challenge, so a
- * client sees one shape whichever of the two built the answer.
+ * JSON-RPC error code for a tool call the session's token lacks scopes for,
+ * from the range MCP leaves to implementations and clear of the codes MCP and
+ * its SDK use. Not -32001: the SDK uses that for a request timeout.
  */
-const INSUFFICIENT_SCOPE_ERROR_CODE = -32001;
+const INSUFFICIENT_SCOPE_ERROR_CODE = -32003;
 
 /**
  * Why a tool call may not run with the session's token, and the scopes the

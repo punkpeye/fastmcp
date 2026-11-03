@@ -164,7 +164,7 @@ test("answers an HTTP call without the tool's scopes with a 403 scope challenge"
     });
     expect(await response.json()).toEqual({
       error: {
-        code: -32001,
+        code: -32003,
         data: {
           error: "insufficient_scope",
           required_scopes: ["files:read", "files:write"],
@@ -348,7 +348,7 @@ test("rejects the call with a JSON-RPC error on transports without HTTP", async 
 
     expect(error).toBeInstanceOf(McpError);
     expect(error).toMatchObject({
-      code: -32001,
+      code: -32003,
       data: {
         error: "insufficient_scope",
         required_scopes: ["files:read", "files:write"],
@@ -369,7 +369,7 @@ test("grants nothing to a session without auth when authenticate is configured",
     await expect(
       client.callTool({ arguments: {}, name: "write_file" }),
     ).rejects.toMatchObject({
-      code: -32001,
+      code: -32003,
       data: { required_scopes: ["files:write"] },
     });
     expect(execute).not.toHaveBeenCalled();

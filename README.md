@@ -783,7 +783,8 @@ WWW-Authenticate: Bearer error="insufficient_scope", scope="files:read files:wri
 `scope` lists the scopes the session already has plus the ones the tool needs,
 so the client can get a token with all of them and retry. `resource_metadata`
 is included when `oauth.enabled` is set. On stdio and other transports without
-HTTP, the call fails with a JSON-RPC error (code `-32001`) instead.
+HTTP, the call fails with a JSON-RPC error instead: code `-32003`, with
+`data.error` set to `"insufficient_scope"`.
 
 To hide the tool from sessions without the scopes, use
 `canAccess: requireScopes(...)` instead. Like `canAccess`, `scopes` is not
