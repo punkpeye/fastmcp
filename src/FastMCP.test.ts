@@ -3996,10 +3996,12 @@ test("provides auth to tools", async () => {
 
   await client.connect(transport);
 
+  // Once per HTTP request: the SSE GET, then the initialize and the
+  // notifications/initialized POSTs.
   expect(
     authenticate,
-    "authenticate should have been called",
-  ).toHaveBeenCalledTimes(1);
+    "authenticate should run on every SSE request",
+  ).toHaveBeenCalledTimes(3);
 
   expect(
     await client.callTool({
@@ -4835,17 +4837,11 @@ test("filters tools based on canAccess property", async () => {
       { name: "admin", version: "1.0.0" },
       { capabilities: {} },
     );
+    // requestInit headers go on the GET and on every POST, and each of those
+    // requests is authenticated on its own.
     const adminTransport = new SSEClientTransport(
       new URL(`http://localhost:${port}/sse`),
-      {
-        eventSourceInit: {
-          fetch: (url, init) =>
-            fetch(url, {
-              ...init,
-              headers: { ...init?.headers, "x-role": "admin" },
-            }),
-        },
-      },
+      { requestInit: { headers: { "x-role": "admin" } } },
     );
     await adminClient.connect(adminTransport);
 
@@ -4862,15 +4858,7 @@ test("filters tools based on canAccess property", async () => {
     );
     const userTransport = new SSEClientTransport(
       new URL(`http://localhost:${port}/sse`),
-      {
-        eventSourceInit: {
-          fetch: (url, init) =>
-            fetch(url, {
-              ...init,
-              headers: { ...init?.headers, "x-role": "user" },
-            }),
-        },
-      },
+      { requestInit: { headers: { "x-role": "user" } } },
     );
     await userClient.connect(userTransport);
 

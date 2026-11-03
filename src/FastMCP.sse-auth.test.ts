@@ -1,5 +1,7 @@
 import type http from "http";
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { expect, test, vi } from "vitest";
 import { z } from "zod";
 
@@ -7,10 +9,11 @@ import { FastMCP } from "./FastMCP.js";
 import { getTestPort } from "./getTestPort.js";
 
 /**
- * mcp-proxy serves an SSE endpoint at `/sse` by default and — unlike the HTTP
- * Stream endpoint — does not apply `authenticate` to it. FastMCP must therefore
- * reject unauthenticated sessions itself, otherwise `/sse` is an unauthenticated
- * back door into a server whose `/mcp` endpoint returns 401.
+ * mcp-proxy serves an SSE endpoint at `/sse` by default. It must not be an
+ * unauthenticated back door into a server whose `/mcp` endpoint returns 401:
+ * the `GET` that opens the stream and every message POSTed to `/messages` are
+ * authenticated, by mcp-proxy since 6.8.0, and FastMCP rejects a failed
+ * authentication in `createServer` as well.
  *
  * Reported by @pacocartones.
  */
@@ -115,6 +118,30 @@ const initialize = (port: number) =>
     method: "POST",
   });
 
+/**
+ * POSTs an `initialize` to an SSE session's `/messages` URL. Each message is
+ * authenticated on its own, so the token has to be sent every time, not only
+ * on the `GET` that opened the stream.
+ */
+const postInitialize = (port: number, messagesUrl: string, token?: string) =>
+  fetch(`http://localhost:${port}${messagesUrl}`, {
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: "client", version: "1.0.0" },
+        protocolVersion: "2024-11-05",
+      },
+    }),
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    method: "POST",
+  });
+
 test("rejects unauthenticated SSE connections when authenticate returns undefined", async () => {
   const port = await getTestPort();
   const authenticate = vi.fn(async () => undefined);
@@ -197,26 +224,93 @@ test("still allows authenticated SSE connections", async () => {
     expect(sse.messagesUrl).toMatch(/^\/messages\?sessionId=/);
 
     // The session must be usable, not merely advertised.
-    const call = await fetch(`http://localhost:${port}${sse.messagesUrl}`, {
-      body: JSON.stringify({
-        id: 1,
-        jsonrpc: "2.0",
-        method: "initialize",
-        params: {
-          capabilities: {},
-          clientInfo: { name: "client", version: "1.0.0" },
-          protocolVersion: "2024-11-05",
-        },
-      }),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-    });
+    const call = await postInitialize(port, sse.messagesUrl!, "good-token");
     await call.text().catch(() => undefined);
 
     expect(call.status).toBe(202);
 
     await sse.close();
   } finally {
+    await server.stop();
+  }
+});
+
+test("rejects SSE messages posted without valid credentials", async () => {
+  const port = await getTestPort();
+  const server = await startServer(async (request) => {
+    if (request.headers.authorization === "Bearer good-token") {
+      return { id: 1 };
+    }
+
+    return undefined;
+  }, port);
+
+  try {
+    const sse = await openSse(port, "good-token");
+
+    expect(sse.status).toBe(200);
+
+    // The session id is not a credential: a message without a valid token is
+    // refused even though the stream it belongs to was opened with one.
+    for (const token of [undefined, "bad-token"]) {
+      const call = await postInitialize(port, sse.messagesUrl!, token);
+      await call.text().catch(() => undefined);
+
+      expect(call.status).toBe(401);
+      expect(call.headers.get("www-authenticate")).toMatch(/^Bearer/);
+    }
+
+    await sse.close();
+  } finally {
+    await server.stop();
+  }
+});
+
+test("rechecks tool access on every SSE message", async () => {
+  const port = await getTestPort();
+  const server = await startServer(async (request) => {
+    if (request.headers.authorization === "Bearer admin") {
+      return { id: 1 };
+    }
+
+    if (request.headers.authorization === "Bearer reader") {
+      return { id: 2 };
+    }
+
+    return undefined;
+  }, port);
+
+  // Read on every request, so changing it mid-session downgrades the token
+  // that the next message carries.
+  let token = "admin";
+  const client = new Client({ name: "client", version: "1.0.0" });
+  const transport = new SSEClientTransport(
+    new URL(`http://localhost:${port}/sse`),
+    {
+      fetch: (url, init) => {
+        const headers = new Headers(init?.headers);
+        headers.set("authorization", `Bearer ${token}`);
+
+        return fetch(url, { ...init, headers });
+      },
+    },
+  );
+
+  try {
+    await client.connect(transport);
+
+    expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      "read_secret",
+    ]);
+
+    token = "reader";
+
+    expect((await client.listTools()).tools).toEqual([]);
+    await expect(
+      client.callTool({ arguments: {}, name: "read_secret" }),
+    ).rejects.toThrow("Unknown tool: read_secret");
+  } finally {
+    await client.close();
     await server.stop();
   }
 });

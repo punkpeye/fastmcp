@@ -5345,12 +5345,11 @@ export class FastMCP<
    * Rejects a failed authentication result before it can become a session.
    *
    * Authentication is REQUIRED whenever an `authenticate` function is
-   * configured. mcp-proxy gates the HTTP Stream endpoint before `createServer`
-   * runs, but it does not gate the SSE endpoint it serves at `/sse` by default:
-   * `handleSSERequest` never receives `authenticate`. Throwing here is what
-   * stops `/sse` from handing out a session — with access to every tool, since
-   * `#createSession` skips `canAccess` filtering when `auth` is falsy — to a
-   * client that `/mcp` would have answered with a 401.
+   * configured. mcp-proxy answers a failed `authenticate` with a 401 before
+   * `createServer` runs: on the HTTP Stream endpoint, and since 6.8.0 on the
+   * SSE endpoint's `GET /sse` and every `POST /messages` too. This is the
+   * second gate, so a client that `/mcp` would answer with a 401 never gets a
+   * session, whichever endpoint it uses.
    *
    * The falsy test matches mcp-proxy's own check so that both endpoints agree
    * on what counts as a failed authentication. Returning a nullish value is the
