@@ -738,6 +738,30 @@ const LOGGING_LEVEL_SEVERITY: Record<LoggingLevel, number> = {
   warning: 3,
 };
 
+/**
+ * JSON-RPC error code for a tool call the session's token lacks scopes for,
+ * from the range MCP leaves to implementations and clear of the codes MCP and
+ * its SDK use. Not -32001: the SDK uses that for a request timeout.
+ */
+const INSUFFICIENT_SCOPE_ERROR_CODE = -32003;
+
+/**
+ * Why a tool call may not run with the session's token, and the scopes the
+ * client should re-authorize for: the ones the session already has plus the
+ * ones the tool needs, so that the new token does not drop any (the approach
+ * MCP recommends for scope challenges).
+ */
+type ScopeChallenge = {
+  description: string;
+  scopes: string[];
+};
+
+/**
+ * RFC 6749 §3.3 `scope-token`. Only these are echoed into a challenge's
+ * `WWW-Authenticate` header, which a stray quote or space would break.
+ */
+const SCOPE_TOKEN = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
+
 type Prompt<
   T extends FastMCPSessionAuth = FastMCPSessionAuth,
   Arguments extends PromptArgument<T>[] = PromptArgument<T>[],
@@ -1276,6 +1300,19 @@ type Tool<
   name: string;
   outputSchema?: OutputParams;
   parameters?: Params;
+  /**
+   * OAuth scopes a caller needs to call this tool, checked on every call
+   * against `auth.scopes` (an array or a `Set`, read as `requireScopes()`
+   * reads it). Unlike `canAccess`, this does not hide the tool. A call without
+   * them never runs: over HTTP it is answered with MCP's 403
+   * `insufficient_scope` challenge, which tells the client which scopes to
+   * re-authorize for, and on other transports with a JSON-RPC error.
+   *
+   * Enforced on the same terms as `canAccess`: not at all on a server without
+   * `authenticate`, and as if nothing were granted for a session that ends up
+   * without auth on one that has it.
+   */
+  scopes?: string[];
   timeoutMs?: number;
 };
 
@@ -1846,6 +1883,35 @@ export class FastMCPSession<
   }
 
   /**
+   * The scope challenge one message a client sent would get, or `undefined` to
+   * let it through. FastMCP's HTTP transports ask before mcp-proxy dispatches
+   * each message, the last point at which the answer can still be a 403; the
+   * `tools/call` handler applies the same check on every transport.
+   */
+  public scopeChallengeFor(message: unknown): ScopeChallenge | undefined {
+    if (typeof message !== "object" || message === null) {
+      return undefined;
+    }
+
+    const { method, params } = message as {
+      method?: unknown;
+      params?: unknown;
+    };
+
+    if (method !== "tools/call" || typeof params !== "object" || !params) {
+      return undefined;
+    }
+
+    const { name } = params as { name?: unknown };
+
+    // A tool this session may not see is left to the handler, which answers
+    // "Unknown tool": a challenge would reveal that it exists.
+    const tool = this.#visibleTools.find((visible) => visible.name === name);
+
+    return tool ? this.#scopeChallenge(tool) : undefined;
+  }
+
+  /**
    * Notifies the connected client that the contents of a resource have changed.
    *
    * The `notifications/resources/updated` notification is only sent when the
@@ -2154,6 +2220,31 @@ export class FastMCPSession<
         return;
       }
     }
+  }
+
+  /**
+   * The challenge a call to `tool` gets while the session's token lacks the
+   * tool's `scopes`, or `undefined` when it may run. Applied on the same terms
+   * as `canAccess` (see `toolsVisibleTo`): never without auth on a server that
+   * does not authenticate, and with nothing granted when a server that does
+   * has no auth for this session.
+   */
+  #scopeChallenge(tool: Tool<T>): ScopeChallenge | undefined {
+    if (!tool.scopes?.length || (!this.#auth && !this.#authRequired)) {
+      return undefined;
+    }
+
+    const granted = grantedScopes(this.#auth);
+    const missing = tool.scopes.filter((scope) => !granted.includes(scope));
+
+    if (missing.length === 0) {
+      return undefined;
+    }
+
+    return {
+      description: `Insufficient scope for tool '${tool.name}': requires ${missing.join(" ")}`,
+      scopes: [...new Set([...granted, ...tool.scopes])],
+    };
   }
 
   /**
@@ -2960,6 +3051,19 @@ export class FastMCPSession<
           );
         }
 
+        const challenge = this.#scopeChallenge(tool);
+
+        if (challenge) {
+          // Over HTTP the call was already answered with a 403 before it got
+          // here (see `scopeChallengeFor`). Other transports have no status
+          // to set, so the same challenge comes back as a JSON-RPC error.
+          throw new McpError(
+            INSUFFICIENT_SCOPE_ERROR_CODE,
+            challenge.description,
+            { error: "insufficient_scope", required_scopes: challenge.scopes },
+          );
+        }
+
         let args: unknown = undefined;
 
         if (tool.parameters) {
@@ -3523,6 +3627,22 @@ const OAUTH_INVALID_CLIENT_RESPONSE_HEADERS = {
   ...OAUTH_CREDENTIAL_RESPONSE_HEADERS,
   "WWW-Authenticate": 'Basic realm="oauth", charset="UTF-8"',
 } as const;
+
+/**
+ * The scopes an auth object was granted, read from `auth.scopes` the way
+ * `requireScopes()` reads it: an array or a `Set`, of which only the strings
+ * count.
+ */
+function grantedScopes(auth: FastMCPSessionAuth): string[] {
+  const scopes = auth?.scopes;
+  const values: unknown[] = Array.isArray(scopes)
+    ? scopes
+    : scopes instanceof Set
+      ? [...scopes]
+      : [];
+
+  return values.filter((scope): scope is string => typeof scope === "string");
+}
 
 function stripBasePath(
   path: string,
@@ -4163,6 +4283,8 @@ export class FastMCP<
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
           ...(authenticate ? { authenticate } : {}),
+          beforeDispatch: ({ message, server }) =>
+            this.#answerScopeChallenge(message, server),
           cors: httpConfig.cors,
           createServer: async (request) => {
             let auth: T | undefined;
@@ -4227,6 +4349,8 @@ export class FastMCP<
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
           ...(authenticate ? { authenticate } : {}),
+          beforeDispatch: ({ message, server }) =>
+            this.#answerScopeChallenge(message, server),
           cors: httpConfig.cors,
           createServer: async (request) => {
             let auth: T | undefined;
@@ -4315,6 +4439,30 @@ export class FastMCP<
   }
 
   /**
+   * mcp-proxy's `beforeDispatch`: answers a `tools/call` the session's token
+   * lacks scopes for with MCP's 403 scope challenge. It runs for every message
+   * POSTed over HTTP, after `authenticate` and `updateAuth`, because once a
+   * message is dispatched the SDK answers it on a 200.
+   */
+  #answerScopeChallenge(
+    message: unknown,
+    session: FastMCPSession<T>,
+  ): Response | undefined {
+    const challenge = session.scopeChallengeFor(message);
+
+    if (!challenge) {
+      return undefined;
+    }
+
+    const { id } = message as { id?: unknown };
+
+    return this.#createInsufficientScopeResponse(
+      challenge,
+      typeof id === "number" || typeof id === "string" ? id : null,
+    );
+  }
+
+  /**
    * Connects `session` to `transport` and lists it in `sessions` until the
    * transport closes. The close is watched from before the session connects,
    * so a client that hangs up during setup leaves no session behind.
@@ -4349,6 +4497,63 @@ export class FastMCP<
     this.emit("connect", {
       session: session as FastMCPSession<FastMCPSessionAuth>,
     });
+  }
+
+  /**
+   * Builds MCP's 403 `insufficient_scope` challenge (2025-11-25, Scope
+   * Challenge Handling). `scope` lists what the client should re-authorize
+   * for, and `resource_metadata` is added on the same terms as on the 401 (see
+   * `#createUnauthorizedResponse`).
+   *
+   * Clients such as the MCP SDK pick each parameter out with a simple pattern:
+   * the first match wins and a quoted value ends at the first quote. So the
+   * parameters come first, the description comes last, and it keeps only the
+   * characters RFC 6750 allows in it.
+   */
+  #createInsufficientScopeResponse(
+    challenge: ScopeChallenge,
+    id: null | number | string,
+  ): Response {
+    const oauth = this.#options.oauth;
+    const resource = oauth?.enabled
+      ? oauth.protectedResource?.resource
+      : undefined;
+    const wwwAuthenticateParts = [
+      'error="insufficient_scope"',
+      `scope="${challenge.scopes.filter((scope) => SCOPE_TOKEN.test(scope)).join(" ")}"`,
+    ];
+
+    if (resource) {
+      wwwAuthenticateParts.push(
+        `resource_metadata="${protectedResourceMetadataUrl(resource)}"`,
+      );
+    }
+
+    wwwAuthenticateParts.push(
+      `error_description="${challenge.description.replace(/[^\x20\x21\x23-\x5B\x5D-\x7E]/g, "")}"`,
+    );
+
+    return new Response(
+      JSON.stringify({
+        error: {
+          code: INSUFFICIENT_SCOPE_ERROR_CODE,
+          data: {
+            error: "insufficient_scope",
+            required_scopes: challenge.scopes,
+          },
+          message: challenge.description,
+        },
+        id,
+        jsonrpc: "2.0",
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "WWW-Authenticate": `Bearer ${wwwAuthenticateParts.join(", ")}`,
+        },
+        status: 403,
+      },
+    );
   }
 
   /**
@@ -5345,12 +5550,11 @@ export class FastMCP<
    * Rejects a failed authentication result before it can become a session.
    *
    * Authentication is REQUIRED whenever an `authenticate` function is
-   * configured. mcp-proxy gates the HTTP Stream endpoint before `createServer`
-   * runs, but it does not gate the SSE endpoint it serves at `/sse` by default:
-   * `handleSSERequest` never receives `authenticate`. Throwing here is what
-   * stops `/sse` from handing out a session — with access to every tool, since
-   * `#createSession` skips `canAccess` filtering when `auth` is falsy — to a
-   * client that `/mcp` would have answered with a 401.
+   * configured. mcp-proxy answers a failed `authenticate` with a 401 before
+   * `createServer` runs: on the HTTP Stream endpoint, and since 6.8.0 on the
+   * SSE endpoint's `GET /sse` and every `POST /messages` too. This is the
+   * second gate, so a client that `/mcp` would answer with a 401 never gets a
+   * session, whichever endpoint it uses.
    *
    * The falsy test matches mcp-proxy's own check so that both endpoints agree
    * on what counts as a failed authentication. Returning a nullish value is the
@@ -5476,6 +5680,7 @@ export type {
   ResourceResult,
   ResourceTemplate,
   ResourceTemplateArgument,
+  ScopeChallenge,
   SerializableValue,
   ServerOptions,
   TextContent,

@@ -757,6 +757,39 @@ session sees every tool. With one, a session that still ends up without auth —
 on stdio, where the server carries on when `authenticate` throws or returns
 nothing — sees none of the tools that have `canAccess`.
 
+##### Scope challenges
+
+To keep a tool listed but require OAuth scopes to call it, list them in
+`scopes`. FastMCP reads the scopes a session was granted from `auth.scopes`, an
+array or a `Set`, the same way `requireScopes()` does.
+
+```typescript
+server.addTool({
+  name: "write-file",
+  description: "Writes a file",
+  scopes: ["files:write"],
+  execute: async () => "Written",
+});
+```
+
+A call without those scopes never runs. Over HTTP it gets MCP's
+[scope challenge](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization#scope-challenge-handling),
+a `403` with:
+
+```http
+WWW-Authenticate: Bearer error="insufficient_scope", scope="files:read files:write", resource_metadata="…"
+```
+
+`scope` lists the scopes the session already has plus the ones the tool needs,
+so the client can get a token with all of them and retry. `resource_metadata`
+is included when `oauth.enabled` is set. On stdio and other transports without
+HTTP, the call fails with a JSON-RPC error instead: code `-32003`, with
+`data.error` set to `"insufficient_scope"`.
+
+To hide the tool from sessions without the scopes, use
+`canAccess: requireScopes(...)` instead. Like `canAccess`, `scopes` is not
+enforced on a server without an `authenticate` function.
+
 #### Returning a string
 
 `execute` can return a string:
@@ -2003,7 +2036,8 @@ server.addTool({
   // ...
 });
 
-// Require specific OAuth scopes
+// Require specific OAuth scopes (hides the tool; see "Scope challenges" to
+// keep it listed and answer calls with a 403 instead)
 server.addTool({
   canAccess: requireScopes("read:user", "write:data"),
   name: "scoped-tool",

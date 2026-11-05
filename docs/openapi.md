@@ -114,7 +114,9 @@ Required flattened JSON request bodies are sent as `{}` when no body properties 
 
 Flat object path parameters support `style: simple`, including the path default when `style` is omitted. With `{ R: 100, G: 200, B: 150 }`, `explode: false` (the default) produces `R,100,G,200,B,150`; `explode: true` produces `R=100,G=200,B=150`.
 
-Each property key and scalar value is percent-encoded separately before adding the comma and equals-sign separators. For example, `{ "x,y": "a/b=c" }` becomes `x%2Cy,a%2Fb%3Dc`, or `x%2Cy=a%2Fb%3Dc` when exploded. Empty objects expand to an empty path value. Scalar and array path parameters keep their existing encoding, including encoded array commas.
+Each property key and scalar value is percent-encoded separately before adding the comma and equals-sign separators. For example, `{ "x,y": "a/b=c" }` becomes `x%2Cy,a%2Fb%3Dc`, or `x%2Cy=a%2Fb%3Dc` when exploded. Empty objects expand to an empty path value.
+
+Simple-style arrays also encode each item separately, then join them with commas, for either `explode` value. For example, `["blue,green", "red/white"]` becomes `blue%2Cgreen,red%2Fwhite`, preserving the difference between a comma inside an item and a separator. Empty arrays expand to an empty path value. Scalar path parameters keep their existing encoding.
 
 Nested object/array properties and other path styles (such as `matrix` and `label`) remain unsupported: these objects are still sent as the literal string `"[object Object]"`.
 
