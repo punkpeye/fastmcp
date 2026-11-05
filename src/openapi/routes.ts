@@ -74,8 +74,10 @@ const IGNORED_HEADER_PARAMETERS = new Set([
 ]);
 
 function isIgnoredParameter(param: OpenApiParameter): boolean {
+  // Specs are bundled, not validated, so a parameter may lack a `name`.
   return (
     param.in === "header" &&
+    typeof param.name === "string" &&
     IGNORED_HEADER_PARAMETERS.has(param.name.toLowerCase())
   );
 }

@@ -2209,3 +2209,24 @@ test("Accept, Content-Type and Authorization header parameters are ignored, as O
     await server.stop();
   }
 });
+
+test("a header parameter without a name does not stop the spec from loading", async () => {
+  await expect(
+    fromOpenAPI({
+      spec: {
+        info: { title: "Pets API", version: "1.0.0" },
+        openapi: "3.0.3",
+        paths: {
+          "/pets": {
+            get: {
+              operationId: "listPets",
+              parameters: [{ in: "header", schema: { type: "string" } }],
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    }),
+  ).resolves.toBeDefined();
+});
