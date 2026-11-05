@@ -142,8 +142,8 @@ export interface OpenApiParameter {
    * `"pipeDelimited"`; `"form"` (the query default) uses repeated keys for
    * arrays and property pairs for objects unless `explode: false` requests
    * a single comma-separated value. `"simple"` (the path default) serializes
-   * flat path objects as comma-separated keys/values or, when exploded,
-   * key=value pairs.
+   * flat path arrays as comma-separated items, and flat path objects as
+   * comma-separated keys/values or, when exploded, key=value pairs.
    */
   style?: string;
 }
