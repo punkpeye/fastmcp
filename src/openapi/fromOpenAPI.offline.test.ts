@@ -2146,3 +2146,66 @@ test.each(["3.0.3", "3.1.0"])(
     }
   },
 );
+
+test("Accept, Content-Type and Authorization header parameters are ignored, as OpenAPI requires", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("ok"));
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    headers: { Authorization: "Bearer configured" },
+    spec: {
+      info: { title: "Pets API", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "listPets",
+            parameters: [
+              {
+                in: "header",
+                name: "Authorization",
+                required: true,
+                schema: { type: "string" },
+              },
+              { in: "header", name: "accept", schema: { type: "string" } },
+              {
+                in: "header",
+                name: "Content-Type",
+                schema: { type: "string" },
+              },
+              {
+                in: "header",
+                name: "X-Request-Id",
+                schema: { type: "string" },
+              },
+            ],
+            responses: { 200: { description: "OK" } },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.com" }],
+    },
+  });
+  const client = await connect(server);
+
+  try {
+    const { tools } = await client.listTools();
+    expect(Object.keys(tools[0].inputSchema.properties ?? {})).toEqual([
+      "X-Request-Id",
+    ]);
+    expect(tools[0].inputSchema.required ?? []).toEqual([]);
+
+    const result = await client.callTool({
+      arguments: { "X-Request-Id": "r-1" },
+      name: "listPets",
+    });
+    expect(result.isError).toBeFalsy();
+    const [, init] = fetchImpl.mock.calls[0]!;
+    const headers = new Headers(init?.headers);
+    expect(headers.get("authorization")).toBe("Bearer configured");
+    expect(headers.get("x-request-id")).toBe("r-1");
+  } finally {
+    await Promise.all(server.sessions.map((session) => session.close()));
+    await client.close();
+    await server.stop();
+  }
+});
