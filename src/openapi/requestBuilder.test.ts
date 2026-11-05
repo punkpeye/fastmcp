@@ -569,6 +569,34 @@ test("a style: cookie value is sent as given and one holding a separator is refu
   expect(fetchImpl).toHaveBeenCalledTimes(1);
 });
 
+test("cookie values match the OAS 3.2 examples, and array items keep their comma separator", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response("{}", { status: 200 }),
+  );
+  const cookieFor = async (value: unknown, style?: string) => {
+    fetchImpl.mockClear();
+    await executeRequest({
+      args: { greeting: value },
+      fetchImpl,
+      parameterMap: { greeting: { in: "cookie", name: "greeting", style } },
+      route: route({ path: "/pets" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+    const [, calledInit] = fetchImpl.mock.calls[0]!;
+    return new Headers(calledInit?.headers).get("cookie");
+  };
+
+  expect(await cookieFor("Hello, world!")).toBe("greeting=Hello%2C%20world%21");
+  expect(await cookieFor(["x,y", "z"])).toBe("greeting=x%2Cy,z");
+  expect(await cookieFor("Hello%2C world!", "cookie")).toBe(
+    "greeting=Hello%2C world!",
+  );
+  expect(await cookieFor(["blue", "black"], "cookie")).toBe(
+    "greeting=blue,black",
+  );
+  await expect(cookieFor(["a;b"], "cookie")).rejects.toThrow(/style "cookie"/);
+});
+
 test("a caller-supplied header overrides the generated content-type, case-insensitively", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () => new Response("{}", { status: 200 }),
