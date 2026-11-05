@@ -61,6 +61,27 @@ export function extractRoutes(document: BundledOpenApiDocument): HttpRoute[] {
   return routes;
 }
 
+/**
+ * OpenAPI says a header parameter named `Accept`, `Content-Type` or
+ * `Authorization` "SHALL be ignored": the request body, the response and the
+ * security scheme own those headers. Kept as a tool argument, it would let the
+ * model replace the `Authorization` header configured through `headers`.
+ */
+const IGNORED_HEADER_PARAMETERS = new Set([
+  "accept",
+  "authorization",
+  "content-type",
+]);
+
+function isIgnoredParameter(param: OpenApiParameter): boolean {
+  // Specs are bundled, not validated, so a parameter may lack a `name`.
+  return (
+    param.in === "header" &&
+    typeof param.name === "string" &&
+    IGNORED_HEADER_PARAMETERS.has(param.name.toLowerCase())
+  );
+}
+
 function mergeParameters(
   pathLevel: OpenApiParameter[],
   operationLevel: OpenApiParameter[],
@@ -74,7 +95,7 @@ function mergeParameters(
       (param) => !overridden.has(`${param.in}:${param.name}`),
     ),
     ...operationLevel,
-  ];
+  ].filter((param) => !isIgnoredParameter(param));
 }
 
 /**
