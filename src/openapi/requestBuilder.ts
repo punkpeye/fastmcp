@@ -55,13 +55,20 @@ export async function executeRequest(
         bodyProps[mapping.name] = value;
         break;
       case "cookie": {
+        // Form style (the default) percent-encodes the value. OAS 3.2
+        // `style: cookie` forbids percent-encoding, so a value it cannot
+        // carry is refused there. Sent raw, "; " would add cookies of its own.
+        const raw = String(value);
+        if (mapping.style === "cookie" && /[;,\s]/.test(raw)) {
+          throw new Error(
+            `Cookie parameter "${mapping.name}" uses style "cookie" and its value contains ";", "," or whitespace`,
+          );
+        }
+        const pair = `${mapping.name}=${
+          mapping.style === "cookie" ? raw : encodeURIComponent(raw)
+        }`;
         const existing = headers.get("cookie");
-        headers.set(
-          "cookie",
-          existing
-            ? `${existing}; ${mapping.name}=${String(value)}`
-            : `${mapping.name}=${String(value)}`,
-        );
+        headers.set("cookie", existing ? `${existing}; ${pair}` : pair);
         break;
       }
       case "header":

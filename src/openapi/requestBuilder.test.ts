@@ -480,6 +480,49 @@ test("a dot segment written in the route template itself is left alone", async (
   expect(new URL(calledUrl).pathname).toBe("/v1/pets/42");
 });
 
+test("a cookie parameter value is percent-encoded, so it cannot add cookies of its own", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response("{}", { status: 200 }),
+  );
+
+  await executeRequest({
+    args: { session: "abc; admin=true" },
+    fetchImpl,
+    headers: { cookie: "theme=dark" },
+    parameterMap: { session: { in: "cookie", name: "session" } },
+    route: route({ path: "/pets" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [, calledInit] = fetchImpl.mock.calls[0]!;
+  expect(new Headers(calledInit?.headers).get("cookie")).toBe(
+    "theme=dark; session=abc%3B%20admin%3Dtrue",
+  );
+});
+
+test("a style: cookie value is sent as given and one holding a separator is refused", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response("{}", { status: 200 }),
+  );
+  const call = (session: string) =>
+    executeRequest({
+      args: { session },
+      fetchImpl,
+      parameterMap: {
+        session: { in: "cookie", name: "session", style: "cookie" },
+      },
+      route: route({ path: "/pets" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+  await call("abc%3D");
+  const [, calledInit] = fetchImpl.mock.calls[0]!;
+  expect(new Headers(calledInit?.headers).get("cookie")).toBe("session=abc%3D");
+
+  await expect(call("abc; admin=true")).rejects.toThrow(/style "cookie"/);
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
 test("a caller-supplied header overrides the generated content-type, case-insensitively", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () => new Response("{}", { status: 200 }),

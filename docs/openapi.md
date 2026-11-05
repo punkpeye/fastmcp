@@ -104,6 +104,8 @@ With `explode: false`, commas inside individual array items or object keys/value
 
 Form-style query objects support scalar property values; nested objects/arrays require `deepObject` serialization. Object-valued `spaceDelimited`/`pipeDelimited` queries, headers, and cookies are still sent as the literal string `"[object Object]"`.
 
+Form-style cookie values (the default) are percent-encoded, so a value such as `a; b=c` is sent as `a%3B%20b%3Dc` and cannot add a cookie of its own. With OpenAPI 3.2 `style: cookie` the value is sent as given, already escaped by the caller, and a value holding `;`, `,` or whitespace is refused.
+
 Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded.
 
 Required flattened JSON request bodies are sent as `{}` when no body properties are supplied. A required `application/json` body without a schema also sends `{}`. Omitted optional bodies remain absent.
