@@ -55,13 +55,9 @@ export async function executeRequest(
         bodyProps[mapping.name] = value;
         break;
       case "cookie": {
+        const pair = `${mapping.name}=${encodeCookieValue(mapping, value)}`;
         const existing = headers.get("cookie");
-        headers.set(
-          "cookie",
-          existing
-            ? `${existing}; ${mapping.name}=${String(value)}`
-            : `${mapping.name}=${String(value)}`,
-        );
+        headers.set("cookie", existing ? `${existing}; ${pair}` : pair);
         break;
       }
       case "header":
@@ -344,6 +340,34 @@ function assertNoSubstitutedDotSegments(
 }
 
 /**
+ * Form style (the cookie default) percent-encodes like RFC 6570 form
+ * expansion, so `"; "` in a value cannot add cookies of its own. OAS 3.2
+ * `style: cookie` sends a value as given, already escaped by the caller, so
+ * one holding `;` or `,` is refused instead. Array items are encoded or
+ * checked one at a time and then joined with commas, so a comma inside an
+ * item stays distinct from the separator.
+ */
+function encodeCookieValue(mapping: ParameterMapping, value: unknown): string {
+  return (Array.isArray(value) ? value : [value])
+    .map((item) => {
+      const text = String(item);
+
+      if (mapping.style !== "cookie") {
+        return encodePathComponent(text);
+      }
+
+      if (/[;,]/.test(text)) {
+        throw new UserError(
+          `Cookie parameter "${mapping.name}" uses style "cookie" and its value contains ";" or ","`,
+        );
+      }
+
+      return text;
+    })
+    .join(",");
+}
+
+/**
  * Serializes a flattened body payload as `application/x-www-form-urlencoded`,
  * bracket-expanding nested objects/arrays (e.g. Stripe's own
  * `metadata[key]=value` style) via `appendBracketPairs` — the same helper
@@ -370,7 +394,7 @@ function encodeFormBody(payload: unknown): string {
   return params.toString();
 }
 
-/** Simple expansion escapes everything except RFC 3986 unreserved characters. */
+/** RFC 6570 simple and form expansion escape everything except RFC 3986 unreserved characters. */
 function encodePathComponent(value: string): string {
   return encodeURIComponent(value).replace(
     /[!'()*]/g,

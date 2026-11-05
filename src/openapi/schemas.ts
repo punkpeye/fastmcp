@@ -84,7 +84,7 @@ export interface ParameterMapping {
   explode?: boolean;
   in: "body" | ParameterLocation;
   name: string;
-  /** Query serialization and simple-style path arrays/objects — see `OpenApiParameter.style`. */
+  /** Query and cookie serialization, and simple-style path arrays/objects — see `OpenApiParameter.style`. */
   style?: string;
 }
 
