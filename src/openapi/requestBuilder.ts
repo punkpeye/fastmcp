@@ -14,6 +14,7 @@ export interface ExecuteRequestOptions {
   parameterMap: Record<string, ParameterMapping>;
   route: HttpRoute;
   servers: OpenApiServer[] | undefined;
+  signal?: AbortSignal;
   wholeBodyKey?: string;
 }
 
@@ -129,6 +130,7 @@ export async function executeRequest(
     body,
     headers,
     method: options.route.method.toUpperCase(),
+    signal: options.signal,
   });
 
   const text = await response.text();

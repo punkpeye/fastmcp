@@ -107,11 +107,12 @@ export async function fromOpenAPI(
     server.addTool({
       description:
         route.summary ?? `${route.method.toUpperCase()} ${route.path}`,
-      execute: async (args) => {
+      execute: async (args, { signal }) => {
         const result = await executeRequest({
           ...execOptions,
           args: args as Record<string, unknown>,
           bodyEncoding,
+          signal,
           wholeBodyKey,
         });
 
