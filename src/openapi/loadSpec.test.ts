@@ -101,3 +101,15 @@ test.each(["http", "HTTP", "HtTp", "https", "HTTPS", "HtTpS"])(
     }
   },
 );
+
+test("leaves a document without bundle-generated pointers unchanged", async () => {
+  const spec = {
+    info: { title: "x", version: "1.0.0" },
+    openapi: "3.0.3",
+    paths: {},
+  };
+
+  const { document } = await loadSpec(spec);
+
+  expect(document).not.toHaveProperty("components");
+});

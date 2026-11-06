@@ -1,0 +1,57 @@
+openapi: 3.0.3
+info:
+  title: Multi-file reuse from component and property sites
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+components:
+  parameters:
+    Page:
+      in: query
+      name: page
+      schema:
+        $ref: "shared.yaml#/components/schemas/Page"
+paths:
+  /pages:
+    get:
+      operationId: listPages
+      parameters:
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          description: OK
+    post:
+      operationId: savePage
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "shared.yaml#/components/schemas/Page"
+      responses:
+        "200":
+          description: OK
+  /tags:
+    post:
+      operationId: saveTag
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "shared.yaml#/components/schemas/Tag"
+      responses:
+        "200":
+          description: OK
+  /tags/default:
+    post:
+      operationId: saveDefaultTag
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                default:
+                  $ref: "shared.yaml#/components/schemas/Tag"
+      responses:
+        "200":
+          description: OK

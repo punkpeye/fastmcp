@@ -1,0 +1,38 @@
+openapi: 3.0.3
+info:
+  title: Shared schemas
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Filter:
+      type: object
+      properties:
+        s:
+          type: string
+    Payload:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required:
+        - ok
+    Node:
+      type: object
+      properties:
+        value:
+          type: string
+        child:
+          $ref: "#/components/schemas/Node"
+    Page:
+      type: object
+      properties:
+        size:
+          type: integer
+    Tag:
+      type: object
+      properties:
+        label:
+          type: string
+      required:
+        - label

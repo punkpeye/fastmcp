@@ -1,6 +1,8 @@
 import SwaggerParser from "@apidevtools/swagger-parser";
 
-import type { BundledOpenApiDocument } from "./types.js";
+import type { BundledOpenApiDocument, OpenApiSchema } from "./types.js";
+
+import { DATA_KEYS, SCHEMA_MAP_KEYS } from "./schemas.js";
 
 export interface LoadedSpec {
   document: BundledOpenApiDocument;
@@ -10,6 +12,8 @@ export interface LoadedSpec {
    */
   origin?: string;
 }
+
+type PointerWalkMode = "components" | "document" | "schema" | "schemaMap";
 
 /**
  * Loads and bundles an OpenAPI document, resolving local *and* external
@@ -36,6 +40,8 @@ export async function loadSpec(
     );
   }
 
+  resolveBundledPointerRefs(document);
+
   return {
     document,
     origin: typeof spec === "string" && isHttpUrl(spec) ? spec : undefined,
@@ -44,4 +50,166 @@ export async function loadSpec(
 
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
+}
+
+/**
+ * `bundle()` inlines an external `$ref` at one use site and rewrites every
+ * other use of the same external ref into a local pointer at that site —
+ * e.g. `#/paths/~1a/get/parameters/0/schema` — which is valid in the bundled
+ * document but not in a generated tool's schema: that schema is standalone
+ * and only carries `#/$defs/...`. Left alone, the tool advertises a dangling
+ * `$ref` and every call fails when the validator cannot compile it
+ * (JSON-RPC -32603), or — for a response schema — its `outputSchema` is
+ * silently dropped.
+ *
+ * Move each such target into `components.schemas` under a synthetic name and
+ * point the `$ref` at it, so the existing component-to-`$defs` rewriting (and
+ * per-tool filtering) handles it. The synthetic name is registered before the
+ * target is walked, so a recursive external schema comes out as a `$ref` to
+ * that definition instead of an expansion that would never terminate.
+ *
+ * Only schema positions are rewritten. Bundle-generated refs in parameter,
+ * response, and path-item positions are already resolved by `routes.ts`.
+ */
+function resolveBundledPointerRefs(document: BundledOpenApiDocument): void {
+  const hoisted = new Map<string, string>();
+  let counter = 0;
+
+  /** Resolves a same-document JSON Pointer (RFC 6901) to the node it names. */
+  const resolvePointer = (pointer: string): unknown => {
+    let segments: string[];
+
+    try {
+      segments = pointer
+        .slice(2)
+        .split("/")
+        .map((segment) =>
+          decodeURIComponent(
+            segment.replaceAll("~1", "/").replaceAll("~0", "~"),
+          ),
+        );
+    } catch {
+      // Not a decodable URI fragment; leave the ref as it was.
+      return undefined;
+    }
+
+    let node: unknown = document;
+
+    for (const segment of segments) {
+      // Own keys only, so a "__proto__" segment cannot reach Object.prototype.
+      if (!node || typeof node !== "object" || !Object.hasOwn(node, segment)) {
+        return undefined;
+      }
+
+      node = (node as Record<string, unknown>)[segment];
+    }
+
+    return node;
+  };
+
+  const hoist = (ref: string): string | undefined => {
+    const existing = hoisted.get(ref);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const target = resolvePointer(ref);
+
+    if (!target || typeof target !== "object") {
+      return undefined;
+    }
+
+    // Created on first use, so a document with nothing to hoist is unchanged.
+    const schemas = ((document.components ??= {}).schemas ??= {});
+    let name: string;
+
+    do {
+      name = `__bundle_${counter++}`;
+    } while (Object.hasOwn(schemas, name));
+
+    hoisted.set(ref, name);
+    schemas[name] = target as OpenApiSchema;
+    // Walk the target only after registering the name: a self-reference then
+    // resolves to the definition above instead of recursing into itself.
+    walk(target, "schema");
+
+    return name;
+  };
+
+  const rewriteRef = (record: Record<string, unknown>): void => {
+    const ref = record.$ref;
+
+    // Only `#/components/schemas/...` becomes `#/$defs/...` in a tool schema.
+    // A schema first used by another component (a shared parameter, say) is
+    // inlined there, so its other uses point at `#/components/parameters/...`.
+    if (
+      typeof ref !== "string" ||
+      !ref.startsWith("#/") ||
+      ref.startsWith("#/components/schemas/") ||
+      ref.startsWith("#/$defs/")
+    ) {
+      return;
+    }
+
+    const name = hoist(ref);
+
+    if (name !== undefined) {
+      record.$ref = `#/components/schemas/${name}`;
+    }
+  };
+
+  /**
+   * The only places a schema is reached from outside one: `components.schemas`
+   * (a map of schemas) and a `schema` key (parameters, request bodies,
+   * responses, headers). Inside a schema, a schema map (`properties`, ...)
+   * names its children, so a property named `default` is a schema too.
+   */
+  const childMode = (key: string, mode: PointerWalkMode): PointerWalkMode => {
+    if (mode === "schemaMap") {
+      return "schema";
+    }
+
+    if (mode === "schema") {
+      return SCHEMA_MAP_KEYS.has(key) ? "schemaMap" : "schema";
+    }
+
+    if (key === "schema") {
+      return "schema";
+    }
+
+    if (mode === "document" && key === "components") {
+      return "components";
+    }
+
+    return mode === "components" && key === "schemas"
+      ? "schemaMap"
+      : "document";
+  };
+
+  const walk = (value: unknown, mode: PointerWalkMode): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        walk(item, mode);
+      }
+
+      return;
+    }
+
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    const record = value as Record<string, unknown>;
+
+    for (const [key, entryValue] of Object.entries(record)) {
+      if (mode === "schema" && key === "$ref") {
+        rewriteRef(record);
+      } else if (mode !== "schema" || !DATA_KEYS.has(key)) {
+        walk(entryValue, childMode(key, mode));
+      }
+    }
+  };
+
+  walk(document, "document");
 }
