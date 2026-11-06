@@ -680,6 +680,106 @@ describe("WebStreamableHTTPServerTransport", () => {
     await first.body?.cancel("test cleanup");
   });
 
+  it("resumes a POST stream while the standalone GET stream stays open", async () => {
+    const stored: {
+      eventId: string;
+      message: JsonResponse;
+      streamId: string;
+    }[] = [];
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      eventStore: {
+        getStreamIdForEventId: async (id) =>
+          stored.find((event) => event.eventId === id)?.streamId,
+        replayEventsAfter: async (id, { send }) => {
+          const index = stored.findIndex((event) => event.eventId === id);
+          const streamId = stored[index].streamId;
+          for (const event of stored.slice(index + 1)) {
+            if (event.streamId === streamId) {
+              await send(event.eventId, event.message);
+            }
+          }
+          return streamId;
+        },
+        storeEvent: async (streamId, message) => {
+          const eventId = `evt-${stored.length}`;
+          stored.push({ eventId, message, streamId });
+          return eventId;
+        },
+      },
+      sessionIdGenerator: () => "test-session",
+    });
+    const server = createHangingToolServer();
+    const finish = Promise.withResolvers<void>();
+    server.setRequestHandler(CallToolRequestSchema, async () => {
+      await finish.promise;
+      return { content: [{ text: "done", type: "text" }] };
+    });
+    await server.connect(transport);
+    await transport.handleRequest(createInitializeRequest("application/json"));
+    const standalone = await transport.handleRequest(createGetRequest());
+    const response = await transport.handleRequest(
+      createPostRequest(
+        createToolCall(2, "one"),
+        "text/event-stream",
+        "test-session",
+      ),
+    );
+    const reader = response.body!.getReader();
+
+    try {
+      const first = reader.read();
+      await transport.send(
+        {
+          jsonrpc: "2.0",
+          method: "notifications/progress",
+          params: { progress: 1, progressToken: "one" },
+        },
+        { relatedRequestId: 2 },
+      );
+      const firstText = new TextDecoder().decode((await first).value);
+      const lastEventId = firstText.match(/^id: (.+)$/m)![1];
+      await reader.cancel("connection dropped");
+      finish.resolve();
+      await vi.waitFor(() => expect(stored).toHaveLength(2));
+
+      const resumed = await transport.handleRequest(
+        createGetRequest(lastEventId),
+      );
+      try {
+        expect(resumed.status).toBe(200);
+        const text = await readSSEUntil(resumed, (body) =>
+          body.includes('"result"'),
+        );
+        expect(text).toBe(
+          `id: ${stored[1].eventId}\ndata: ${JSON.stringify(stored[1].message)}\n\n`,
+        );
+      } finally {
+        if (!resumed.body?.locked) await resumed.body?.cancel();
+      }
+
+      const notification = {
+        jsonrpc: "2.0",
+        method: "notifications/message",
+        params: { data: "still open", level: "info" },
+      } as const;
+      await Promise.all([
+        readSSEUntil(standalone, (body) => body.includes("still open")).then(
+          (body) => {
+            expect(body).toContain("still open");
+            expect(body).not.toContain('"result"');
+          },
+        ),
+        transport.send(notification),
+      ]);
+    } finally {
+      finish.resolve();
+      await reader.cancel().catch(() => {});
+      if (!standalone.body?.locked) await standalone.body?.cancel();
+      await server.close();
+    }
+  });
+
   it("answers a reconnect whose replay actually has events to catch up on", async () => {
     // Every other store in this file replays nothing, which is the only reason
     // awaiting the replay before returning the Response ever looked healthy. A
