@@ -329,9 +329,9 @@ test.each([
       { age: 20, name: 42 },
     ]) {
       expect(acceptsArguments(advertised, invalid)).toBe(false);
-      await expect(
-        client.callTool({ arguments: invalid, name: "person" }),
-      ).rejects.toMatchObject({ code: -32602 });
+      expect(
+        await client.callTool({ arguments: invalid, name: "person" }),
+      ).toMatchObject({ isError: true });
     }
     expect(await client.callTool({ arguments: args, name: "person" })).toEqual({
       content: [{ text: JSON.stringify(args), type: "text" }],

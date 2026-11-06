@@ -191,9 +191,12 @@ test.each([false, true])(
       expect(
         await client.callTool({ arguments: { value: "new" }, name: "replace" }),
       ).toMatchObject({ structuredContent: { value: "new" } });
-      await expect(
-        client.callTool({ arguments: { value: "too long" }, name: "replace" }),
-      ).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
+      expect(
+        await client.callTool({
+          arguments: { value: "too long" },
+          name: "replace",
+        }),
+      ).toMatchObject({ isError: true });
       expect(await client.callTool({ name: "keep" })).toMatchObject({
         content: [{ text: "keep", type: "text" }],
       });

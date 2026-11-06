@@ -614,11 +614,20 @@ export class EdgeFastMCP {
           })
           .join(", ");
 
-        return this.#rpcError(
+        // A tool execution error, not a protocol error, as in the Node path.
+        return {
           id,
-          ErrorCode.InvalidParams,
-          `Tool '${toolName}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`,
-        );
+          jsonrpc: "2.0",
+          result: {
+            content: [
+              {
+                text: `Tool '${toolName}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`,
+                type: "text",
+              },
+            ],
+            isError: true,
+          },
+        } as JSONRPCMessage;
       }
 
       args = parsed.value;
