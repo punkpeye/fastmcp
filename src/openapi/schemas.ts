@@ -394,7 +394,13 @@ function childMode(key: string): WalkMode {
 function componentSchemaName(ref: string): string | undefined {
   for (const prefix of ["#/components/schemas/", "#/$defs/"]) {
     if (ref.startsWith(prefix)) {
-      return ref.slice(prefix.length);
+      // JSON Pointer escapes (RFC 6901, section 4): "~1" is "/" and "~0" is
+      // "~". "~1" has to be undone first, or "A~01B" (the escape of "A~1B")
+      // would decode to "A/1B".
+      return ref
+        .slice(prefix.length)
+        .replaceAll("~1", "/")
+        .replaceAll("~0", "~");
     }
   }
 
@@ -556,8 +562,11 @@ function filterReferencedDefs(
         value.startsWith("#/$defs/")
       ) {
         // A ref may point into a definition (`#/$defs/Pet/properties/name`),
-        // not just at its root, so the definition is the first pointer segment.
-        const [name = ""] = value.slice("#/$defs/".length).split("/");
+        // not just at its root, so the definition is the first pointer segment
+        // — split before unescaping, since an escaped segment cannot contain a
+        // literal "/" of its own.
+        const [first = ""] = value.slice("#/$defs/".length).split("/");
+        const name = first.replaceAll("~1", "/").replaceAll("~0", "~");
 
         if (allDefs[name] && !referenced.has(name)) {
           referenced.add(name);

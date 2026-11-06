@@ -2143,6 +2143,83 @@ test("preserves replacement tokens in server variable defaults when calling a to
 });
 
 test.each(["3.0.3", "3.1.0"])(
+  "a $ref to a component name that needs a JSON Pointer escape keeps the component in OpenAPI %s",
+  async (openapi) => {
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ city: "Berlin" }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        components: {
+          schemas: {
+            "Pet/Address": {
+              additionalProperties: false,
+              properties: { city: { type: "string" } },
+              required: ["city"],
+              type: "object",
+            },
+          },
+        },
+        info: { title: "Escaped component names", version: "1.0.0" },
+        openapi,
+        paths: {
+          "/address": {
+            post: {
+              operationId: "saveAddress",
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Pet~1Address" },
+                  },
+                },
+              },
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      schema: { $ref: "#/components/schemas/Pet~1Address" },
+                    },
+                  },
+                  description: "OK",
+                },
+              },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const { tools } = await client.listTools();
+      // Both halves travel with the tool: the definition the input ref needs,
+      // and the resolved object shape the response ref advertises. Without
+      // them, `tools/list` succeeds but every call fails with -32603 ("can't
+      // resolve reference #/$defs/Pet~1Address from id #").
+      expect(tools[0].inputSchema).toMatchObject({
+        $defs: { "Pet/Address": expect.any(Object) },
+      });
+      expect(tools[0].outputSchema).toMatchObject({ type: "object" });
+
+      const result = await client.callTool({
+        arguments: { body: { city: "Berlin" } },
+        name: "saveAddress",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual({ city: "Berlin" });
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each(["3.0.3", "3.1.0"])(
   "a $ref into a component sub-schema keeps the component in OpenAPI %s",
   async (openapi) => {
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response("pet"));
