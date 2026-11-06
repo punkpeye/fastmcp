@@ -2290,3 +2290,66 @@ test("a header parameter without a name does not stop the spec from loading", as
     }),
   ).resolves.toBeDefined();
 });
+
+test("a multi-file spec that reuses the same external schema keeps every tool callable", async () => {
+  // `bundle()` inlines an external `$ref` at one use site and rewrites the
+  // other uses of it into local pointers at that site (`#/paths/~1a/...`).
+  // Those resolve in the document but not in a standalone tool schema, so the
+  // second tool used to be advertised and then fail every call with -32603,
+  // while a reused response schema silently lost its outputSchema.
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () =>
+      new Response(
+        JSON.stringify({ child: { value: "x" }, ok: true, value: "root" }),
+        {
+          headers: { "content-type": "application/json" },
+        },
+      ),
+  );
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    spec: fileURLToPath(
+      new URL("./__fixtures__/multi-file-reuse/root.yaml", import.meta.url),
+    ),
+  });
+  const client = await connect(server);
+
+  try {
+    const { tools } = await client.listTools();
+    expect(tools).toHaveLength(6);
+
+    // "Filter" is used by both query parameters.
+    for (const name of ["getA", "getB"]) {
+      const result = await client.callTool({
+        arguments: { q: { s: "x" } },
+        name,
+      });
+      expect(result.isError, name).toBeFalsy();
+    }
+
+    // "Payload" is used by both responses, so both tools have to keep an
+    // object outputSchema rather than silently dropping it.
+    for (const name of ["getC", "getD"]) {
+      expect(
+        tools.find((tool) => tool.name === name)?.outputSchema,
+        name,
+      ).toMatchObject({ type: "object" });
+      const result = await client.callTool({ arguments: {}, name });
+      expect(result.isError, name).toBeFalsy();
+      expect(result.structuredContent, name).toMatchObject({ ok: true });
+    }
+
+    // "Node" is recursive: the inlined copy references itself too, so it
+    // needs a definition to point at on both routes.
+    for (const name of ["getE", "getF"]) {
+      const result = await client.callTool({ arguments: {}, name });
+      expect(result.isError, name).toBeFalsy();
+      expect(result.structuredContent, name).toMatchObject({ value: "root" });
+    }
+
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});

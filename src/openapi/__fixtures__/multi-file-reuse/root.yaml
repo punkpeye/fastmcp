@@ -1,0 +1,69 @@
+openapi: 3.0.3
+info:
+  title: Multi-file reuse API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /a:
+    get:
+      operationId: getA
+      parameters:
+        - in: query
+          name: q
+          schema:
+            $ref: "shared.yaml#/components/schemas/Filter"
+      responses:
+        "200":
+          description: OK
+  /b:
+    get:
+      operationId: getB
+      parameters:
+        - in: query
+          name: q
+          schema:
+            $ref: "shared.yaml#/components/schemas/Filter"
+      responses:
+        "200":
+          description: OK
+  /c:
+    get:
+      operationId: getC
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "shared.yaml#/components/schemas/Payload"
+  /d:
+    get:
+      operationId: getD
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "shared.yaml#/components/schemas/Payload"
+  /e:
+    get:
+      operationId: getE
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "shared.yaml#/components/schemas/Node"
+  /f:
+    get:
+      operationId: getF
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "shared.yaml#/components/schemas/Node"
