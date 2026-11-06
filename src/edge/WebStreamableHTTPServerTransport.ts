@@ -441,6 +441,14 @@ export class WebStreamableHTTPServerTransport implements Transport {
       return this.createErrorResponse(400, -32000, unsupported);
     }
 
+    // Handle resumability
+    if (this._eventStore) {
+      const lastEventId = request.headers.get("last-event-id");
+      if (lastEventId) {
+        return this.handleReplayEvents(lastEventId);
+      }
+    }
+
     // Check for existing standalone stream
     if (this._streamMapping.has(this._standaloneSseStreamId)) {
       return this.createErrorResponse(
@@ -448,14 +456,6 @@ export class WebStreamableHTTPServerTransport implements Transport {
         -32000,
         "Conflict: SSE stream already exists for this session",
       );
-    }
-
-    // Handle resumability
-    if (this._eventStore) {
-      const lastEventId = request.headers.get("last-event-id");
-      if (lastEventId) {
-        return this.handleReplayEvents(lastEventId);
-      }
     }
 
     // Create SSE stream
