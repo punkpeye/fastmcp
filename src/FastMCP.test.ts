@@ -3603,7 +3603,7 @@ test("returns isError result if tool parameters do not match zod schema", async 
   });
 });
 
-test("server remains usable after InvalidParams error", async () => {
+test("server remains usable after an input validation error", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
       const invalidResult = await client.callTool({
@@ -5018,7 +5018,7 @@ test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
   }
 });
 
-test("uses `formatInvalidParamsErrorMessage` callback to build ErrorCode.InvalidParams error message", async () => {
+test("uses `formatInvalidParamsErrorMessage` callback to build the input validation error message", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
       const result = await client.callTool({

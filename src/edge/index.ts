@@ -614,6 +614,7 @@ export class EdgeFastMCP {
           })
           .join(", ");
 
+        // A tool execution error, not a protocol error, as in the Node path.
         return {
           id,
           jsonrpc: "2.0",

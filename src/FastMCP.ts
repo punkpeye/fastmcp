@@ -3077,6 +3077,8 @@ export class FastMCPSession<
           if (parsed.issues) {
             const friendlyErrors = this.#formatSchemaIssues(parsed.issues);
 
+            // The specification lists input validation errors as tool
+            // execution errors, so the model can read them and retry.
             return {
               content: [
                 {
