@@ -80,9 +80,19 @@ test("preserves dictionary schemas through tool discovery and calls", async () =
       name: "dictionary",
     });
     expect(result.structuredContent).toEqual({ team: "infra" });
-    await expect(
-      client.callTool({ arguments: { team: 42 }, name: "dictionary" }),
-    ).rejects.toThrow(/team: must be string/);
+    const invalidResult = await client.callTool({
+      arguments: { team: 42 },
+      name: "dictionary",
+    });
+    expect(invalidResult).toMatchObject({
+      content: [
+        {
+          text: expect.stringMatching(/team: must be string/),
+          type: "text",
+        },
+      ],
+      isError: true,
+    });
     expect(execute).toHaveBeenCalledTimes(1);
   } finally {
     await client.close();
@@ -428,9 +438,21 @@ test("rejects a tool call whose arguments do not match", async () => {
   await withGreetServer(async (client) => {
     // The issue path fix is what puts "name:" in front of the message; without
     // it the client is told a property is missing but not which one.
-    await expect(
-      client.callTool({ arguments: { age: 30 }, name: "greet" }),
-    ).rejects.toThrow(/name: must have required property 'name'/);
+    const invalidResult = await client.callTool({
+      arguments: { age: 30 },
+      name: "greet",
+    });
+    expect(invalidResult).toMatchObject({
+      content: [
+        {
+          text: expect.stringMatching(
+            /name: must have required property 'name'/,
+          ),
+          type: "text",
+        },
+      ],
+      isError: true,
+    });
 
     const accepted = await client.callTool({
       arguments: { name: "Alice" },

@@ -623,18 +623,33 @@ test.each(["application/json", "application/x-www-form-urlencoded"])(
       );
 
       fetchImpl.mockClear();
-      await expect(
-        client.callTool({
-          arguments: { ...args, id__path_2: 42 },
-          name: "updateItem",
-        }),
-      ).rejects.toThrow(/must be string/);
-      await expect(
-        client.callTool({
-          arguments: { id__path: 31, id__query: 17 },
-          name: "updateItem",
-        }),
-      ).rejects.toThrow(/id__path_2/);
+      const invalidResult1 = await client.callTool({
+        arguments: { ...args, id__path_2: 42 },
+        name: "updateItem",
+      });
+      expect(invalidResult1).toMatchObject({
+        content: [
+          {
+            text: expect.stringMatching(/must be string/),
+            type: "text",
+          },
+        ],
+        isError: true,
+      });
+
+      const invalidResult2 = await client.callTool({
+        arguments: { id__path: 31, id__query: 17 },
+        name: "updateItem",
+      });
+      expect(invalidResult2).toMatchObject({
+        content: [
+          {
+            text: expect.stringMatching(/id__path_2/),
+            type: "text",
+          },
+        ],
+        isError: true,
+      });
       expect(fetchImpl).not.toHaveBeenCalled();
     } finally {
       await Promise.all(server.sessions.map((session) => session.close()));
@@ -929,12 +944,19 @@ test.each([
       );
 
       fetchImpl.mockClear();
-      await expect(
-        client.callTool({
-          arguments: { body: { team: 42 } },
-          name: "setLabels",
-        }),
-      ).rejects.toThrow(/must be string/);
+      const invalidDict = await client.callTool({
+        arguments: { body: { team: 42 } },
+        name: "setLabels",
+      });
+      expect(invalidDict).toMatchObject({
+        content: [
+          {
+            text: expect.stringMatching(/must be string/),
+            type: "text",
+          },
+        ],
+        isError: true,
+      });
       expect(fetchImpl).not.toHaveBeenCalled();
 
       const empty = await client.callTool({
@@ -949,9 +971,19 @@ test.each([
 
       fetchImpl.mockClear();
       if (required) {
-        await expect(
-          client.callTool({ arguments: {}, name: "setLabels" }),
-        ).rejects.toThrow(/body.*[Rr]equired|required.*body/);
+        const invalidReq = await client.callTool({
+          arguments: {},
+          name: "setLabels",
+        });
+        expect(invalidReq).toMatchObject({
+          content: [
+            {
+              text: expect.stringMatching(/body.*[Rr]equired|required.*body/),
+              type: "text",
+            },
+          ],
+          isError: true,
+        });
         expect(fetchImpl).not.toHaveBeenCalled();
       } else {
         const omitted = await client.callTool({
@@ -1822,9 +1854,19 @@ test.each([false, true])(
 
     try {
       for (const name of [42, null]) {
-        await expect(
-          client.callTool({ arguments: { name }, name: "createWidget" }),
-        ).rejects.toThrow(/must be string/);
+        const invalidName = await client.callTool({
+          arguments: { name },
+          name: "createWidget",
+        });
+        expect(invalidName).toMatchObject({
+          content: [
+            {
+              text: expect.stringMatching(/must be string/),
+              type: "text",
+            },
+          ],
+          isError: true,
+        });
       }
       expect(fetchImpl).not.toHaveBeenCalled();
 
@@ -1916,12 +1958,19 @@ test("OpenAPI 3.0's boolean exclusive bounds validate input and keep tools/list 
       type: "number",
     });
 
-    await expect(
-      client.callTool({
-        arguments: { name: "sprocket", price: 0 },
-        name: "createTypedWidget",
-      }),
-    ).rejects.toThrow(/must be > 0/);
+    const invalidBounds = await client.callTool({
+      arguments: { name: "sprocket", price: 0 },
+      name: "createTypedWidget",
+    });
+    expect(invalidBounds).toMatchObject({
+      content: [
+        {
+          text: expect.stringMatching(/must be > 0/),
+          type: "text",
+        },
+      ],
+      isError: true,
+    });
     expect(fetchImpl).not.toHaveBeenCalled();
 
     const result = await client.callTool({
