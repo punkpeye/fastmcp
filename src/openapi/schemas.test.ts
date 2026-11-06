@@ -1425,3 +1425,89 @@ test("buildOutputSchema skips wiring when the schema transitively references too
 
   expect(schema).toBeUndefined();
 });
+
+test("a $defs name that needs a JSON Pointer escape keeps its definition", () => {
+  const document: BundledOpenApiDocument = {
+    components: {
+      schemas: {
+        "A~B": { type: "string" },
+        "Pet/Address": { type: "object" },
+      },
+    },
+  };
+
+  const defs = buildSharedDefs(document);
+
+  // `~1` is "/" and `~0` is "~" (RFC 6901). A ref may also point into a
+  // definition, so only the first pointer segment names it.
+  for (const ref of [
+    "#/components/schemas/Pet~1Address",
+    "#/components/schemas/A~0B",
+    "#/components/schemas/Pet~1Address/properties/city",
+  ]) {
+    const { flatSchema } = buildFlatSchema(
+      route({
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: { properties: { value: { $ref: ref } }, type: "object" },
+            },
+          },
+        },
+      }),
+      defs,
+    );
+
+    expect(Object.keys(flatSchema.$defs ?? {}), ref).toHaveLength(1);
+  }
+});
+
+test("a $defs name that contains '~1' decodes correctly: '~1' is undone before '~0'", () => {
+  const document: BundledOpenApiDocument = {
+    components: { schemas: { "A~1B": { type: "string" } } },
+  };
+
+  const { flatSchema } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              properties: { value: { $ref: "#/components/schemas/A~01B" } },
+              type: "object",
+            },
+          },
+        },
+      },
+    }),
+    buildSharedDefs(document),
+  );
+
+  // Undoing "~0" first would decode this to "A/1B" and drop the definition.
+  expect(flatSchema.$defs).toEqual({ "A~1B": { type: "string" } });
+});
+
+test("buildOutputSchema resolves a bare $ref whose name needs a JSON Pointer escape", () => {
+  const document: BundledOpenApiDocument = {
+    components: { schemas: { "Pet/Address": { type: "object" } } },
+  };
+
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Pet~1Address" },
+            },
+          },
+        },
+      },
+    }),
+    buildSharedDefs(document),
+  );
+
+  // Otherwise `resolveComponentRef` can't follow the ref, the schema never
+  // resolves to `type: "object"`, and the outputSchema is silently dropped.
+  expect(schema).toEqual({ type: "object" });
+});
