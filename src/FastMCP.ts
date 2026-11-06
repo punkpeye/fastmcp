@@ -3077,10 +3077,15 @@ export class FastMCPSession<
           if (parsed.issues) {
             const friendlyErrors = this.#formatSchemaIssues(parsed.issues);
 
-            throw new McpError(
-              ErrorCode.InvalidParams,
-              `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`,
-            );
+            return {
+              content: [
+                {
+                  text: `Tool '${request.params.name}' parameter validation failed: ${friendlyErrors}. Please check the parameter types and values according to the tool's schema.`,
+                  type: "text",
+                },
+              ],
+              isError: true,
+            };
           }
 
           args = parsed.value;

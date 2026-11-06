@@ -3559,28 +3559,26 @@ test("rejects elicitation when the client does not declare the capability", asyn
   });
 });
 
-test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema", async () => {
+test("returns isError result if tool parameters do not match zod schema", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
-      try {
-        await client.callTool({
-          arguments: {
-            a: 1,
-            b: "invalid",
+      const result = await client.callTool({
+        arguments: {
+          a: 1,
+          b: "invalid",
+        },
+        name: "add",
+      });
+
+      expect(result).toEqual({
+        content: [
+          {
+            text: "Tool 'add' parameter validation failed: b: Invalid input: expected number, received string. Please check the parameter types and values according to the tool's schema.",
+            type: "text",
           },
-          name: "add",
-        });
-      } catch (error) {
-        expect(error).toBeInstanceOf(McpError);
-
-        // @ts-expect-error - we know that error is an McpError
-        expect(error.code).toBe(ErrorCode.InvalidParams);
-
-        // @ts-expect-error - we know that error is an McpError
-        expect(error.message).toBe(
-          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Invalid input: expected number, received string. Please check the parameter types and values according to the tool's schema.",
-        );
-      }
+        ],
+        isError: true,
+      });
     },
     server: async () => {
       const server = new FastMCP({
@@ -3608,25 +3606,17 @@ test("throws ErrorCode.InvalidParams if tool parameters do not match zod schema"
 test("server remains usable after InvalidParams error", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
-      try {
-        await client.callTool({
-          arguments: {
-            a: 1,
-            b: "invalid",
-          },
-          name: "add",
-        });
-      } catch (error) {
-        expect(error).toBeInstanceOf(McpError);
+      const invalidResult = await client.callTool({
+        arguments: {
+          a: 1,
+          b: "invalid",
+        },
+        name: "add",
+      });
 
-        // @ts-expect-error - we know that error is an McpError
-        expect(error.code).toBe(ErrorCode.InvalidParams);
-
-        // @ts-expect-error - we know that error is an McpError
-        expect(error.message).toBe(
-          "MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: b: Invalid input: expected number, received string. Please check the parameter types and values according to the tool's schema.",
-        );
-      }
+      expect(invalidResult).toMatchObject({
+        isError: true,
+      });
 
       expect(
         await client.callTool({
@@ -5031,25 +5021,23 @@ test("HTTP Stream: calls a tool", { timeout: 20000 }, async () => {
 test("uses `formatInvalidParamsErrorMessage` callback to build ErrorCode.InvalidParams error message", async () => {
   await runWithTestServer({
     run: async ({ client }) => {
-      try {
-        await client.callTool({
-          arguments: {
-            a: 1,
-            b: "invalid",
+      const result = await client.callTool({
+        arguments: {
+          a: 1,
+          b: "invalid",
+        },
+        name: "add",
+      });
+
+      expect(result).toEqual({
+        content: [
+          {
+            text: "Tool 'add' parameter validation failed: My custom error message: Field b failed with error 'Invalid input: expected number, received string'. Please check the parameter types and values according to the tool's schema.",
+            type: "text",
           },
-          name: "add",
-        });
-      } catch (error) {
-        expect(error).toBeInstanceOf(McpError);
-
-        // @ts-expect-error - we know that error is an McpError
-        expect(error.code).toBe(ErrorCode.InvalidParams);
-
-        // @ts-expect-error - we know that error is an McpError
-        expect(error.message).toBe(
-          `MCP error -32602: MCP error -32602: Tool 'add' parameter validation failed: My custom error message: Field b failed with error 'Invalid input: expected number, received string'. Please check the parameter types and values according to the tool's schema.`,
-        );
-      }
+        ],
+        isError: true,
+      });
     },
     server: async () => {
       const server = new FastMCP({

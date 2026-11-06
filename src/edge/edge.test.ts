@@ -702,7 +702,21 @@ describe("EdgeFastMCP", () => {
 
     expect(response.status).toBe(200);
     const body: JsonResponse = await response.json();
-    expect.soft(body.error?.code).toBe(-32602);
+    expect(body).toMatchObject({
+      id: 9,
+      jsonrpc: "2.0",
+      result: {
+        content: [
+          {
+            text: expect.stringContaining(
+              "Tool 'count' parameter validation failed:",
+            ),
+            type: "text",
+          },
+        ],
+        isError: true,
+      },
+    });
     expect(execute).not.toHaveBeenCalled();
   });
 

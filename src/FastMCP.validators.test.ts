@@ -194,12 +194,11 @@ describe("tool parameters via ArkType", () => {
 
     await runWithTestServer({
       run: async ({ client }) => {
-        await expect(
-          client.callTool({
-            arguments: { a: "not-a-number", b: 2 },
-            name: "add",
-          }),
-        ).rejects.toThrow();
+        const result = await client.callTool({
+          arguments: { a: "not-a-number", b: 2 },
+          name: "add",
+        });
+        expect(result).toMatchObject({ isError: true });
         expect(executed).toBe(false);
       },
       server,
@@ -280,12 +279,11 @@ describe("tool parameters via Valibot", () => {
 
     await runWithTestServer({
       run: async ({ client }) => {
-        await expect(
-          client.callTool({
-            arguments: { a: "not-a-number", b: 2 },
-            name: "add",
-          }),
-        ).rejects.toThrow();
+        const result = await client.callTool({
+          arguments: { a: "not-a-number", b: 2 },
+          name: "add",
+        });
+        expect(result).toMatchObject({ isError: true });
         expect(executed).toBe(false);
       },
       server,
