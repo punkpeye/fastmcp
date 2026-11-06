@@ -24,3 +24,15 @@ components:
           type: string
         child:
           $ref: "#/components/schemas/Node"
+    Page:
+      type: object
+      properties:
+        size:
+          type: integer
+    Tag:
+      type: object
+      properties:
+        label:
+          type: string
+      required:
+        - label

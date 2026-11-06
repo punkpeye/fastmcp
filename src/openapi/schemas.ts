@@ -12,7 +12,7 @@ import type {
  * Keys whose values are name-to-schema maps: their child keys are
  * author-chosen names rather than JSON Schema keywords.
  */
-const SCHEMA_MAP_KEYS = new Set([
+export const SCHEMA_MAP_KEYS = new Set([
   "$defs",
   "definitions",
   "dependentSchemas",
@@ -24,7 +24,13 @@ const SCHEMA_MAP_KEYS = new Set([
  * Keys whose values are arbitrary instance data rather than schemas. A
  * sample payload may well contain a "$ref" or "nullable" key of its own.
  */
-const DATA_KEYS = new Set(["const", "default", "enum", "example", "examples"]);
+export const DATA_KEYS = new Set([
+  "const",
+  "default",
+  "enum",
+  "example",
+  "examples",
+]);
 
 /**
  * Keys whose values are dropped entirely — not just left unwalked as

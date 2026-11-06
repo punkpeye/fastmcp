@@ -2353,3 +2353,40 @@ test("a multi-file spec that reuses the same external schema keeps every tool ca
     await server.stop();
   }
 });
+
+test("a reused external schema stays callable when first inlined in a shared parameter or reused under a property named default", async () => {
+  // `bundle()` inlines a reused schema at its shallowest use. That can be a
+  // shared parameter, so the other uses point at `#/components/parameters/...`.
+  // A property named `default` is a schema, not instance data.
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () =>
+      new Response("{}", { headers: { "content-type": "application/json" } }),
+  );
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    spec: fileURLToPath(
+      new URL(
+        "./__fixtures__/multi-file-reuse/component-sites.yaml",
+        import.meta.url,
+      ),
+    ),
+  });
+  const client = await connect(server);
+
+  try {
+    for (const [name, args] of [
+      ["listPages", { page: { size: 1 } }],
+      ["savePage", { body: { size: 1 } }],
+      ["saveTag", { label: "x" }],
+      ["saveDefaultTag", { default: { label: "x" } }],
+    ] as const) {
+      const result = await client.callTool({ arguments: args, name });
+      expect(result.isError, name).toBeFalsy();
+    }
+
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});

@@ -2,6 +2,8 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 
 import type { BundledOpenApiDocument, OpenApiSchema } from "./types.js";
 
+import { DATA_KEYS, SCHEMA_MAP_KEYS } from "./schemas.js";
+
 export interface LoadedSpec {
   document: BundledOpenApiDocument;
   /**
@@ -10,6 +12,8 @@ export interface LoadedSpec {
    */
   origin?: string;
 }
+
+type PointerWalkMode = "components" | "document" | "schema" | "schemaMap";
 
 /**
  * Loads and bundles an OpenAPI document, resolving local *and* external
@@ -49,24 +53,6 @@ function isHttpUrl(value: string): boolean {
 }
 
 /**
- * Keys whose values are arbitrary instance data rather than schemas. A sample
- * payload may well contain a `"$ref"` field of its own.
- */
-const SCHEMA_DATA_KEYS = new Set([
-  "const",
-  "default",
-  "enum",
-  "example",
-  "examples",
-]);
-
-type PointerWalkMode =
-  | "components"
-  | "componentSchemas"
-  | "document"
-  | "schema";
-
-/**
  * `bundle()` inlines an external `$ref` at one use site and rewrites every
  * other use of the same external ref into a local pointer at that site —
  * e.g. `#/paths/~1a/get/parameters/0/schema` — which is valid in the bundled
@@ -86,10 +72,6 @@ type PointerWalkMode =
  * response, and path-item positions are already resolved by `routes.ts`.
  */
 function resolveBundledPointerRefs(document: BundledOpenApiDocument): void {
-  const schemas = ((document.components ??= {}).schemas ??= {}) as Record<
-    string,
-    OpenApiSchema
-  >;
   const hoisted = new Map<string, string>();
   let counter = 0;
 
@@ -114,7 +96,8 @@ function resolveBundledPointerRefs(document: BundledOpenApiDocument): void {
     let node: unknown = document;
 
     for (const segment of segments) {
-      if (!node || typeof node !== "object") {
+      // Own keys only, so a "__proto__" segment cannot reach Object.prototype.
+      if (!node || typeof node !== "object" || !Object.hasOwn(node, segment)) {
         return undefined;
       }
 
@@ -137,6 +120,8 @@ function resolveBundledPointerRefs(document: BundledOpenApiDocument): void {
       return undefined;
     }
 
+    // Created on first use, so a document with nothing to hoist is unchanged.
+    const schemas = ((document.components ??= {}).schemas ??= {});
     let name: string;
 
     do {
@@ -155,10 +140,13 @@ function resolveBundledPointerRefs(document: BundledOpenApiDocument): void {
   const rewriteRef = (record: Record<string, unknown>): void => {
     const ref = record.$ref;
 
+    // Only `#/components/schemas/...` becomes `#/$defs/...` in a tool schema.
+    // A schema first used by another component (a shared parameter, say) is
+    // inlined there, so its other uses point at `#/components/parameters/...`.
     if (
       typeof ref !== "string" ||
       !ref.startsWith("#/") ||
-      ref.startsWith("#/components/") ||
+      ref.startsWith("#/components/schemas/") ||
       ref.startsWith("#/$defs/")
     ) {
       return;
@@ -174,9 +162,18 @@ function resolveBundledPointerRefs(document: BundledOpenApiDocument): void {
   /**
    * The only places a schema is reached from outside one: `components.schemas`
    * (a map of schemas) and a `schema` key (parameters, request bodies,
-   * responses, headers). Everything below those stays a schema.
+   * responses, headers). Inside a schema, a schema map (`properties`, ...)
+   * names its children, so a property named `default` is a schema too.
    */
   const childMode = (key: string, mode: PointerWalkMode): PointerWalkMode => {
+    if (mode === "schemaMap") {
+      return "schema";
+    }
+
+    if (mode === "schema") {
+      return SCHEMA_MAP_KEYS.has(key) ? "schemaMap" : "schema";
+    }
+
     if (key === "schema") {
       return "schema";
     }
@@ -185,11 +182,9 @@ function resolveBundledPointerRefs(document: BundledOpenApiDocument): void {
       return "components";
     }
 
-    if (mode === "components" && key === "schemas") {
-      return "componentSchemas";
-    }
-
-    return mode === "componentSchemas" ? "schema" : "document";
+    return mode === "components" && key === "schemas"
+      ? "schemaMap"
+      : "document";
   };
 
   const walk = (value: unknown, mode: PointerWalkMode): void => {
@@ -208,17 +203,11 @@ function resolveBundledPointerRefs(document: BundledOpenApiDocument): void {
     const record = value as Record<string, unknown>;
 
     for (const [key, entryValue] of Object.entries(record)) {
-      if (mode === "schema") {
-        if (key === "$ref") {
-          rewriteRef(record);
-        } else if (!SCHEMA_DATA_KEYS.has(key)) {
-          walk(entryValue, "schema");
-        }
-
-        continue;
+      if (mode === "schema" && key === "$ref") {
+        rewriteRef(record);
+      } else if (mode !== "schema" || !DATA_KEYS.has(key)) {
+        walk(entryValue, childMode(key, mode));
       }
-
-      walk(entryValue, childMode(key, mode));
     }
   };
 
