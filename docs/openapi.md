@@ -32,6 +32,8 @@ await server.start({ transportType: "stdio" });
 
 Path Item `$ref`s are supported too: when multiple paths share a definition, each remains a separate tool or resource at its own path.
 
+Generated tools forward the call's cancellation signal to `fetch`, so cancelling a tool call or closing its session aborts the HTTP request and response-body reading. A custom `fetch` implementation must honor `RequestInit.signal` for this to work. Aborting a request does not undo work the API has already performed; resource reads do not receive a cancellation signal.
+
 Each operation uses the first server in its nearest non-empty `servers` array: operation, then path, then document. Server variables use their defaults, and relative URLs resolve against the spec URL. An explicit `baseUrl` overrides this selection for every generated tool or resource.
 
 Tool inputs combine path, query, header, cookie, and body fields. If a parameter name is shared across locations or with a body property, it becomes `{name}__{location}`; body properties keep their names. If that generated alias is already occupied, `_2`, `_3`, and so on are appended until it is unique. These aliases only affect MCP input names; HTTP requests still use the original parameter and body names. Header parameters named `Accept`, `Content-Type` or `Authorization` are ignored, as the OpenAPI specification requires, so they never become tool inputs; set those headers through the `headers` option.
