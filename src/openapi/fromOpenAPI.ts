@@ -107,12 +107,13 @@ export async function fromOpenAPI(
     server.addTool({
       description:
         route.summary ?? `${route.method.toUpperCase()} ${route.path}`,
-      execute: async (args, { signal }) => {
+      execute: async (args, context) => {
         const result = await executeRequest({
           ...execOptions,
           args: args as Record<string, unknown>,
           bodyEncoding,
-          signal,
+          context,
+          signal: context.signal,
           wholeBodyKey,
         });
 
@@ -157,9 +158,9 @@ function registerResource(
   if (mapping.kind === "resource") {
     server.addResource({
       description,
-      load: async () =>
+      load: async (_auth, context) =>
         wrapAsResourceResult(
-          await executeRequest({ ...execOptions, args: {} }),
+          await executeRequest({ ...execOptions, args: {}, context }),
         ),
       name,
       uri: mapping.uri,
@@ -171,11 +172,12 @@ function registerResource(
   server.addResourceTemplate({
     arguments: mapping.args,
     description,
-    load: async (args) =>
+    load: async (args, _auth, context) =>
       wrapAsResourceResult(
         await executeRequest({
           ...execOptions,
           args: args as Record<string, unknown>,
+          context,
         }),
       ),
     name,

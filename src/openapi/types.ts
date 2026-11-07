@@ -1,4 +1,4 @@
-import type { FastMCP, FastMCPSessionAuth } from "../FastMCP.js";
+import type { FastMCP, FastMCPSessionAuth, LoadContext } from "../FastMCP.js";
 
 /**
  * A minimal, hand-typed slice of a bundled OpenAPI 3.x document — just the
@@ -41,9 +41,16 @@ export interface FromOpenAPIOptions {
   /**
    * Static or dynamically-resolved headers (e.g. an auth token) sent with
    * every generated tool call.
+   *
+   * A function is called once per HTTP request with the context of the MCP
+   * call that caused it, so a header can depend on `context.session`. It is
+   * `undefined` when a resource is read through `server.embedded()`, which
+   * has no request.
    */
   headers?:
-    | (() => Promise<Record<string, string>> | Record<string, string>)
+    | ((
+        context?: LoadContext<FastMCPSessionAuth>,
+      ) => Promise<Record<string, string>> | Record<string, string>)
     | Record<string, string>;
 
   /**

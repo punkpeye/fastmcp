@@ -2516,3 +2516,49 @@ test("a reused external schema stays callable when first inlined in a shared par
     await server.stop();
   }
 });
+
+test("headers() receives the call context, so a token can come from the session", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    headers: (context) => ({
+      Authorization: `Bearer ${String(context?.session?.token)}`,
+    }),
+    resources: true,
+    spec: {
+      info: { title: "Pets API", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "listPets",
+            responses: { 200: { description: "OK" } },
+          },
+          post: {
+            operationId: "createPet",
+            responses: { 200: { description: "OK" } },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.com" }],
+    },
+  });
+  const client = await connect(server);
+
+  try {
+    server.sessions[0].updateAuth({ token: "user-1" });
+
+    await client.callTool({ arguments: {}, name: "createPet" });
+    await client.readResource({ uri: "openapi://listPets/pets" });
+
+    expect(
+      fetchImpl.mock.calls.map(([, init]) =>
+        new Headers(init?.headers).get("authorization"),
+      ),
+    ).toEqual(["Bearer user-1", "Bearer user-1"]);
+  } finally {
+    await Promise.all(server.sessions.map((session) => session.close()));
+    await client.close();
+    await server.stop();
+  }
+});
