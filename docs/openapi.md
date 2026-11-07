@@ -112,6 +112,8 @@ Request bodies get the same bracket-notation treatment for nested objects/arrays
 
 Required flattened JSON request bodies are sent as `{}` when no body properties are supplied. A required `application/json` body without a schema also sends `{}`. Omitted optional bodies remain absent.
 
+For optional JSON and form-urlencoded bodies, required body properties are enforced only when at least one body field is supplied. Omitting all body fields leaves the body absent; supplying only some required fields is rejected. Path, query, header, and cookie requirements still apply independently.
+
 ## Path parameter serialization
 
 Flat object path parameters support `style: simple`, including the path default when `style` is omitted. With `{ R: 100, G: 200, B: 150 }`, `explode: false` (the default) produces `R,100,G,200,B,150`; `explode: true` produces `R=100,G=200,B=150`.

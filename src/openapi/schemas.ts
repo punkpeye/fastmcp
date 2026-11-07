@@ -188,14 +188,21 @@ export function buildFlatSchema(
     }
   }
 
+  const bodyKeys: string[] = [];
+  const requiredBodyKeys: string[] = [];
   for (const [name, { required: isRequired, schema }] of bodyProperties) {
     const key = name === "__proto__" ? allocateAlias(`${name}__body`) : name;
     properties[key] = rewriteComponentRefs(schema);
     parameterMap[key] = { in: "body", name };
+    bodyKeys.push(key);
 
     if (isRequired) {
-      required.push(key);
+      requiredBodyKeys.push(key);
     }
+  }
+
+  if (route.requestBody?.required) {
+    required.push(...requiredBodyKeys);
   }
 
   const flatSchema: JsonSchemaObject = {
@@ -204,6 +211,13 @@ export function buildFlatSchema(
     type: "object",
     ...(required.length > 0 ? { required } : {}),
   };
+
+  // An optional body may be absent, but supplying any of its flattened fields
+  // must still satisfy the body's required properties. Use the aliased keys.
+  if (!route.requestBody?.required && requiredBodyKeys.length > 0) {
+    flatSchema.if = { anyOf: bodyKeys.map((key) => ({ required: [key] })) };
+    flatSchema.then = { required: requiredBodyKeys };
+  }
 
   // Only the definitions this tool's own schema actually (transitively)
   // references — embedding the whole document's components.schemas into
