@@ -41,6 +41,7 @@ test("a path param and a body property with the same name: path gets suffixed, b
             },
           },
         },
+        required: true,
       },
     }),
     undefined,
@@ -631,6 +632,7 @@ test("a form-urlencoded body is flattened like a JSON one, with bodyEncoding: 'f
             },
           },
         },
+        required: true,
       },
     }),
     undefined,
@@ -643,6 +645,101 @@ test("a form-urlencoded body is flattened like a JSON one, with bodyEncoding: 'f
   });
   expect(parameterMap.amount).toEqual({ in: "body", name: "amount" });
   expect(flatSchema.required).toEqual(["amount"]);
+});
+
+test.each([false, undefined])(
+  "an optional body (required: %s) does not make its required properties unconditional",
+  (bodyRequired) => {
+    const { flatSchema } = buildFlatSchema(
+      route({
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                properties: {
+                  enabled: { type: "boolean" },
+                  mode: { type: "string" },
+                  name: { type: "string" },
+                },
+                required: ["name", "mode"],
+                type: "object",
+              },
+            },
+          },
+          ...(bodyRequired === undefined ? {} : { required: bodyRequired }),
+        },
+      }),
+      undefined,
+    );
+
+    expect(flatSchema.required).toBeUndefined();
+    expect(flatSchema.if).toEqual({
+      anyOf: [
+        { required: ["enabled"] },
+        { required: ["mode"] },
+        { required: ["name"] },
+      ],
+    });
+    expect(flatSchema.then).toEqual({ required: ["mode", "name"] });
+  },
+);
+
+test("optional body conditionals follow aliased body property names", () => {
+  const { flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      parameters: [{ in: "query", name: "body", schema: { type: "string" } }],
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              properties: {
+                ["__proto__"]: { type: "string" },
+                enabled: { type: "boolean" },
+              },
+              required: ["__proto__"],
+              type: "object",
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  // The body property collides with the query param named "body", so it is
+  // exposed as "__proto____body". The conditional has to name that key.
+  expect(parameterMap.__proto____body).toEqual({
+    in: "body",
+    name: "__proto__",
+  });
+  expect(flatSchema.if).toEqual({
+    anyOf: [{ required: ["__proto____body"] }, { required: ["enabled"] }],
+  });
+  expect(flatSchema.then).toEqual({ required: ["__proto____body"] });
+});
+
+test("a required body keeps its required properties unconditional and adds no conditional", () => {
+  const { flatSchema } = buildFlatSchema(
+    route({
+      requestBody: {
+        content: {
+          "application/json": {
+            schema: {
+              properties: { name: { type: "string" } },
+              required: ["name"],
+              type: "object",
+            },
+          },
+        },
+        required: true,
+      },
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.required).toEqual(["name"]);
+  expect(flatSchema.if).toBeUndefined();
+  expect(flatSchema.then).toBeUndefined();
 });
 
 test("application/json is preferred over form-urlencoded when a route declares both", () => {

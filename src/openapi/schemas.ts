@@ -188,14 +188,25 @@ export function buildFlatSchema(
     }
   }
 
+  const bodyKeys: string[] = [];
+  const requiredBodyKeys: string[] = [];
+
   for (const [name, { required: isRequired, schema }] of bodyProperties) {
     const key = name === "__proto__" ? allocateAlias(`${name}__body`) : name;
     properties[key] = rewriteComponentRefs(schema);
     parameterMap[key] = { in: "body", name };
+    bodyKeys.push(key);
 
     if (isRequired) {
-      required.push(key);
+      requiredBodyKeys.push(key);
     }
+  }
+
+  // A required request body makes its own required properties required
+  // unconditionally; an optional one does not. The body's required properties
+  // are then enforced only once any body argument is supplied — see below.
+  if (route.requestBody?.required) {
+    required.push(...requiredBodyKeys);
   }
 
   const flatSchema: JsonSchemaObject = {
@@ -204,6 +215,16 @@ export function buildFlatSchema(
     type: "object",
     ...(required.length > 0 ? { required } : {}),
   };
+
+  // `requestBody.required` defaults to false, so a body may be absent even
+  // when its schema lists required properties. Those properties must still
+  // hold once the body exists, which is exactly what supplying any one of its
+  // flattened arguments means. Keys are post-alias, so this follows name
+  // collisions.
+  if (!route.requestBody?.required && requiredBodyKeys.length > 0) {
+    flatSchema.if = { anyOf: bodyKeys.map((key) => ({ required: [key] })) };
+    flatSchema.then = { required: requiredBodyKeys };
+  }
 
   // Only the definitions this tool's own schema actually (transitively)
   // references — embedding the whole document's components.schemas into

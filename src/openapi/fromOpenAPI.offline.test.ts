@@ -282,6 +282,100 @@ test.each(
   },
 );
 
+test.each([false, undefined, true])(
+  "an optional request body (requestBody.required: %s) is validated only when supplied",
+  async (requestBodyRequired) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        info: { title: "Jobs API", version: "1.0.0" },
+        openapi: "3.0.3",
+        paths: {
+          "/jobs/{id}": {
+            post: {
+              operationId: "runJob",
+              parameters: [
+                {
+                  in: "path",
+                  name: "id",
+                  required: true,
+                  schema: { type: "string" },
+                },
+              ],
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: {
+                      properties: {
+                        enabled: { type: "boolean" },
+                        mode: { type: "string" },
+                        name: { type: "string" },
+                      },
+                      required: ["name", "mode"],
+                      type: "object",
+                    },
+                  },
+                },
+                ...(requestBodyRequired === undefined
+                  ? {}
+                  : { required: requestBodyRequired }),
+              },
+              responses: { 200: { description: "OK" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const omitted = await client.callTool({
+        arguments: { id: "job-1" },
+        name: "runJob",
+      });
+
+      if (requestBodyRequired) {
+        expect(omitted.isError).toBe(true);
+        expect(fetchImpl).not.toHaveBeenCalled();
+      } else {
+        expect(omitted.isError).toBeFalsy();
+        expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+          "https://api.example.com/jobs/job-1",
+          expect.objectContaining({ body: undefined, method: "POST" }),
+        );
+      }
+
+      fetchImpl.mockClear();
+
+      const incomplete = await client.callTool({
+        arguments: { enabled: false, id: "job-1" },
+        name: "runJob",
+      });
+      expect(incomplete.isError).toBe(true);
+      expect(fetchImpl).not.toHaveBeenCalled();
+
+      const complete = await client.callTool({
+        arguments: { id: "job-1", mode: "fast", name: "example" },
+        name: "runJob",
+      });
+      expect(complete.isError).toBeFalsy();
+      expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+        "https://api.example.com/jobs/job-1",
+        expect.objectContaining({
+          body: '{"mode":"fast","name":"example"}',
+          method: "POST",
+        }),
+      );
+    } finally {
+      await server.sessions[0]?.close();
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
 test.each(
   ["3.0.3", "3.1.0"].flatMap((openapi) => [
     { allowReserved: true, expected: "?formula=x/y", openapi },
