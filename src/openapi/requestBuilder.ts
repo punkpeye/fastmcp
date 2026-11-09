@@ -1,3 +1,4 @@
+import type { FastMCPSessionAuth, LoadContext } from "../FastMCP.js";
 import type { ParameterMapping } from "./schemas.js";
 import type { FromOpenAPIOptions, HttpRoute, OpenApiServer } from "./types.js";
 
@@ -8,6 +9,8 @@ export interface ExecuteRequestOptions {
   baseUrlOverride?: string;
   /** Selected body encoding, including an empty required JSON object. */
   bodyEncoding?: "form" | "json";
+  /** The MCP call's context, passed to a `headers` function. */
+  context?: LoadContext<FastMCPSessionAuth>;
   fetchImpl: typeof fetch;
   headers?: FromOpenAPIOptions["headers"];
   origin?: string;
@@ -41,7 +44,9 @@ export async function executeRequest(
   // as one this function sets internally (e.g. "content-type") — `Headers`
   // normalizes casing, so `.set()` correctly overrides rather than
   // combining into a comma-joined, malformed value.
-  const headers = new Headers(await resolveHeaders(options.headers));
+  const headers = new Headers(
+    await resolveHeaders(options.headers, options.context),
+  );
   const bodyProps: Record<string, unknown> = Object.create(null);
 
   for (const [key, value] of Object.entries(options.args)) {
@@ -452,12 +457,15 @@ function encodePathValue(
 
 async function resolveHeaders(
   headers: FromOpenAPIOptions["headers"],
+  context: LoadContext<FastMCPSessionAuth> | undefined,
 ): Promise<Record<string, string>> {
   if (!headers) {
     return {};
   }
 
-  return typeof headers === "function" ? await headers() : { ...headers };
+  return typeof headers === "function"
+    ? await headers(context)
+    : { ...headers };
 }
 
 /**

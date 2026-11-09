@@ -152,7 +152,28 @@ const server = await fromOpenAPI({
 });
 ```
 
-Pass a function instead of a plain object if the token needs to be refreshed per call.
+Pass a function instead of a plain object if the token needs to be refreshed per call. The function receives the context of the MCP call, so a per-user token can come from the session your `authenticate` returned. Pass that server as `server`:
+
+```typescript
+const server = new FastMCP({
+  name: "My Server",
+  version: "1.0.0",
+  authenticate: async (request) => ({
+    token: request.headers["x-api-token"] as string,
+  }),
+});
+
+await fromOpenAPI({
+  spec: "https://api.example.com/openapi.json",
+  server,
+  headers: (context) =>
+    context?.session?.token
+      ? { Authorization: `Bearer ${context.session.token}` }
+      : {},
+});
+```
+
+The context is `undefined` when a resource is read through `server.embedded()`.
 
 ## Adding to an existing server
 
