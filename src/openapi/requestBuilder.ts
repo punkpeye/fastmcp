@@ -67,7 +67,10 @@ export async function executeRequest(
         break;
       }
       case "header":
-        headers.set(mapping.name, String(value));
+        headers.set(
+          mapping.name,
+          encodeHeaderValue(value, mapping.style, mapping.explode),
+        );
         break;
       case "path":
         pathParams[mapping.name] = encodePathValue(
@@ -399,6 +402,36 @@ function encodeFormBody(payload: unknown): string {
   }
 
   return params.toString();
+}
+
+/** Serialize flat simple-style header objects; retain other header values as-is. */
+function encodeHeaderValue(
+  value: unknown,
+  style: string | undefined,
+  explode: boolean | undefined,
+): string {
+  if (
+    (style === undefined || style === "simple") &&
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (
+      entries.every(([, item]) => item === null || typeof item !== "object")
+    ) {
+      return entries
+        .map(([key, item]) => {
+          const encodedKey = encodePathComponent(key);
+          const encodedValue = encodePathComponent(String(item));
+          return explode === true
+            ? `${encodedKey}=${encodedValue}`
+            : `${encodedKey},${encodedValue}`;
+        })
+        .join(",");
+    }
+  }
+  return String(value);
 }
 
 /** RFC 6570 simple and form expansion escape everything except RFC 3986 unreserved characters. */

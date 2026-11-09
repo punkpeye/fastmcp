@@ -93,6 +93,62 @@ function route(overrides: Partial<HttpRoute>): HttpRoute {
   };
 }
 
+test.each([
+  { expected: "G,200,R,100", value: { G: 200, R: 100 } },
+  {
+    expected: "G,200,R,100",
+    explode: false,
+    style: "simple",
+    value: { G: 200, R: 100 },
+  },
+  { expected: "G=200,R=100", explode: true, value: { G: 200, R: 100 } },
+  {
+    expected: "G=200,R=100",
+    explode: true,
+    style: "simple",
+    value: { G: 200, R: 100 },
+  },
+  { expected: "x%2Cy,a%2Fb%3Dc", value: { "x,y": "a/b=c" } },
+  { expected: "x%2Cy=a%2Fb%3Dc", explode: true, value: { "x,y": "a/b=c" } },
+  {
+    expected: "label,caf%C3%A9%20%21%27%28%29%2A%25",
+    value: { label: "café !'()*%" },
+  },
+  {
+    expected: "active,false,count,0,empty,",
+    value: { active: false, count: 0, empty: "" },
+  },
+  { expected: "", value: {} },
+  { expected: "", explode: true, value: {} },
+  { expected: "[object Object]", value: { nested: { value: "x" } } },
+  { expected: "[object Object]", value: { nested: [1, 2] } },
+  { expected: "[object Object]", style: "form", value: { R: 100 } },
+  { expected: "a,b", value: ["a", "b"] },
+  { expected: "a,b", explode: true, value: ["a", "b"] },
+  { expected: "a,b", value: "a,b" },
+  { expected: "false", value: false },
+  { expected: "0", value: 0 },
+  { expected: "null", value: null },
+] as const)(
+  "serializes a header without changing other shapes: %j",
+  async ({ expected, value, ...serialization }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("ok"));
+    await executeRequest({
+      args: { filter: value },
+      fetchImpl,
+      headers: { "x-filter": "default", "x-other": "retained" },
+      parameterMap: {
+        filter: { ...serialization, in: "header", name: "X-Filter" },
+      },
+      route: route({ path: "/items" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+    const headers = new Headers(fetchImpl.mock.calls[0][1]?.headers);
+    expect(headers.get("x-filter")).toBe(expected);
+    expect(headers.get("x-other")).toBe("retained");
+  },
+);
+
 test.each([{}, { limit: 10 }])(
   "sends an empty required flattened JSON body with arguments %j",
   async (args) => {
