@@ -93,6 +93,7 @@ export const buildDevCommand = (
   return [
     "npx",
     "@wong2/mcp-cli",
+    "--",
     "npx",
     "tsx",
     ...(watch ? ["--watch"] : []),

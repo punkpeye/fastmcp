@@ -1,3 +1,8 @@
+import { execa } from "execa";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +16,7 @@ describe("buildDevCommand", () => {
     expect(buildDevCommand({ file: "server.ts" })).toEqual([
       "npx",
       "@wong2/mcp-cli",
+      "--",
       "npx",
       "tsx",
       "server.ts",
@@ -21,6 +27,7 @@ describe("buildDevCommand", () => {
     expect(buildDevCommand({ file: "server.ts", watch: true })).toEqual([
       "npx",
       "@wong2/mcp-cli",
+      "--",
       "npx",
       "tsx",
       "--watch",
@@ -90,6 +97,44 @@ describe("buildDevCommand", () => {
     expect(() => buildDevCommand({ file: "server.ts", tool: "add" })).toThrow(
       /configPath is required/,
     );
+  });
+
+  it("forwards watch and the filename through mcp-cli's argument parser", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "fastmcp-dev-"));
+    const output = join(dir, "argv.json");
+    const recorder = join(dir, "record.cjs");
+
+    try {
+      await writeFile(
+        recorder,
+        `require("node:fs").writeFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)));`,
+      );
+      const args = buildDevCommand({
+        file: "server with spaces.ts",
+        watch: true,
+      }).slice(2);
+      // Run the installed parser, replacing npx/tsx with an argv recorder.
+      args.splice(args.indexOf("npx"), 2, process.execPath, recorder);
+      await execa(
+        process.execPath,
+        [
+          createRequire(import.meta.url).resolve("@wong2/mcp-cli/src/cli.js"),
+          ...args,
+        ],
+        {
+          env: { APPDATA: dir, XDG_CONFIG_HOME: dir },
+          reject: false,
+          timeout: 10_000,
+        },
+      );
+
+      expect(JSON.parse(await readFile(output, "utf8"))).toEqual([
+        "--watch",
+        "server with spaces.ts",
+      ]);
+    } finally {
+      await rm(dir, { force: true, recursive: true });
+    }
   });
 });
 
