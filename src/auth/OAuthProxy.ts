@@ -1681,6 +1681,11 @@ export class OAuthProxy {
       const text = await response.text();
       const params = new URLSearchParams(text);
 
+      this.rejectUpstreamError({
+        error: params.get("error"),
+        error_description: params.get("error_description"),
+      });
+
       const rawData = {
         access_token: params.get("access_token") || "",
         expires_in: params.get("expires_in")
@@ -1700,6 +1705,7 @@ export class OAuthProxy {
 
     // Default to JSON parsing
     const rawJson = await response.json();
+    this.rejectUpstreamError(rawJson);
     return tokenResponseSchema.parse(rawJson);
   }
 
@@ -1823,6 +1829,40 @@ export class OAuthProxy {
       scope: tokens.scope ? tokens.scope.split(" ") : [],
       tokenType: tokens.token_type || "Bearer",
     };
+  }
+
+  /**
+   * RFC 6749 §5.2: a provider refuses a token request by naming the error in
+   * the response body. The status that carries it is not fixed — GitHub, whose
+   * own branch exists above, answers every refusal with 200 — so a refusal is
+   * recognised here, from the body, rather than left to fail the token schema
+   * parse. Without this the upstream's own diagnosis (`bad_verification_code`,
+   * `invalid_grant`, …) is replaced by a `ZodError`, which the routes answer as
+   * `server_error` (callback) or `invalid_request` (token).
+   *
+   * The upstream's code is kept as the `OAuthProxyError` code, and its
+   * description when it sent one, so the client is told what the provider
+   * actually refused.
+   */
+  private rejectUpstreamError(payload: unknown): void {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+
+    const { error, error_description } = payload as {
+      error?: unknown;
+      error_description?: unknown;
+    };
+
+    // Providers that succeed simply omit it; an empty one is not a refusal.
+    if (typeof error !== "string" || error === "") {
+      return;
+    }
+
+    throw new OAuthProxyError(
+      error,
+      typeof error_description === "string" ? error_description : undefined,
+    );
   }
 
   /**
