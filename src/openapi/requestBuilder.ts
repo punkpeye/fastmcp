@@ -56,6 +56,18 @@ export async function executeRequest(
       continue;
     }
 
+    // RFC 6570, which OpenAPI's parameter styles follow, treats null as
+    // undefined, so a null query, header or cookie value is left out rather
+    // than sent as the string "null". A body property keeps its JSON null.
+    if (
+      value === null &&
+      (mapping.in === "query" ||
+        mapping.in === "header" ||
+        mapping.in === "cookie")
+    ) {
+      continue;
+    }
+
     switch (mapping.in) {
       case "body":
         bodyProps[mapping.name] = value;
