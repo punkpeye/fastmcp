@@ -1005,3 +1005,26 @@ test("a non-ok response throws with the status and body surfaced", async () => {
     }),
   ).rejects.toThrow(/404/);
 });
+
+test("a null query, header or cookie value is left out like an undefined one", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+  await executeRequest({
+    args: { limit: 10, session: null, status: null, trace: null },
+    fetchImpl,
+    parameterMap: {
+      limit: { in: "query", name: "limit" },
+      session: { in: "cookie", name: "session" },
+      status: { in: "query", name: "status" },
+      trace: { in: "header", name: "x-trace" },
+    },
+    route: route({ path: "/pets" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [calledUrl, calledInit] = fetchImpl.mock.calls[0]!;
+  expect(calledUrl).toBe("https://api.example.com/pets?limit=10");
+  const headers = new Headers(calledInit?.headers);
+  expect(headers.has("x-trace")).toBe(false);
+  expect(headers.has("cookie")).toBe(false);
+});
