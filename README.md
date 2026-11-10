@@ -514,6 +514,8 @@ server.start({
 
 > **Note:** Stateless mode is only available with HTTP streaming transport. Features that depend on persistent sessions (like session-specific state) will not be available in stateless mode.
 
+> **Legacy SSE:** the HTTP Stream transport also answers the legacy SSE endpoints (`GET /sse` and `POST /messages`) by default. Set `httpStream.sseEndpoint` to another path to move them, or to `null` to turn them off — in stateless deployments a long-lived SSE session contradicts the stateless contract.
+
 You can also enable stateless mode using CLI arguments or environment variables:
 
 ```bash
