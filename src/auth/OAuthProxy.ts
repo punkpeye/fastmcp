@@ -519,7 +519,7 @@ export class OAuthProxy {
     uiLocalesSupported?: string[];
   } {
     return {
-      authorizationEndpoint: `${this.config.baseUrl}/oauth/authorize`,
+      authorizationEndpoint: this.getEndpointUrl("/oauth/authorize"),
       ...(this.config.authorizationResponseIss
         ? { authorizationResponseIssParameterSupported: true as const }
         : {}),
@@ -531,10 +531,10 @@ export class OAuthProxy {
         : ["S256"],
       grantTypesSupported: ["authorization_code", "refresh_token"],
       issuer: this.config.baseUrl,
-      registrationEndpoint: `${this.config.baseUrl}/oauth/register`,
+      registrationEndpoint: this.getEndpointUrl("/oauth/register"),
       responseTypesSupported: ["code"],
       scopesSupported: this.config.scopes || [],
-      tokenEndpoint: `${this.config.baseUrl}/oauth/token`,
+      tokenEndpoint: this.getEndpointUrl("/oauth/token"),
       // Public clients use PKCE instead of a secret: CIMD clients never
       // receive one, and DCR clients may register with "none".
       tokenEndpointAuthMethodsSupported: [
@@ -956,7 +956,7 @@ export class OAuthProxy {
       code,
       code_verifier: transaction.proxyCodeVerifier,
       grant_type: "authorization_code",
-      redirect_uri: `${this.config.baseUrl}${this.config.redirectPath}`,
+      redirect_uri: this.getEndpointUrl(this.config.redirectPath!),
     };
 
     // Include client credentials in body only for client_secret_post
@@ -1147,6 +1147,11 @@ export class OAuthProxy {
       this.config.upstreamClientSecret,
     );
     return `Basic ${Buffer.from(`${encodedClientId}:${encodedClientSecret}`).toString("base64")}`;
+  }
+
+  /** Join endpoint paths without changing the configured issuer identifier. */
+  private getEndpointUrl(path: string): string {
+    return `${this.config.baseUrl.replace(/\/+$/, "")}${path}`;
   }
 
   /**
@@ -1739,7 +1744,7 @@ export class OAuthProxy {
     authUrl.searchParams.set("client_id", this.config.upstreamClientId);
     authUrl.searchParams.set(
       "redirect_uri",
-      `${this.config.baseUrl}${this.config.redirectPath}`,
+      this.getEndpointUrl(this.config.redirectPath!),
     );
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("state", transaction.id);
