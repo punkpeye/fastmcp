@@ -3004,27 +3004,52 @@ export class FastMCPSession<
       }
       cachedToolsList = await Promise.all(
         tools.map(async (tool) => {
+          // A schema with no JSON Schema form (Date, BigInt, a valibot
+          // transform) throws here; keep that from failing the whole list.
+          let inputSchema: SDKTool["inputSchema"];
+          try {
+            inputSchema = (
+              tool.parameters
+                ? strictInputSchema(
+                    tool.parameters["~standard"].vendor === "zod" &&
+                      "_zod" in tool.parameters
+                      ? zodInputSchema(tool.parameters as z.ZodType, "draft-7")
+                      : await toJsonSchema(tool.parameters),
+                  )
+                : {
+                    additionalProperties: false,
+                    properties: {},
+                    type: "object",
+                  }
+            ) as SDKTool["inputSchema"];
+          } catch (error) {
+            this.#logger.warn(
+              `[FastMCP warning] Tool '${tool.name}' parameters cannot be converted to JSON Schema; advertising a generic object schema.`,
+              error,
+            );
+            inputSchema = { type: "object" };
+          }
+
+          let outputSchema: SDKTool["outputSchema"];
+          if (tool.outputSchema) {
+            try {
+              outputSchema = objectRootSchema(
+                await toJsonSchema(tool.outputSchema),
+              ) as SDKTool["outputSchema"];
+            } catch (error) {
+              this.#logger.warn(
+                `[FastMCP warning] Tool '${tool.name}' outputSchema cannot be converted to JSON Schema; advertising the tool without it.`,
+                error,
+              );
+            }
+          }
+
           return {
             annotations: tool.annotations,
             description: tool.description,
-            inputSchema: (tool.parameters
-              ? strictInputSchema(
-                  tool.parameters["~standard"].vendor === "zod" &&
-                    "_zod" in tool.parameters
-                    ? zodInputSchema(tool.parameters as z.ZodType, "draft-7")
-                    : await toJsonSchema(tool.parameters),
-                )
-              : {
-                  additionalProperties: false,
-                  properties: {},
-                  type: "object",
-                }) as SDKTool["inputSchema"],
+            inputSchema,
             name: tool.name,
-            ...(tool.outputSchema && {
-              outputSchema: objectRootSchema(
-                await toJsonSchema(tool.outputSchema),
-              ) as SDKTool["outputSchema"],
-            }),
+            ...(outputSchema && { outputSchema }),
             // Pass through _meta for MCP ext-apps UI support (issue #229)
             ...(tool._meta && { _meta: tool._meta }),
           };
