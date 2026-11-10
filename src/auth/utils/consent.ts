@@ -234,7 +234,7 @@ export class ConsentManager {
             </p>
         </div>
 
-        <form method="POST" action="/oauth/consent">
+        <form method="POST" action="consent">
             <input type="hidden" name="transaction_id" value="${this.escapeHtml(transactionId)}">
             <div class="actions">
                 <button type="submit" name="action" value="deny" class="deny">

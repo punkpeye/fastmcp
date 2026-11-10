@@ -4,7 +4,10 @@
  * "approve" must not be treated as one.
  */
 
+import { startAuthorization } from "@modelcontextprotocol/sdk/client/auth.js";
 import { afterEach, describe, expect, it } from "vitest";
+
+import type { AuthorizationParams } from "./types.js";
 
 import { OAuthProxy, OAuthProxyError } from "./OAuthProxy.js";
 import { MemoryTokenStorage } from "./utils/tokenStore.js";
@@ -122,6 +125,54 @@ describe("OAuthProxy consent action handling", () => {
       baseConfig.upstreamAuthorizationEndpoint,
     );
   });
+
+  it.each(["", "/issuer", "/tenant/team"])(
+    "posts the consent form to the issuer's OAuth path (%s)",
+    async (path) => {
+      const baseUrl = `${baseConfig.baseUrl}${path}`;
+      const proxy = new OAuthProxy({ ...baseConfig, baseUrl });
+      proxies.push(proxy);
+      const client = await proxy.registerClient({
+        redirect_uris: [CALLBACK_URL],
+        token_endpoint_auth_method: "none",
+      });
+      const { authorizationUrl } = await startAuthorization(baseUrl, {
+        clientInformation: client,
+        metadata: {
+          authorization_endpoint:
+            proxy.getAuthorizationServerMetadata().authorizationEndpoint,
+          issuer: baseUrl,
+          response_types_supported: ["code"],
+          token_endpoint: proxy.getAuthorizationServerMetadata().tokenEndpoint,
+        },
+        redirectUrl: CALLBACK_URL,
+      });
+      const response = await proxy.authorize(
+        Object.fromEntries(
+          authorizationUrl.searchParams,
+        ) as AuthorizationParams,
+      );
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      const action = /<form method="POST" action="([^"]+)"/.exec(html)![1];
+      const transactionId = /name="transaction_id" value="([^"]+)"/.exec(
+        html,
+      )![1];
+      const consentUrl = new URL(action, authorizationUrl);
+
+      expect(consentUrl.href).toBe(`${baseUrl}/oauth/consent`);
+      const approved = await proxy.handleConsent(
+        new Request(consentUrl, {
+          body: new URLSearchParams({
+            action: "approve",
+            transaction_id: transactionId,
+          }),
+          method: "POST",
+        }),
+      );
+      expect(approved.status).toBe(302);
+    },
+  );
 
   it("redirects back to the client with access_denied on deny", async () => {
     const { proxy, transactionId } = await startConsentFlow();
