@@ -5,6 +5,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   ErrorCode,
+  PromptListChangedNotificationSchema,
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -383,6 +384,123 @@ test.each([
           client.readResource({ uri: "docs://x" }),
         ).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
       }
+      expect(notifications).toHaveLength(connected ? 1 : 0);
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each([false, true])(
+  "keeps the last prompt with a repeated name in a batch (connected: %s)",
+  async (connected) => {
+    const server = new FastMCP({ name: "Batch prompts", version: "1.0.0" });
+    server.addPrompt({ load: async () => "keep", name: "keep" });
+    server.addPrompt({ load: async () => "old", name: "replace" });
+
+    const client = new Client({ name: "batch-client", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const notifications: unknown[] = [];
+    client.setNotificationHandler(
+      PromptListChangedNotificationSchema,
+      (notification) => {
+        notifications.push(notification);
+      },
+    );
+    const connect = () =>
+      Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+
+    try {
+      if (connected) {
+        await connect();
+        await client.listPrompts();
+      }
+
+      server.addPrompts([
+        {
+          arguments: [
+            {
+              description: "Obsolete argument",
+              enum: ["obsolete"],
+              name: "value",
+              required: true,
+            },
+          ],
+          description: "superseded",
+          load: async () => "obsolete",
+          name: "replace",
+        },
+        { load: async () => "new prompt", name: "added" },
+        {
+          arguments: [
+            {
+              description: "Current argument",
+              enum: ["current"],
+              name: "value",
+              required: true,
+            },
+          ],
+          description: "current",
+          load: async ({ value }) => `current: ${value}`,
+          name: "replace",
+        },
+      ]);
+
+      if (!connected) {
+        await connect();
+      }
+      const { prompts } = await client.listPrompts();
+      expect(prompts.map((prompt) => prompt.name)).toEqual([
+        "keep",
+        "added",
+        "replace",
+      ]);
+      expect(prompts[2]).toMatchObject({
+        arguments: [
+          {
+            description: "Current argument",
+            name: "value",
+            required: true,
+          },
+        ],
+        description: "current",
+        name: "replace",
+      });
+      expect(
+        await client.getPrompt({
+          arguments: { value: "current" },
+          name: "replace",
+        }),
+      ).toMatchObject({
+        description: "current",
+        messages: [
+          {
+            content: { text: "current: current", type: "text" },
+            role: "user",
+          },
+        ],
+      });
+      expect(
+        await client.complete({
+          argument: { name: "value", value: "" },
+          ref: { name: "replace", type: "ref/prompt" },
+        }),
+      ).toMatchObject({
+        completion: { total: 1, values: ["current"] },
+      });
+      expect(await client.getPrompt({ name: "keep" })).toMatchObject({
+        messages: [{ content: { text: "keep", type: "text" }, role: "user" }],
+      });
+      expect(await client.getPrompt({ name: "added" })).toMatchObject({
+        messages: [
+          { content: { text: "new prompt", type: "text" }, role: "user" },
+        ],
+      });
       expect(notifications).toHaveLength(connected ? 1 : 0);
     } finally {
       await client.close();
