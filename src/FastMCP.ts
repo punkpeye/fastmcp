@@ -4181,6 +4181,7 @@ export class FastMCP<
         eventStore?: EventStore;
         host?: string;
         port: number;
+        sseEndpoint?: `/${string}` | null;
         sslCa?: string;
         sslCert?: string;
         sslKey?: string;
@@ -4370,6 +4371,7 @@ export class FastMCP<
             );
           },
           port: httpConfig.port,
+          sseEndpoint: httpConfig.sseEndpoint,
           sslCa: httpConfig.sslCa,
           sslCert: httpConfig.sslCert,
           sslKey: httpConfig.sslKey,
@@ -4443,6 +4445,7 @@ export class FastMCP<
             );
           },
           port: httpConfig.port,
+          sseEndpoint: httpConfig.sseEndpoint,
           sslCa: httpConfig.sslCa,
           sslCert: httpConfig.sslCert,
           sslKey: httpConfig.sslKey,
@@ -5450,6 +5453,7 @@ export class FastMCP<
         eventStore?: EventStore;
         host?: string;
         port: number;
+        sseEndpoint?: `/${string}` | null;
         sslCa?: string;
         sslCert?: string;
         sslKey?: string;
@@ -5467,6 +5471,7 @@ export class FastMCP<
           eventStore?: EventStore;
           host: string;
           port: number;
+          sseEndpoint?: `/${string}` | null;
           sslCa?: string;
           sslCert?: string;
           sslKey?: string;
@@ -5539,6 +5544,7 @@ export class FastMCP<
         false;
       const cors = overrides?.httpStream?.cors;
       const eventStore = overrides?.httpStream?.eventStore;
+      const sseEndpoint = overrides?.httpStream?.sseEndpoint;
       const sslCa = overrides?.httpStream?.sslCa;
       const sslCert = overrides?.httpStream?.sslCert;
       const sslKey = overrides?.httpStream?.sslKey;
@@ -5552,6 +5558,7 @@ export class FastMCP<
           eventStore,
           host,
           port,
+          sseEndpoint,
           sslCa,
           sslCert,
           sslKey,
