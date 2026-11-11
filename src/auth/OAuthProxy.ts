@@ -44,6 +44,15 @@ import {
   MemoryTokenStorage,
 } from "./utils/tokenStore.js";
 
+/** The ports a URL leaves out, by scheme. */
+const DEFAULT_PORTS: Record<string, string | undefined> = {
+  "ftp:": "21",
+  "http:": "80",
+  "https:": "443",
+  "ws:": "80",
+  "wss:": "443",
+};
+
 /** The value of a consent cookie: 32 random bytes, as `generateId()` makes. */
 const CONSENT_COOKIE_VALUE = /^[\w-]{43}$/;
 
@@ -242,6 +251,16 @@ export class OAuthProxy {
       throw new OAuthProxyError(
         "invalid_request",
         "redirect_uri is not registered for this client",
+      );
+    }
+
+    // Registrations are kept, so one made when the allow-list or its matching
+    // let more through would otherwise go on being usable after either has
+    // been tightened.
+    if (!this.validateRedirectUri(params.redirect_uri)) {
+      throw new OAuthProxyError(
+        "invalid_request",
+        "redirect_uri is no longer allowed",
       );
     }
 
@@ -1828,17 +1847,55 @@ export class OAuthProxy {
   }
 
   /**
-   * Match URI against pattern (supports wildcards)
+   * Whether a redirect URI matches a pattern.
+   *
+   * The pattern is a glob over the URI as it is written, and the host the URI
+   * really leads to must match the pattern's host as well: `*` runs past the
+   * end of a host, so the text of `https://*.example.com/*` could otherwise be
+   * found in the path of a URI on any host at all. The URI's host is the one
+   * a browser goes to, which a backslash or a tab can make other than it is
+   * written. The pattern's runs from after `://` to the first `/` or `#`.
+   *
+   * A `?` there may stand for a character, as in `localhost:30??`, or start
+   * the query, as in `https://app.example.com?source=*`, where the host ends.
+   * A URI may match the pattern read any of these ways, if its host matches
+   * the host that reading gives.
    */
-  private matchesPattern(uri: string, pattern: string): boolean {
-    const regex = new RegExp(
-      "^" +
-        pattern.replace(/[.*+?^${}()|[\]\\]/g, (char) =>
-          char === "*" ? ".*" : char === "?" ? "." : "\\" + char,
-        ) +
-        "$",
-    );
-    return regex.test(uri);
+  private matchesPattern(uri: string, pattern: string, parsed: URL): boolean {
+    // `://` only marks a host when it follows a scheme. Anywhere else it is
+    // part of a path or a query, and the pattern names no host.
+    const scheme = /^[a-z*?][a-z\d+.\-*?]*:\/\//i.exec(pattern);
+
+    if (!scheme) {
+      return globToRegExp(pattern).test(uri);
+    }
+
+    const hostStart = scheme[0].length;
+    const length = pattern.slice(hostStart).search(/[/#]/);
+    const hostEnd = length === -1 ? pattern.length : hostStart + length;
+
+    if (
+      globToRegExp(pattern).test(uri) &&
+      leadsToHost(parsed, pattern.slice(hostStart, hostEnd))
+    ) {
+      return true;
+    }
+
+    // Read again with a `?` in that stretch starting the query, each in turn:
+    // one before it may still stand for a character.
+    for (let query = hostStart; query < hostEnd; query++) {
+      if (
+        pattern[query] === "?" &&
+        new RegExp(
+          `^${globSource(pattern.slice(0, query))}\\?${globSource(pattern.slice(query + 1))}$`,
+        ).test(uri) &&
+        leadsToHost(parsed, pattern.slice(hostStart, query))
+      ) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -2227,7 +2284,7 @@ export class OAuthProxy {
     ];
 
     return effectivePatterns.some((pattern) =>
-      this.matchesPattern(uri, pattern),
+      this.matchesPattern(uri, pattern, parsed),
     );
   }
 }
@@ -2255,6 +2312,81 @@ const describeUnauthenticatedClient = (client: ProxyDCRClient): string => {
 
   return "clients that do not authenticate with their client_secret";
 };
+
+/**
+ * Whether the host `uri` leads to matches the host of a redirect URI pattern.
+ *
+ * The pattern's host name is written the way the URL parser writes the URI's,
+ * so that it may be spelled as its author would: `bücher.example`, `127.1`
+ * or `[0:0:0:0:0:0:0:1]`. A wildcard that ends a host name does not run on
+ * into a longer one: `https://app.example.com*` is `app.example.com` with any
+ * path, not `app.example.com.elsewhere.example`. A host of `*` alone is any
+ * host.
+ */
+const leadsToHost = (uri: URL, host: string): boolean => {
+  // The port follows the last `:`, unless that is inside an IPv6 address.
+  const portStart = host.lastIndexOf(":");
+  const hasPort = portStart > host.lastIndexOf("]");
+  const name = writeHostName(
+    uri.protocol,
+    hasPort ? host.slice(0, portStart) : host,
+  );
+  // The wildcards that end a name match no `.`, so they cannot reach into
+  // another domain. A `*` alone is any host.
+  const trailing = /[*?]*$/.exec(name)![0];
+  const nameSource = /^\*+$/.test(name)
+    ? ".*"
+    : globSource(name.slice(0, name.length - trailing.length)) +
+      trailing.replace(/\*/g, "[^.]*").replace(/\?/g, "[^.]");
+  const expected = new RegExp(
+    `^${nameSource}${hasPort ? globSource(host.slice(portStart)) : ""}$`,
+  );
+  const candidates = [uri.host.toLowerCase()];
+  const defaultPort = DEFAULT_PORTS[uri.protocol];
+
+  // A URI may spell out the port its scheme implies, which is then dropped.
+  if (uri.port === "" && defaultPort) {
+    candidates.push(`${uri.hostname.toLowerCase()}:${defaultPort}`);
+  }
+
+  return candidates.some((candidate) => expected.test(candidate));
+};
+
+/**
+ * A pattern's host name as the URL parser writes the host of a URI with
+ * `protocol`, wildcards and all. A name the parser does not take is used as
+ * written, and so is one it would turn into another wildcard, as it would a
+ * percent-encoded `*`.
+ */
+const writeHostName = (protocol: string, name: string): string => {
+  // A `?` standing for a character, or what would end or precede a host,
+  // would be read as something else.
+  if (/[?#/\\@]/.test(name)) {
+    return name.toLowerCase();
+  }
+
+  try {
+    const { hostname } = new URL(`${protocol}//${name}`);
+
+    if (hostname.split("*").length === name.split("*").length) {
+      return hostname.toLowerCase();
+    }
+  } catch {
+    // Compared as written.
+  }
+
+  return name.toLowerCase();
+};
+
+/** A glob as regular expression source: `*` is any run, `?` any one character. */
+const globSource = (glob: string): string =>
+  glob.replace(/[.*+?^${}()|[\]\\]/g, (char) =>
+    char === "*" ? ".*" : char === "?" ? "." : "\\" + char,
+  );
+
+/** A glob as a pattern for a whole string. */
+const globToRegExp = (glob: string): RegExp =>
+  new RegExp(`^${globSource(glob)}$`);
 
 const isTokenEndpointAuthMethod = (
   value: string,

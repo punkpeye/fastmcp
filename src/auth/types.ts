@@ -222,7 +222,14 @@ export interface OAuthProxyConfig {
    *
    * A client calling POST /oauth/register must present a `redirect_uri` that
    * matches one of these patterns (exact string or glob with `*` / `?`);
-   * otherwise the registration is rejected with `invalid_redirect_uri`. Once
+   * otherwise the registration is rejected with `invalid_redirect_uri`. The
+   * host the URI leads to must match the pattern's host as well, so a
+   * wildcard in the host, as in `https://*.example.com/*`, stands for part of
+   * a host name rather than for a path on some other host, and one that ends
+   * a host name does not reach into a longer one. A `?` in the host may also
+   * be read as the start of the query, as in a URL. The patterns are checked
+   * again at /oauth/authorize, so a registration they no longer allow cannot
+   * be used. Once
    * registered, the same exact URI must be echoed back at /oauth/authorize —
    * the proxy performs an exact per-client match per RFC 6749 §3.1.2.3.
    *

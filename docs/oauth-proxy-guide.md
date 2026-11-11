@@ -326,6 +326,10 @@ const authProxy = new OAuthProxy({
 });
 ```
 
+A pattern is matched against the redirect URI as written, and the host the URI leads to must match the pattern's host too. A wildcard in the host therefore stands for part of a host name: `https://*.example.com/*` accepts `https://app.example.com/callback`, and not a URI on another host that carries `.example.com/` in its path. A wildcard that ends a host name does not reach into a longer one: `https://app.example.com*` accepts any path on `app.example.com`, not `app.example.com.elsewhere.example`.
+
+Patterns are checked again when a client asks for authorization, so tightening them also stops clients that registered under the old ones.
+
 ### Client ID Metadata Documents (CIMD)
 
 Some MCP clients — VS Code among them — identify themselves with an HTTPS URL
