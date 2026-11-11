@@ -1196,6 +1196,237 @@ describe("OAuthProxy - Swap Mode Refresh Token", () => {
     proxy.destroy();
   });
 
+  /** Answers the next upstream refresh, with or without a `scope`. */
+  function mockUpstreamRefresh(scope?: string) {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          access_token: "new-upstream-access",
+          expires_in: 3600,
+          refresh_token: "new-upstream-refresh",
+          token_type: "Bearer",
+          ...(scope === undefined ? {} : { scope }),
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+  }
+
+  it.each([
+    ["omits the scope", undefined],
+    ["reports the narrower scope", "read"],
+  ])(
+    "should narrow the scope on request when the upstream %s",
+    async (_, upstreamScope) => {
+      const proxy = new OAuthProxy({
+        ...baseConfig,
+        tokenStorage: new MemoryTokenStorage(),
+      });
+      const initialTokens = await getInitialTokens(proxy);
+
+      mockUpstreamRefresh(upstreamScope);
+
+      const refreshedTokens = await proxy.exchangeRefreshToken({
+        ...initialTokens.client,
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+        scope: "read",
+      });
+
+      // The narrowing request reached the upstream.
+      const [, init] = fetchSpy.mock.calls.at(-1)!;
+      expect(new URLSearchParams(init.body as string).get("scope")).toBe(
+        "read",
+      );
+
+      expect(refreshedTokens.scope).toBe("read");
+      expect(
+        (await proxy.loadUpstreamTokens(refreshedTokens.access_token))?.scope,
+      ).toEqual(["read"]);
+
+      proxy.destroy();
+    },
+  );
+
+  it("should not widen the scope when the upstream omits it", async () => {
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage: new MemoryTokenStorage(),
+    });
+    const initialTokens = await getInitialTokens(proxy);
+
+    // A provider that ignores `scope` on refresh answers without one too.
+    mockUpstreamRefresh();
+
+    const refreshedTokens = await proxy.exchangeRefreshToken({
+      ...initialTokens.client,
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+      scope: "read write admin",
+    });
+
+    expect(refreshedTokens.scope).toBe("read write");
+    expect(
+      (await proxy.loadUpstreamTokens(refreshedTokens.access_token))?.scope,
+    ).toEqual(["read", "write"]);
+
+    proxy.destroy();
+  });
+
+  it("should keep a narrowed access token narrow when a later refresh widens the grant", async () => {
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage: new MemoryTokenStorage(),
+    });
+    const initialTokens = await getInitialTokens(proxy);
+
+    mockUpstreamRefresh();
+
+    const narrowedTokens = await proxy.exchangeRefreshToken({
+      ...initialTokens.client,
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+      scope: "read",
+    });
+
+    // The upstream's refresh token still holds the whole grant, and says so.
+    mockUpstreamRefresh("read write");
+
+    const widenedTokens = await proxy.exchangeRefreshToken({
+      ...initialTokens.client,
+      grant_type: "refresh_token",
+      refresh_token: narrowedTokens.refresh_token!,
+    });
+
+    expect(widenedTokens.scope).toBe("read write");
+    expect(
+      (await proxy.loadUpstreamTokens(widenedTokens.access_token))?.scope,
+    ).toEqual(["read", "write"]);
+    expect(
+      (await proxy.loadUpstreamTokens(narrowedTokens.access_token))?.scope,
+    ).toEqual(["read"]);
+
+    proxy.destroy();
+  });
+
+  it("should narrow the access token even when the upstream reports the whole grant", async () => {
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage: new MemoryTokenStorage(),
+    });
+    const initialTokens = await getInitialTokens(proxy);
+
+    // A provider that ignores `scope` on refresh and says what it issued.
+    mockUpstreamRefresh("read write");
+
+    const refreshedTokens = await proxy.exchangeRefreshToken({
+      ...initialTokens.client,
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+      scope: "read",
+    });
+
+    expect(refreshedTokens.scope).toBe("read");
+    expect(
+      (await proxy.loadUpstreamTokens(refreshedTokens.access_token))?.scope,
+    ).toEqual(["read"]);
+
+    proxy.destroy();
+  });
+
+  it("should narrow only the access token, not the grant", async () => {
+    const proxy = new OAuthProxy({
+      ...baseConfig,
+      tokenStorage: new MemoryTokenStorage(),
+    });
+    const initialTokens = await getInitialTokens(proxy);
+
+    mockUpstreamRefresh();
+
+    const narrowedTokens = await proxy.exchangeRefreshToken({
+      ...initialTokens.client,
+      grant_type: "refresh_token",
+      refresh_token: initialTokens.refresh_token!,
+      scope: "read",
+    });
+
+    // The access token issued before keeps what it was issued with.
+    expect(
+      (await proxy.loadUpstreamTokens(initialTokens.access_token))?.scope,
+    ).toEqual(["read", "write"]);
+
+    // RFC 6749 §6: a refresh that asks for nothing gets the whole grant.
+    mockUpstreamRefresh();
+
+    const nextTokens = await proxy.exchangeRefreshToken({
+      ...initialTokens.client,
+      grant_type: "refresh_token",
+      refresh_token: narrowedTokens.refresh_token!,
+    });
+
+    expect(nextTokens.scope).toBe("read write");
+    expect(
+      (await proxy.loadUpstreamTokens(narrowedTokens.access_token))?.scope,
+    ).toEqual(["read"]);
+
+    proxy.destroy();
+  });
+
+  it.each([
+    [
+      "repeats its scope under the names it asked for it by",
+      ["https://idp.example/profile", "https://idp.example/email"],
+      "profile email",
+    ],
+    [
+      "asks for a scope outside the grant as well",
+      ["read", "write"],
+      "read admin",
+    ],
+    ["was answered with one comma-separated scope", ["repo,gist"], "repo gist"],
+  ])(
+    "should keep the grant's scope when the client %s",
+    async (_, granted, requested) => {
+      const proxy = new OAuthProxy({
+        ...baseConfig,
+        tokenStorage: new MemoryTokenStorage(),
+      });
+      // What the provider reported when the grant was made.
+      const initialTokens = await getInitialTokens(proxy, { scope: granted });
+
+      mockUpstreamRefresh();
+
+      const refreshedTokens = await proxy.exchangeRefreshToken({
+        ...initialTokens.client,
+        grant_type: "refresh_token",
+        refresh_token: initialTokens.refresh_token!,
+        scope: requested,
+      });
+
+      // Not a narrowing the proxy can read, so nothing is dropped...
+      expect(refreshedTokens.scope).toBe(granted.join(" "));
+      expect(
+        (await proxy.loadUpstreamTokens(refreshedTokens.access_token))?.scope,
+      ).toEqual(granted);
+
+      // ...now or on the refresh after.
+      mockUpstreamRefresh();
+
+      const nextTokens = await proxy.exchangeRefreshToken({
+        ...initialTokens.client,
+        grant_type: "refresh_token",
+        refresh_token: refreshedTokens.refresh_token!,
+      });
+
+      expect(nextTokens.scope).toBe(granted.join(" "));
+
+      proxy.destroy();
+    },
+  );
+
   it("should correctly calculate TTL on refresh", async () => {
     const tokenStorage = new TTLTrackingStorage();
     const proxy = new OAuthProxy({

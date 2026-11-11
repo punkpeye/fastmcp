@@ -706,6 +706,7 @@ export class OAuthProxy {
     const mapping = (await this.tokenStorage.get(
       `mapping:${result.claims.jti}`,
     )) as {
+      scope?: string[];
       upstreamTokenKey: string;
     } | null;
 
@@ -718,7 +719,20 @@ export class OAuthProxy {
       `upstream:${mapping.upstreamTokenKey}`,
     )) as null | UpstreamTokenSet;
 
-    return upstreamTokens;
+    if (!upstreamTokens || !Array.isArray(mapping.scope)) {
+      return upstreamTokens;
+    }
+
+    // Every token issued from one grant shares this record, and its scope is
+    // the grant's, not this token's: a refresh may have issued this token
+    // with less. A token carries no more than it was issued with, and no
+    // more than the grant now holds.
+    return {
+      ...upstreamTokens,
+      scope: mapping.scope.filter((scope) =>
+        upstreamTokens.scope.includes(scope),
+      ),
+    };
   }
 
   /**
@@ -1380,9 +1394,29 @@ export class OAuthProxy {
         request.scope,
       );
 
+      // What the grant holds: what the upstream says it does, or, when its
+      // answer names no scope, what it held before.
       if (refreshedUpstreamTokens.scope.length === 0) {
         refreshedUpstreamTokens.scope = upstreamTokens.scope;
       }
+
+      // RFC 6749 §6: a refresh may ask for less than the grant holds, and the
+      // access token it gets back carries only that. The grant keeps its
+      // scope, so a later refresh that asks for nothing gets all of it again.
+      // A request naming a scope the grant does not hold cannot be read as a
+      // narrowing — a provider may report its scopes under other names than
+      // the client asked for them by — and is answered with what the grant
+      // holds, as a request for more is.
+      const requestedScope = [
+        ...new Set(request.scope?.split(" ").filter(Boolean)),
+      ];
+      const accessTokenScope =
+        requestedScope.length > 0 &&
+        requestedScope.every((scope) =>
+          refreshedUpstreamTokens.scope.includes(scope),
+        )
+          ? requestedScope
+          : refreshedUpstreamTokens.scope;
 
       const refreshTokenTtl =
         refreshedUpstreamTokens.refreshExpiresIn ??
@@ -1404,6 +1438,7 @@ export class OAuthProxy {
         refreshedUpstreamTokens,
         mapping.upstreamTokenKey,
         caller.authenticated,
+        accessTokenScope,
       );
     } catch (error) {
       // No tokens reached the client, so hand the refresh token back rather
@@ -1543,6 +1578,8 @@ export class OAuthProxy {
     upstreamTokens: UpstreamTokenSet,
     upstreamTokenKey: string,
     clientAuthenticated: boolean,
+    // The access token may carry less than the grant: see the refresh.
+    accessTokenScope: string[] = upstreamTokens.scope,
   ): Promise<TokenResponse> {
     if (!this.jwtIssuer) {
       throw new Error("JWT issuer not initialized");
@@ -1559,7 +1596,7 @@ export class OAuthProxy {
 
     const accessToken = this.jwtIssuer.issueAccessToken(
       clientId,
-      upstreamTokens.scope,
+      accessTokenScope,
       customClaims || undefined,
       accessTokenTtl,
     );
@@ -1572,7 +1609,7 @@ export class OAuthProxy {
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + accessTokenTtl * 1000),
         jti: accessJti,
-        scope: upstreamTokens.scope,
+        scope: accessTokenScope,
         upstreamTokenKey,
       },
       accessTokenTtl,
@@ -1581,11 +1618,13 @@ export class OAuthProxy {
     const response: TokenResponse = {
       access_token: accessToken,
       expires_in: accessTokenTtl,
-      scope: upstreamTokens.scope.join(" "),
+      scope: accessTokenScope.join(" "),
       token_type: "Bearer",
     };
 
     if (upstreamTokens.refreshToken) {
+      // RFC 6749 §6: the new refresh token has the scope of the one it
+      // replaces, whatever the access token was narrowed to.
       const refreshToken = this.jwtIssuer.issueRefreshToken(
         clientId,
         upstreamTokens.scope,
