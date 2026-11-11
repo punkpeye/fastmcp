@@ -441,7 +441,7 @@ export class OAuthProxy {
       // Pass-through pattern: return upstream tokens directly
       const response: TokenResponse = {
         access_token: clientCode.upstreamTokens.accessToken,
-        expires_in: clientCode.upstreamTokens.expiresIn,
+        expires_in: clientCode.upstreamTokens.expiresIn || 3600,
         token_type: clientCode.upstreamTokens.tokenType,
       };
 
@@ -996,7 +996,7 @@ export class OAuthProxy {
 
     return {
       accessToken: tokens.access_token,
-      expiresIn: tokens.expires_in || 3600,
+      expiresIn: tokens.expires_in ?? 0,
       idToken: tokens.id_token,
       issuedAt: new Date(),
       refreshExpiresIn: tokens.refresh_expires_in,
@@ -1826,7 +1826,7 @@ export class OAuthProxy {
     // preserve the original one
     return {
       accessToken: tokens.access_token,
-      expiresIn: tokens.expires_in || 3600,
+      expiresIn: tokens.expires_in ?? 0,
       idToken: tokens.id_token,
       issuedAt: new Date(),
       refreshExpiresIn: tokens.refresh_expires_in,

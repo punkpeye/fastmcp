@@ -213,7 +213,11 @@ export interface OAuthProviderConfig {
  * Configuration for the OAuth Proxy
  */
 export interface OAuthProxyConfig {
-  /** Access token TTL in seconds (default: 3600) */
+  /**
+   * Fallback lifetime in seconds for swapped access tokens when upstream omits
+   * expires_in. Defaults to 3600 with an upstream refresh token, otherwise
+   * 31536000 (one year).
+   */
   accessTokenTtl?: number;
   /**
    * Allow-list of redirect URI patterns accepted by Dynamic Client Registration.
@@ -538,7 +542,7 @@ export interface TokenVerifier {
 export interface UpstreamTokenSet {
   /** Access token */
   accessToken: string;
-  /** Token expiration in seconds */
+  /** Token expiration in seconds; 0 when upstream expiry is unknown */
   expiresIn: number;
   /** ID token (for OIDC) */
   idToken?: string;

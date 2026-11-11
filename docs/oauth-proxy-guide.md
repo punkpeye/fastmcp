@@ -276,7 +276,7 @@ interface OAuthProxyConfig {
   // OPTIONAL: Token swap pattern (enabled by default)
   enableTokenSwap?: boolean; // default: true
   jwtSigningKey?: string; // optional (auto-generated if not provided)
-  accessTokenTtl?: number; // seconds, default: 3600
+  accessTokenTtl?: number; // fallback seconds; see TTL Configuration
   refreshTokenTtl?: number; // seconds, default: 2592000
 
   // OPTIONAL: Storage
@@ -425,6 +425,15 @@ const authProxy = new OAuthProxy({
   refreshTokenTtl: 2592000, // 30 days for refresh tokens
 });
 ```
+
+In token-swap mode, a positive upstream `expires_in` takes precedence over
+`accessTokenTtl`. When `expires_in` is omitted, `accessTokenTtl` supplies the
+fallback. If neither is supplied, the default is 3600 seconds with an upstream
+refresh token or 31536000 seconds (one year) without one.
+
+An omitted upstream expiry is stored as `expiresIn: 0` and leaves provider
+sessions' `expiresAt` undefined. The FastMCP JWT still expires after the selected
+lifetime.
 
 ## Advanced Features
 
