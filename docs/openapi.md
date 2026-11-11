@@ -10,6 +10,7 @@
 - [Structured output](#structured-output)
 - [Query and form-body serialization](#query-and-form-body-serialization)
 - [Path parameter serialization](#path-parameter-serialization)
+- [Header parameter serialization](#header-parameter-serialization)
 - [Options](#options)
 - [Authentication](#authentication)
 - [Adding to an existing server](#adding-to-an-existing-server)
@@ -104,7 +105,7 @@ For form-style query arrays and objects, `explode` defaults to `true`. Form-body
 
 With `explode: false`, commas inside individual array items or object keys/values are not escaped separately from the separators. For example, `["x,y", "z"]` is sent as `fields=x%2Cy%2Cz`; a server that URL-decodes and then splits on commas cannot distinguish the comma inside the first item from a separator.
 
-Form-style query objects support scalar property values; nested objects/arrays require `deepObject` serialization. Object-valued `spaceDelimited`/`pipeDelimited` queries, headers, and cookies are still sent as the literal string `"[object Object]"` (percent-encoded for form-style cookies).
+Form-style query objects support scalar property values; nested objects/arrays require `deepObject` serialization. Object-valued `spaceDelimited`/`pipeDelimited` queries and cookies are still sent as the literal string `"[object Object]"` (percent-encoded for form-style cookies).
 
 Form-style cookie values (the default) are percent-encoded, leaving only letters, digits and `-._~` as they are, so a value such as `a; b=c` is sent as `a%3B%20b%3Dc` and cannot add a cookie of its own. With OpenAPI 3.2 `style: cookie` the value is sent as given, already escaped by the caller, and a value holding `;` or `,` is refused. Array items are encoded, or checked, one at a time and joined with commas.
 
@@ -123,6 +124,14 @@ Each property key and scalar value is percent-encoded separately before adding t
 Simple-style arrays also encode each item separately, then join them with commas, for either `explode` value. For example, `["blue,green", "red/white"]` becomes `blue%2Cgreen,red%2Fwhite`, preserving the difference between a comma inside an item and a separator. Empty arrays expand to an empty path value. Scalar path parameters keep their existing encoding.
 
 Nested object/array properties and other path styles (such as `matrix` and `label`) remain unsupported: these objects are still sent as the literal string `"[object Object]"`.
+
+## Header parameter serialization
+
+Flat object header parameters support `style: simple`, the default for headers. `{ R: 100, G: 200 }` is sent as `R,100,G,200`, or `R=100,G=200` with `explode: true`.
+
+Keys and values are sent as given, like scalar and array headers: OpenAPI 3.2 rules out percent-encoding a header value. A `,` or `=` inside a key or value is therefore not escaped separately from the separators; `{ "x,y": "a/b=c" }` is sent as `x,y,a/b=c`. Empty objects produce an empty header value.
+
+Scalar and array headers retain their existing string conversion. Nested objects/arrays inside header objects and non-simple styles remain unsupported and retain the `"[object Object]"` fallback. Static or callback-provided `headers` values are unchanged.
 
 ## Options
 

@@ -79,7 +79,10 @@ export async function executeRequest(
         break;
       }
       case "header":
-        headers.set(mapping.name, String(value));
+        headers.set(
+          mapping.name,
+          serializeHeaderValue(value, mapping.style, mapping.explode),
+        );
         break;
       case "path":
         pathParams[mapping.name] = encodePathValue(
@@ -478,6 +481,39 @@ async function resolveHeaders(
   return typeof headers === "function"
     ? await headers(context)
     : { ...headers };
+}
+
+/**
+ * Flat simple-style header objects use alternating keys/values, or key=value
+ * pairs when exploded. Unlike a path value, a header is sent as given: OpenAPI
+ * 3.2 rules out percent-encoding one, and scalar and array headers are not
+ * encoded either. Other styles/shapes retain their existing string conversion.
+ */
+function serializeHeaderValue(
+  value: unknown,
+  style: string | undefined,
+  explode: boolean | undefined,
+): string {
+  if (
+    (style === undefined || style === "simple") &&
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    const entries = Object.entries(value as Record<string, unknown>);
+
+    if (
+      entries.every(([, item]) => item === null || typeof item !== "object")
+    ) {
+      const separator = explode === true ? "=" : ",";
+
+      return entries
+        .map(([key, item]) => `${key}${separator}${String(item)}`)
+        .join(",");
+    }
+  }
+
+  return String(value);
 }
 
 /**

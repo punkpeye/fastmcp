@@ -137,7 +137,7 @@ export interface OpenApiParameter {
   description?: string;
   /**
    * Form-style query arrays/objects use separate parameters (default: true).
-   * Simple-style path objects use key=value pairs (default: false).
+   * Simple-style path/header objects use key=value pairs (default: false).
    */
   explode?: boolean;
   in: ParameterLocation;
@@ -150,9 +150,10 @@ export interface OpenApiParameter {
    * arrays and property pairs for objects unless `explode: false` requests
    * a single comma-separated value. `"simple"` (the path default) serializes
    * flat path arrays as comma-separated items, and flat path objects as
-   * comma-separated keys/values or, when exploded, key=value pairs. Cookies
-   * are percent-encoded under `"form"` (the cookie default) and sent as
-   * given under OAS 3.2 `"cookie"`.
+   * comma-separated keys/values or, when exploded, key=value pairs. Flat
+   * header objects use the same layout (the header default) but are sent as
+   * given, without percent-encoding. Cookies are percent-encoded under
+   * `"form"` (the cookie default) and sent as given under OAS 3.2 `"cookie"`.
    */
   style?: string;
 }
