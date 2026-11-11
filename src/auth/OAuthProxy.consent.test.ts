@@ -62,7 +62,7 @@ describe("OAuthProxy consent action handling", () => {
     )?.[1];
     expect(transactionId).toBeTruthy();
 
-    return { proxy, transactionId: transactionId! };
+    return { proxy, response, transactionId: transactionId! };
   };
 
   const submitConsent = (
@@ -76,6 +76,15 @@ describe("OAuthProxy consent action handling", () => {
         method: "POST",
       }),
     );
+
+  it("sets both framing headers on the consent page", async () => {
+    const { response } = await startConsentFlow();
+
+    expect.soft(response.headers.get("X-Frame-Options")).toBe("DENY");
+    expect
+      .soft(response.headers.get("Content-Security-Policy"))
+      .toBe("frame-ancestors 'none'");
+  });
 
   it.each([
     ["omitted", {}],

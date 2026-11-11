@@ -5048,7 +5048,10 @@ export class FastMCP<
               // HTML consent screen
               const html = await response.text();
               res
-                .writeHead(response.status, { "Content-Type": "text/html" })
+                .writeHead(
+                  response.status,
+                  Object.fromEntries(response.headers),
+                )
                 .end(html);
             }
           } catch (error) {
@@ -5150,7 +5153,12 @@ export class FastMCP<
                   res.writeHead(response.status, { Location: location }).end();
                 } else {
                   const text = await response.text();
-                  res.writeHead(response.status).end(text);
+                  res
+                    .writeHead(
+                      response.status,
+                      Object.fromEntries(response.headers),
+                    )
+                    .end(text);
                 }
               } catch (error) {
                 res.writeHead(400, { "Content-Type": "application/json" }).end(

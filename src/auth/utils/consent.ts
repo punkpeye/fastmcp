@@ -38,7 +38,9 @@ export class ConsentManager {
 
     return new Response(html, {
       headers: {
+        "Content-Security-Policy": "frame-ancestors 'none'",
         "Content-Type": "text/html; charset=utf-8",
+        "X-Frame-Options": "DENY",
       },
       status: 200,
     });
