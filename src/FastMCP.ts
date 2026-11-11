@@ -3445,6 +3445,14 @@ function convertObjectToSnakeCase(
 }
 
 /**
+ * The cookies a Node request carries, as headers for the web `Request` handed
+ * to the OAuth proxy: a consent request is bound to its browser by a cookie.
+ */
+function cookieHeaders(req: http.IncomingMessage): Record<string, string> {
+  return req.headers.cookie ? { cookie: req.headers.cookie } : {};
+}
+
+/**
  * Whether `transport` is a Streamable HTTP server transport. Duck-typed because
  * mcp-proxy bundles its own copy of the SDK, so `instanceof` would not match.
  */
@@ -3679,6 +3687,37 @@ function grantedScopes(auth: FastMCPSessionAuth): string[] {
       : [];
 
   return values.filter((scope): scope is string => typeof scope === "string");
+}
+
+/**
+ * Writes an OAuth proxy response to a Node response with its headers. The
+ * consent screen's cookie and its framing rules travel in them, as does the
+ * redirect that ends each step.
+ */
+async function sendOAuthProxyResponse(
+  res: http.ServerResponse,
+  response: Response,
+): Promise<void> {
+  // Read before anything is written, so that a body that fails to read
+  // leaves the response for the caller to answer with an error.
+  const body = await response.text();
+  const headers: Record<string, string | string[]> = {};
+
+  response.headers.forEach((value, key) => {
+    // Combining cookies with a comma changes their meaning; they are taken
+    // from getSetCookie() below instead.
+    if (key.toLowerCase() !== "set-cookie") {
+      headers[key] = value;
+    }
+  });
+
+  const setCookies = response.headers.getSetCookie();
+
+  if (setCookies.length > 0) {
+    headers["set-cookie"] = setCookies;
+  }
+
+  res.writeHead(response.status, headers).end(body);
 }
 
 function stripBasePath(
@@ -5090,19 +5129,14 @@ export class FastMCP<
                 redirect_uri: string;
                 response_type: string;
               },
+              // The consent cookie this browser already holds, if any
+              new Request(`http://${host}${req.url}`, {
+                headers: cookieHeaders(req),
+              }),
             );
 
-            // Response is a redirect
-            const location = response.headers.get("Location");
-            if (location) {
-              res.writeHead(response.status, { Location: location }).end();
-            } else {
-              // HTML consent screen
-              const html = await response.text();
-              res
-                .writeHead(response.status, { "Content-Type": "text/html" })
-                .end(html);
-            }
+            // A redirect to the provider, or the HTML consent screen
+            await sendOAuthProxyResponse(res, response);
           } catch (error) {
             res.writeHead(400, { "Content-Type": "application/json" }).end(
               JSON.stringify(
@@ -5118,16 +5152,12 @@ export class FastMCP<
         // Callback endpoint - GET /oauth/callback
         if (req.method === "GET" && oauthPath === "/oauth/callback") {
           try {
-            const mockRequest = new Request(`http://${host}${req.url}`);
+            const mockRequest = new Request(`http://${host}${req.url}`, {
+              headers: cookieHeaders(req),
+            });
             const response = await oauthProxy.handleCallback(mockRequest);
 
-            const location = response.headers.get("Location");
-            if (location) {
-              res.writeHead(response.status, { Location: location }).end();
-            } else {
-              const text = await response.text();
-              res.writeHead(response.status).end(text);
-            }
+            await sendOAuthProxyResponse(res, response);
           } catch (error) {
             res.writeHead(400, { "Content-Type": "application/json" }).end(
               JSON.stringify(
@@ -5190,6 +5220,7 @@ export class FastMCP<
                   {
                     body: Buffer.concat(bodyChunks).toString("utf8"),
                     headers: {
+                      ...cookieHeaders(req),
                       "Content-Type": "application/x-www-form-urlencoded",
                     },
                     method: "POST",
@@ -5197,13 +5228,7 @@ export class FastMCP<
                 );
                 const response = await oauthProxy.handleConsent(mockRequest);
 
-                const location = response.headers.get("Location");
-                if (location) {
-                  res.writeHead(response.status, { Location: location }).end();
-                } else {
-                  const text = await response.text();
-                  res.writeHead(response.status).end(text);
-                }
+                await sendOAuthProxyResponse(res, response);
               } catch (error) {
                 res.writeHead(400, { "Content-Type": "application/json" }).end(
                   JSON.stringify(

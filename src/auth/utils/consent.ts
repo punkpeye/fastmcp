@@ -21,34 +21,48 @@ export class ConsentManager {
 
   /**
    * Create HTTP response with consent screen
+   *
+   * `cookie` is a `Set-Cookie` value that ties the request to the browser the
+   * screen is shown to. The screen may not be framed: a page that embeds it
+   * could have the user approve without seeing what they are approving.
    */
   createConsentResponse(
     transaction: OAuthTransaction,
     provider: string,
+    options: { clientName?: string; cookie?: string } = {},
   ): Response {
     const consentData: ConsentData = {
-      clientName: "MCP Client",
+      clientName: options.clientName || "MCP Client",
       provider,
+      redirectUri: transaction.clientCallbackUrl,
       scope: transaction.scope,
       timestamp: Date.now(),
       transactionId: transaction.id,
     };
 
     const html = this.generateConsentScreen(consentData);
-
-    return new Response(html, {
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-      },
-      status: 200,
+    const headers = new Headers({
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "frame-ancestors 'none'",
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Frame-Options": "DENY",
     });
+
+    if (options.cookie) {
+      headers.append("Set-Cookie", options.cookie);
+    }
+
+    return new Response(html, { headers, status: 200 });
   }
 
   /**
    * Generate HTML for consent screen
    */
   generateConsentScreen(data: ConsentData): string {
-    const { clientName, provider, scope, transactionId } = data;
+    const { clientName, provider, redirectUri, scope, transactionId } = data;
+    // A client names itself, so the name alone says little. Where the user is
+    // sent afterwards is what the client cannot make up.
+    const destination = redirectUri && this.describeDestination(redirectUri);
 
     return `
 <!DOCTYPE html>
@@ -115,6 +129,12 @@ export class ConsentManager {
         .app-name {
             color: #667eea;
             font-weight: 600;
+        }
+
+        .destination {
+            color: #4a5568;
+            font-size: 14px;
+            overflow-wrap: anywhere;
         }
 
         .permissions {
@@ -215,10 +235,19 @@ export class ConsentManager {
 
         <div class="app-info">
             <h2>
-                <span class="app-name">${this.escapeHtml(clientName || "An application")}</span>
+                <span class="app-name">${this.escapeHtml((clientName || "An application").slice(0, 100))}</span>
                 requests access
             </h2>
-
+${
+  destination
+    ? `
+            <p class="destination">
+                If you approve, you will be sent to
+                <strong>${this.escapeHtml(destination)}</strong>
+            </p>
+`
+    : ""
+}
             <div class="permissions">
                 <h3>This will allow the app to:</h3>
                 <ul>
@@ -299,6 +328,28 @@ export class ConsentManager {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Where a redirect URI leads, as the browser will read it rather than as it
+   * was typed: the parsed host, so that a look-alike character, a tab or a
+   * backslash shows for what it does. A long host keeps its end, which is the
+   * part that says whose it is.
+   */
+  private describeDestination(redirectUri: string): string | undefined {
+    let url: URL;
+
+    try {
+      url = new URL(redirectUri);
+    } catch {
+      return undefined;
+    }
+
+    const host = url.host.length > 80 ? `…${url.host.slice(-80)}` : url.host;
+    const path =
+      url.pathname.length > 80 ? `${url.pathname.slice(0, 80)}…` : url.pathname;
+
+    return host ? `${url.protocol}//${host}${path}` : `${url.protocol}${path}`;
   }
 
   /**

@@ -97,8 +97,9 @@ describe("OAuthProxy authorizationResponseIss", () => {
 
   it("is sent on the error redirect when consent is denied", async () => {
     const proxy = createProxy({ consentRequired: true });
+    const consentScreen = await authorize(proxy);
     const transactionId = /name="transaction_id" value="([^"]+)"/.exec(
-      await (await authorize(proxy)).text(),
+      await consentScreen.text(),
     )![1];
 
     const redirect = location(
@@ -108,6 +109,10 @@ describe("OAuthProxy authorizationResponseIss", () => {
             action: "deny",
             transaction_id: transactionId,
           }),
+          // The browser the consent screen was shown to.
+          headers: {
+            cookie: consentScreen.headers.getSetCookie()[0].split(";")[0],
+          },
           method: "POST",
         }),
       ),

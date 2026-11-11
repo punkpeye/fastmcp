@@ -71,6 +71,8 @@ export interface ClientCode {
 export interface ConsentData {
   clientName: string;
   provider: string;
+  /** Where the client is sent once the user approves. */
+  redirectUri?: string;
   scope: string[];
   timestamp: number;
   transactionId: string;
@@ -346,6 +348,11 @@ export interface OAuthTransaction {
   clientCodeChallengeMethod: string;
   /** Client ID from registration */
   clientId: string;
+  /**
+   * Digest of the cookie held by the browser the consent screen was shown to.
+   * Approving the request and finishing it both take that cookie.
+   */
+  consentBinding?: string;
   /** Whether user consent was given */
   consentGiven?: boolean;
   /** Transaction creation timestamp */

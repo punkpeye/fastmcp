@@ -219,6 +219,10 @@ describe("OAuthProxy TokenStorage persistence", () => {
     );
     expect(consentResponse.status).toBe(200);
 
+    // The cookie that binds the request to this browser. It is checked
+    // against the stored transaction, so any instance can verify it.
+    const cookie = consentResponse.headers.getSetCookie()[0].split(";")[0];
+
     const transactionId = /name="transaction_id" value="([^"]+)"/.exec(
       await consentResponse.text(),
     )?.[1];
@@ -231,7 +235,10 @@ describe("OAuthProxy TokenStorage persistence", () => {
           action: "approve",
           transaction_id: transactionId!,
         }).toString(),
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          cookie,
+        },
         method: "POST",
       }),
     );
@@ -248,6 +255,7 @@ describe("OAuthProxy TokenStorage persistence", () => {
         `${baseConfig.baseUrl}/oauth/callback?code=upstream-code&state=${encodeURIComponent(
           getRequiredSearchParam(upstreamUrl, "state"),
         )}`,
+        { headers: { cookie } },
       ),
     );
 

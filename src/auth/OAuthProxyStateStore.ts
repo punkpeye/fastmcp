@@ -102,6 +102,7 @@ const oauthTransactionStorageSchema: z.ZodType<OAuthTransaction> = z.object({
   clientCodeChallenge: z.string(),
   clientCodeChallengeMethod: z.string(),
   clientId: z.string(),
+  consentBinding: z.string().optional(),
   consentGiven: z.boolean().optional(),
   createdAt: storedDateSchema,
   expiresAt: storedDateSchema,

@@ -1212,6 +1212,17 @@ Examples:
 2. Clear browser cookies for the domain
 3. Check consent cookie signing key is consistent
 
+### "Consent must be given in the browser that requested it" or "This authorization request was not approved in this browser"
+
+**Problem:** The consent screen leaves a cookie in the browser it is shown to, and a request can only be approved and finished there. The first message means the consent form was submitted without that cookie; the second, that the provider's redirect reached `/oauth/callback` without it.
+
+**Solutions:**
+
+1. Finish the flow in the browser that showed the consent screen
+2. Check `baseUrl` uses the scheme the server is reached by: with an `https://` `baseUrl` the cookie is `Secure`, and a browser drops it over plain HTTP
+3. Allow cookies for the server's origin
+4. If you serve the proxy's handlers yourself, return the response headers of `authorize()`, and pass the browser's `Cookie` header in the requests you give `authorize()` (its second argument), `handleConsent()` and `handleCallback()`
+
 ### Server restart loses sessions
 
 **Problem:** Using in-memory storage.

@@ -285,7 +285,7 @@ server.addTool({
 
 - Prevents confused deputy attacks
 - Shows clear scope permissions
-- Signed consent cookies (5-minute TTL)
+- Bound to the browser it is shown to (`HttpOnly` cookie), so a request can only be approved and finished there
 - Can be disabled for trusted environments
 
 ### Token Security

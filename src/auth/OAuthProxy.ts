@@ -44,6 +44,9 @@ import {
   MemoryTokenStorage,
 } from "./utils/tokenStore.js";
 
+/** The value of a consent cookie: 32 random bytes, as `generateId()` makes. */
+const CONSENT_COOKIE_VALUE = /^[\w-]{43}$/;
+
 /**
  * The most a client registration may store, in bytes of JSON. Registration is
  * open to anyone and a registration is kept for good, so this is what one
@@ -127,7 +130,6 @@ export class OAuthProxy {
       allowPlainPkce: true,
       authorizationCodeTtl: DEFAULT_AUTHORIZATION_CODE_TTL,
       authorizationResponseIss: true,
-      consentRequired: true,
       enableCimd: false,
       enableTokenSwap: true, // Enabled by default for security
       redirectPath: "/oauth/callback",
@@ -135,6 +137,9 @@ export class OAuthProxy {
       upstreamRequestTimeoutMs: DEFAULT_UPSTREAM_REQUEST_TIMEOUT_MS,
       upstreamTokenEndpointAuthMethod: "client_secret_basic",
       ...config,
+      // Spreading an explicit `undefined` over the default would turn consent
+      // off for a caller that only meant to pass an option along.
+      consentRequired: config.consentRequired ?? true,
     };
 
     // Set up token storage with encryption by default (matches Python's secure defaults)
@@ -198,7 +203,10 @@ export class OAuthProxy {
   /**
    * OAuth authorization endpoint
    */
-  async authorize(params: AuthorizationParams): Promise<Response> {
+  async authorize(
+    params: AuthorizationParams,
+    request?: Request,
+  ): Promise<Response> {
     // Validate parameters
     if (!params.client_id || !params.redirect_uri || !params.response_type) {
       throw new OAuthProxyError(
@@ -299,14 +307,31 @@ export class OAuthProxy {
       }
     }
 
+    // The consent screen leaves a cookie in the browser it is shown to, and
+    // the request can only be approved and finished from there. Without it
+    // anyone could approve their own request and hand a user the rest of the
+    // flow, and the user's sign-in would authorize a client they never saw.
+    // A browser keeps the one cookie for every request it has open, so the
+    // cookie it already holds is used again when `request` carries it.
+    const consentBinding = this.config.consentRequired
+      ? ((request && this.consentCookieValue(request)) ?? this.generateId())
+      : undefined;
+
     // Create transaction
-    const transaction = await this.createTransaction(params);
+    const transaction = await this.createTransaction(params, consentBinding);
 
     // If consent required, show consent screen
-    if (this.config.consentRequired && !transaction.consentGiven) {
+    if (consentBinding && !transaction.consentGiven) {
+      // Registration stores what it was sent, so this may be anything.
+      const clientName: unknown = registeredClient.metadata?.client_name;
+
       return this.consentManager.createConsentResponse(
         transaction,
         this.getProviderName(),
+        {
+          clientName: typeof clientName === "string" ? clientName : undefined,
+          cookie: this.consentCookie(consentBinding),
+        },
       );
     }
 
@@ -583,6 +608,22 @@ export class OAuthProxy {
       throw new OAuthProxyError("invalid_request", "Invalid or expired state");
     }
 
+    // Every MCP client reaches the provider through this proxy's one upstream
+    // client, so the provider cannot tell them apart: consent here is all that
+    // stops a user's sign-in from authorizing a client they never approved.
+    // The `state` alone proves nothing — whoever started the request knows it
+    // and can send a user straight to the provider with it — so the request
+    // must have been approved, and in the browser now finishing it.
+    if (
+      this.config.consentRequired &&
+      !(transaction.consentGiven && this.isConsentBoundTo(request, transaction))
+    ) {
+      throw new OAuthProxyError(
+        "access_denied",
+        "This authorization request was not approved in this browser",
+      );
+    }
+
     // Defense-in-depth: the transaction's stored callback URL must still be
     // registered. Guards against any code path that could persist an
     // unvalidated URI, and against registration being revoked mid-flow.
@@ -645,6 +686,17 @@ export class OAuthProxy {
       throw new OAuthProxyError(
         "invalid_request",
         "Invalid or expired transaction",
+      );
+    }
+
+    // Only the browser the consent screen was shown to may answer it. The
+    // transaction ID is on that screen for anyone who requests it, so on its
+    // own it would let a client approve itself, or have a page submit the
+    // form from a user's browser.
+    if (!this.isConsentBoundTo(request, transaction)) {
+      throw new OAuthProxyError(
+        "invalid_request",
+        "Consent must be given in the browser that requested it",
       );
     }
 
@@ -950,10 +1002,60 @@ export class OAuthProxy {
   }
 
   /**
+   * The cookie that ties consent requests to the browser they were shown to.
+   * A browser holds one, shared by every request it has open, and it lasts as
+   * long as a request does. `Lax` lets it travel with the provider's redirect
+   * back to the callback, which is a cross-site navigation. Over HTTPS the
+   * `__Host-` prefix keeps another host on the same site from setting it.
+   */
+  private consentCookie(value: string): string {
+    return [
+      `${this.consentCookieName()}=${value}`,
+      "Path=/",
+      `Max-Age=${this.config.transactionTtl || 600}`,
+      "HttpOnly",
+      "SameSite=Lax",
+      ...(this.isServedOverHttps() ? ["Secure"] : []),
+    ].join("; ");
+  }
+
+  private consentCookieName(): string {
+    return `${this.isServedOverHttps() ? "__Host-" : ""}fastmcp-consent`;
+  }
+
+  /**
+   * The consent cookie `request` carries, if it carries a well-formed one.
+   *
+   * Only the spaces and tabs that may surround a cookie are dropped. Trimming
+   * all white space would take a cookie whose name begins with, say, a
+   * no-break space for this one, and a browser does not hold such a name to
+   * the `__Host-` rules.
+   */
+  private consentCookieValue(request: Request): string | undefined {
+    const name = this.consentCookieName();
+
+    for (const pair of (request.headers.get("cookie") ?? "").split(";")) {
+      const separator = pair.indexOf("=");
+
+      if (
+        separator !== -1 &&
+        withoutOptionalWhitespace(pair.slice(0, separator)) === name
+      ) {
+        const value = withoutOptionalWhitespace(pair.slice(separator + 1));
+
+        return CONSENT_COOKIE_VALUE.test(value) ? value : undefined;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
    * Create a new OAuth transaction
    */
   private async createTransaction(
     params: AuthorizationParams,
+    consentBinding?: string,
   ): Promise<OAuthTransaction> {
     const transactionId = this.generateId();
     const proxyPkce = PKCEUtils.generatePair("S256");
@@ -963,6 +1065,7 @@ export class OAuthProxy {
       clientCodeChallenge: params.code_challenge || "",
       clientCodeChallengeMethod: params.code_challenge_method || "plain",
       clientId: params.client_id,
+      ...(consentBinding && { consentBinding: sha256(consentBinding) }),
       createdAt: new Date(),
       expiresAt: new Date(
         Date.now() + (this.config.transactionTtl || 600) * 1000,
@@ -1483,6 +1586,29 @@ export class OAuthProxy {
 
       throw error;
     }
+  }
+
+  /**
+   * Whether `request` comes from the browser the transaction's consent screen
+   * was shown to: it carries the cookie that screen set. A transaction that
+   * never had a consent screen is bound to no browser.
+   */
+  private isConsentBoundTo(
+    request: Request,
+    transaction: OAuthTransaction,
+  ): boolean {
+    const presented = this.consentCookieValue(request);
+
+    return Boolean(
+      presented &&
+      transaction.consentBinding &&
+      equalsConstantTime(sha256(presented), transaction.consentBinding),
+    );
+  }
+
+  /** Whether browsers reach this proxy over HTTPS, going by its `baseUrl`. */
+  private isServedOverHttps(): boolean {
+    return /^https:/i.test(this.config.baseUrl);
   }
 
   /**
@@ -2137,6 +2263,10 @@ const isTokenEndpointAuthMethod = (
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value).digest("base64url");
+
+/** Drops the spaces and tabs HTTP allows around a header's parts, and no more. */
+const withoutOptionalWhitespace = (value: string): string =>
+  value.replace(/^[ \t]+|[ \t]+$/g, "");
 
 /**
  * Constant-time secret comparison (CWE-208). Comparing digests keeps both

@@ -36,11 +36,14 @@ Enhanced security through dual PKCE validation:
 
 Built-in consent screen prevents confused deputy attacks:
 
-- Shows clear authorization details and requested scopes
-- Signed consent cookies with HMAC-SHA256
-- Configurable 5-minute consent TTL
+- Shows the requesting client, where it sends the user, and the requested scopes
+- Bound to the browser it is shown to by an `HttpOnly` cookie: a request can only be approved, and finished, there
+- Cannot be framed by another page
+- Lasts as long as the authorization request (`transactionTtl`)
 - Can be disabled for trusted development environments
 - XSS-protected HTML rendering
+
+FastMCP's built-in OAuth routes carry the cookie for you. If you serve the proxy's handlers yourself, return the headers of the response from `authorize()`, and pass the browser's `Cookie` header in the requests you give `handleConsent()` and `handleCallback()`. Give `authorize()` the request as its second argument too, so that a browser with several requests open keeps one cookie for all of them.
 
 ### 5. Token Management
 
