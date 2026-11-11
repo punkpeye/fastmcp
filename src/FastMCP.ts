@@ -3798,9 +3798,15 @@ export class FastMCP<
   public addPrompts<const Args extends InputPromptArgument<T>[]>(
     prompts: InputPrompt<T, Args>[],
   ) {
-    const newPromptNames = new Set(prompts.map((prompt) => prompt.name));
-    this.#prompts = this.#prompts.filter((p) => !newPromptNames.has(p.name));
-    this.#prompts.push(...prompts);
+    const promptsByName = new Map(
+      this.#prompts.map((prompt) => [prompt.name, prompt]),
+    );
+    for (const prompt of prompts) {
+      // Match sequential addPrompt() calls, including the last occurrence's order.
+      promptsByName.delete(prompt.name);
+      promptsByName.set(prompt.name, prompt);
+    }
+    this.#prompts = Array.from(promptsByName.values());
 
     if (this.#serverState === ServerState.Running) {
       this.#promptsListChanged(this.#prompts);
