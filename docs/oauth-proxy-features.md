@@ -154,23 +154,21 @@ When both access token and ID token contain claims:
 
 #### Example: Authorization with Custom Claims
 
+`canAccess` receives the session your `authenticate` function returned and must
+return a boolean synchronously. A tool whose `canAccess` returns anything else
+is hidden from every session, and an `async` function returns a Promise. Put
+the claims you authorize on in that session: the built-in providers do not add
+them.
+
 ```typescript
 // Tool with role-based access control
 server.addTool({
   name: "admin-action",
   description: "Perform admin action",
-  canAccess: async ({ session }) => {
-    const token = session?.headers?.["authorization"]?.replace("Bearer ", "");
-    if (!token) return false;
-
-    // Decode proxy JWT (contains custom claims from upstream)
-    const payload = JSON.parse(
-      Buffer.from(token.split(".")[1], "base64url").toString(),
-    );
-
-    // Check role claim passed through from upstream IDP
-    return payload.role === "admin" || payload.roles?.includes("admin");
-  },
+  // Check the role your authenticate function took from the verified token
+  canAccess: (auth) =>
+    auth?.role === "admin" ||
+    (Array.isArray(auth?.roles) && auth.roles.includes("admin")),
   execute: async (args) => {
     // Execute admin action
     return { content: [{ type: "text", text: "Admin action completed" }] };

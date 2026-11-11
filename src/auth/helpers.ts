@@ -26,10 +26,7 @@ export function getAuthSession<T extends OAuthSession = OAuthSession>(
 export function requireAll<T extends SessionAuth>(
   ...checks: Array<((auth: T) => boolean) | boolean>
 ): (auth: T) => boolean {
-  return (auth: T): boolean =>
-    checks.every((check) =>
-      typeof check === "function" ? check(auth) : check,
-    );
+  return (auth: T): boolean => checks.every((check) => passes(check, auth));
 }
 
 /**
@@ -38,8 +35,7 @@ export function requireAll<T extends SessionAuth>(
 export function requireAny<T extends SessionAuth>(
   ...checks: Array<((auth: T) => boolean) | boolean>
 ): (auth: T) => boolean {
-  return (auth: T): boolean =>
-    checks.some((check) => (typeof check === "function" ? check(auth) : check));
+  return (auth: T): boolean => checks.some((check) => passes(check, auth));
 }
 
 /**
@@ -81,4 +77,23 @@ export function requireScopes<T extends SessionAuth>(
 
     return requiredScopes.every((scope) => scopeSet.has(scope));
   };
+}
+
+/**
+ * Whether a check passes. Only `true` does: an `async` check returns a
+ * Promise, which is truthy whatever it resolves to, so reading the result for
+ * truthiness would pass a check that was written to refuse.
+ */
+function passes<T extends SessionAuth>(
+  check: ((auth: T) => boolean) | boolean,
+  auth: T,
+): boolean {
+  const result: unknown = typeof check === "function" ? check(auth) : check;
+
+  if (typeof (result as null | PromiseLike<unknown>)?.then === "function") {
+    // Nothing awaits it, so a rejection would otherwise go unhandled.
+    Promise.resolve(result).catch(() => {});
+  }
+
+  return result === true;
 }

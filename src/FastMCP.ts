@@ -1743,7 +1743,7 @@ export class FastMCPSession<
 
     if (supportsTools) {
       this.setupToolHandlers(
-        toolsVisibleTo(tools, this.#auth, this.#authRequired),
+        toolsVisibleTo(tools, this.#auth, this.#authRequired, this.#logger),
       );
     }
 
@@ -1941,7 +1941,7 @@ export class FastMCPSession<
 
     this.#tools = tools;
     this.setupToolHandlers(
-      toolsVisibleTo(tools, this.#auth, this.#authRequired),
+      toolsVisibleTo(tools, this.#auth, this.#authRequired, this.#logger),
     );
     this.triggerListChangedNotification("notifications/tools/list_changed");
   }
@@ -1966,7 +1966,12 @@ export class FastMCPSession<
    */
   public updateAuth(auth: T): void {
     this.#auth = auth;
-    const tools = toolsVisibleTo(this.#tools, auth, this.#authRequired);
+    const tools = toolsVisibleTo(
+      this.#tools,
+      auth,
+      this.#authRequired,
+      this.#logger,
+    );
 
     if (
       tools.length !== this.#visibleTools.length ||
@@ -3696,6 +3701,54 @@ function stripBasePath(
 }
 
 /**
+ * Tools already reported for a `canAccess` that returned something other than
+ * a boolean, so a session that is refreshed on every request logs it once.
+ */
+const toolsWithInvalidCanAccess = new WeakSet<object>();
+
+/**
+ * Whether a tool's `canAccess` admits `auth`. Only `true` does. `canAccess` is
+ * synchronous, and an `async` one returns a Promise, which is truthy whatever
+ * it resolves to: read for truthiness, it would admit every session it was
+ * written to keep out. Any other non-boolean is refused the same way rather
+ * than guessed at.
+ */
+function toolAdmits<T extends FastMCPSessionAuth>(
+  tool: Tool<T>,
+  auth: T,
+  logger: Logger,
+): boolean {
+  if (!tool.canAccess) {
+    return true;
+  }
+
+  const admitted: unknown = tool.canAccess(auth);
+
+  if (typeof admitted === "boolean") {
+    return admitted;
+  }
+
+  const isPromise =
+    typeof (admitted as null | PromiseLike<unknown>)?.then === "function";
+
+  if (isPromise) {
+    // Nothing awaits it, so a rejection would otherwise go unhandled.
+    Promise.resolve(admitted).catch(() => {});
+  }
+
+  if (admitted && !toolsWithInvalidCanAccess.has(tool)) {
+    toolsWithInvalidCanAccess.add(tool);
+    logger.warn(
+      `[FastMCP warning] Tool '${tool.name}' is hidden: its canAccess returned ${
+        isPromise ? "a Promise" : "a non-boolean value"
+      }. canAccess must return a boolean synchronously.`,
+    );
+  }
+
+  return false;
+}
+
+/**
  * The tools a session may see. With auth, each tool's `canAccess` decides.
  * Without it, a server that does not authenticate at all — no `authenticate`
  * configured — shows every tool, but one that does hides every tool gated by
@@ -3709,11 +3762,10 @@ function toolsVisibleTo<T extends FastMCPSessionAuth>(
   tools: Tool<T>[],
   auth: T | undefined,
   authRequired: boolean,
+  logger: Logger,
 ): Tool<T>[] {
   if (auth) {
-    return tools.filter((tool) =>
-      tool.canAccess ? tool.canAccess(auth) : true,
-    );
+    return tools.filter((tool) => toolAdmits(tool, auth, logger));
   }
 
   return authRequired ? tools.filter((tool) => !tool.canAccess) : tools;

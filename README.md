@@ -754,6 +754,10 @@ server.addTool({
 });
 ```
 
+`canAccess` is synchronous, and only a boolean `true` allows access. An `async`
+function returns a Promise, so the tool it guards is hidden from every session
+and a warning is logged.
+
 A server without an `authenticate` function has no auth to check, so every
 session sees every tool. With one, a session that still ends up without auth —
 on stdio, where the server carries on when `authenticate` throws or returns

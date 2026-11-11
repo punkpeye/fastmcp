@@ -571,23 +571,21 @@ const authProxyNoClaims = new OAuthProxy({
 
 **Using claims for authorization:**
 
+`canAccess` receives the session your `authenticate` function returned, not the
+tool context, and must return a boolean synchronously. A tool whose `canAccess`
+returns anything else is hidden from every session, and an `async` function
+returns a Promise. Put the claims you authorize on in that session: the
+built-in providers do not add them.
+
 ```typescript
 // Example: Role-based access control
 server.addTool({
   name: "admin-dashboard",
   description: "Access admin dashboard",
-  canAccess: async ({ session }) => {
-    const token = session?.headers?.["authorization"]?.replace("Bearer ", "");
-    if (!token) return false;
-
-    // Decode the proxy JWT
-    const payload = JSON.parse(
-      Buffer.from(token.split(".")[1], "base64url").toString(),
-    );
-
-    // Check role claim from upstream IDP
-    return payload.role === "admin" || payload.roles?.includes("admin");
-  },
+  // Check the role your authenticate function took from the verified token
+  canAccess: (auth) =>
+    auth?.role === "admin" ||
+    (Array.isArray(auth?.roles) && auth.roles.includes("admin")),
   execute: async () => {
     return {
       content: [{ type: "text", text: "Admin dashboard data..." }],
@@ -599,17 +597,10 @@ server.addTool({
 server.addTool({
   name: "delete-resource",
   description: "Delete a resource",
-  canAccess: async ({ session }) => {
-    const token = session?.headers?.["authorization"]?.replace("Bearer ", "");
-    if (!token) return false;
-
-    const payload = JSON.parse(
-      Buffer.from(token.split(".")[1], "base64url").toString(),
-    );
-
-    // Check fine-grained permissions
-    return payload.permissions?.includes("resource:delete");
-  },
+  // Check fine-grained permissions
+  canAccess: (auth) =>
+    Array.isArray(auth?.permissions) &&
+    auth.permissions.includes("resource:delete"),
   execute: async (args) => {
     // Delete logic here
     return {
