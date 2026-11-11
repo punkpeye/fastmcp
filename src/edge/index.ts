@@ -33,7 +33,8 @@ import {
   SUPPORTED_PROTOCOL_VERSIONS,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
-import { Hono } from "hono";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
+import { matchedRoutes } from "hono/route";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -184,16 +185,99 @@ export class EdgeFastMCP {
 
   /**
    * Handle an incoming request (main entry point for edge runtimes)
+   *
+   * The runtime's bindings and execution context are passed on to the app, so
+   * middleware can read them: on Cloudflare Workers `c.env` is where a secret
+   * to check a request against comes from.
    */
-  async fetch(request: Request): Promise<Response> {
-    return this.#honoApp.fetch(request);
+  async fetch(
+    request: Request,
+    env?: unknown,
+    executionContext?: unknown,
+  ): Promise<Response> {
+    return this.#honoApp.fetch(
+      request,
+      env as Parameters<Hono["fetch"]>[1],
+      executionContext as Parameters<Hono["fetch"]>[2],
+    );
   }
 
   /**
-   * Get the Hono app for adding custom routes
+   * Get the Hono app for adding custom routes and middleware. Middleware runs
+   * in front of the MCP endpoint as well.
    */
   getApp(): Hono {
     return this.#honoApp;
+  }
+
+  /**
+   * Wraps an MCP route so that middleware registered on the app runs in front
+   * of it.
+   *
+   * Hono runs what matches a request in the order it was registered, and the
+   * MCP routes are registered in the constructor, before `getApp()` can be
+   * called. They answer without calling `next()`, so middleware registered
+   * afterwards never ran for them: an auth check on the MCP path let every
+   * request through. The route runs that middleware itself instead, with the
+   * MCP response where the rest of the chain would be.
+   */
+  #behindMiddleware(
+    respond: (request: Request) => Promise<Response> | Response,
+  ): (c: Context) => Promise<Response> {
+    return async (c) => {
+      const middleware = laterMiddleware(c);
+
+      if (middleware.length === 0) {
+        return respond(c.req.raw);
+      }
+
+      const routeIndex = c.req.routeIndex;
+      let reached = -1;
+
+      // As Hono's own compose runs a chain, ending in the MCP response.
+      const dispatch = async (position: number): Promise<void> => {
+        if (position <= reached) {
+          throw new Error("next() called multiple times");
+        }
+
+        reached = position;
+
+        if (position === middleware.length) {
+          // Middleware that answered and called next() all the same keeps its
+          // answer, as it would in front of any route. The request it turned
+          // away is not run.
+          if (!c.finalized) {
+            c.res = await respond(await readableRequest(c));
+          }
+
+          return;
+        }
+
+        const { handler, index } = middleware[position];
+
+        c.req.routeIndex = index;
+
+        const response = await handler(c, () => dispatch(position + 1));
+
+        if (response && !c.finalized) {
+          c.res = response;
+        }
+      };
+
+      try {
+        await dispatch(0);
+      } finally {
+        c.req.routeIndex = routeIndex;
+      }
+
+      if (!c.finalized) {
+        throw new Error(
+          "Context is not finalized. Did you forget to return a Response object or `await next()`?",
+        );
+      }
+
+      return c.res;
+    };
   }
 
   /**
@@ -744,23 +828,92 @@ export class EdgeFastMCP {
     this.#honoApp.get("/health", (c) => c.text("✓ Ok"));
 
     // MCP endpoint - handles all MCP protocol messages
-    this.#honoApp.post(this.#mcpPath, async (c) => {
-      return this.#handleMcpRequest(c.req.raw);
-    });
+    this.#honoApp.post(
+      this.#mcpPath,
+      this.#behindMiddleware((request) => this.#handleMcpRequest(request)),
+    );
 
     // MCP GET endpoint for SSE streams (server-initiated messages)
-    this.#honoApp.get(this.#mcpPath, async (c) => {
-      return this.#handleMcpSseRequest(c.req.raw);
-    });
+    this.#honoApp.get(
+      this.#mcpPath,
+      this.#behindMiddleware((request) => this.#handleMcpSseRequest(request)),
+    );
 
     // MCP DELETE endpoint for session termination
-    this.#honoApp.delete(this.#mcpPath, async (c) => {
-      const unsupported = unsupportedProtocolVersion(c.req.raw);
-      if (unsupported) {
-        return this.#errorResponse(400, -32000, unsupported);
-      }
+    this.#honoApp.delete(
+      this.#mcpPath,
+      this.#behindMiddleware((request) => {
+        const unsupported = unsupportedProtocolVersion(request);
+        if (unsupported) {
+          return this.#errorResponse(400, -32000, unsupported);
+        }
 
-      return new Response(null, { status: 204 });
-    });
+        return new Response(null, { status: 204 });
+      }),
+    );
   }
+}
+
+/**
+ * The middleware Hono matched for this request that was registered after the
+ * route now running, however it was registered: with `use()`, on a route
+ * group, or under a method.
+ *
+ * Middleware is what takes `next`. A handler that takes only the context
+ * cannot let a request through, so it is a route of its own — a fallback, a
+ * custom 404 — and is left out: it does not replace the MCP endpoint.
+ */
+function laterMiddleware(
+  c: Context,
+): { handler: MiddlewareHandler; index: number }[] {
+  let routes: { handler: unknown }[];
+
+  try {
+    // Read from the request first. An app mounted in one that was built from
+    // another copy of hono is handed that copy's request, which this copy's
+    // helper cannot read.
+    routes = c.req.matchedRoutes ?? matchedRoutes(c);
+  } catch {
+    return [];
+  }
+
+  return routes
+    .map((route, index) => ({
+      handler: route.handler as MiddlewareHandler,
+      index,
+    }))
+    .filter(
+      ({ handler, index }) =>
+        index > c.req.routeIndex && registeredHandler(handler).length !== 1,
+    );
+}
+
+/**
+ * The request with a body that can still be read. Middleware that read it
+ * through `c.req` used the original up, and left Hono's copy of it behind.
+ */
+async function readableRequest(c: Context): Promise<Request> {
+  const request = c.req.raw;
+
+  if (!request.bodyUsed) {
+    return request;
+  }
+
+  return new Request(request.url, {
+    body: await c.req.arrayBuffer(),
+    headers: request.headers,
+    method: request.method,
+  });
+}
+
+/**
+ * The handler a route was registered with. Mounting an app that has its own
+ * error handler into another one (`route()`) wraps each of its handlers, once
+ * per mount, and keeps the one it wrapped under this key.
+ */
+function registeredHandler(handler: MiddlewareHandler): MiddlewareHandler {
+  const wrapped = (handler as { __COMPOSED_HANDLER?: MiddlewareHandler })
+    .__COMPOSED_HANDLER;
+
+  return typeof wrapped === "function" ? registeredHandler(wrapped) : handler;
 }

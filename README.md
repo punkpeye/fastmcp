@@ -406,17 +406,19 @@ FastMCP supports edge runtimes like Cloudflare Workers, enabling deployment of M
 
 > **Note:** Built-in authentication for EdgeFastMCP is planned for a future release. Both FastMCP and EdgeFastMCP use Hono internally, so there's no technical barrier—EdgeFastMCP was simply written before OAuth was added to FastMCP. PRs are welcome to add an `authenticate` option that accepts web `Request` instead of Node.js `http.IncomingMessage`.
 >
-> In the meantime, use Hono middleware:
+> In the meantime, use Hono middleware. Middleware (a handler that takes `next`) runs in front of the MCP endpoint as well as your own routes, however it is registered, so this protects `/mcp`:
 >
 > ```ts
 > const app = server.getApp();
-> app.use("/api/*", async (c, next) => {
+> app.use("/mcp", async (c, next) => {
 >   if (c.req.header("authorization") !== "Bearer secret") {
 >     return c.json({ error: "Unauthorized" }, 401);
 >   }
 >   await next();
 > });
 > ```
+>
+> A handler that takes only the context is a route of its own and does not replace the MCP endpoint. The `/health` route is not covered by middleware.
 
 ##### Cloudflare Workers
 
