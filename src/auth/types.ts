@@ -57,6 +57,8 @@ export interface ClientCode {
   createdAt: Date;
   /** Code expiration timestamp */
   expiresAt: Date;
+  /** Authorization redirect URI; absent on codes issued before it was recorded */
+  redirectUri?: string;
   /** Associated transaction ID */
   transactionId: string;
   /** Upstream tokens obtained from provider */
@@ -469,7 +471,7 @@ export interface TokenRequest {
   code: string;
   code_verifier?: string;
   grant_type: "authorization_code";
-  redirect_uri: string;
+  redirect_uri?: string;
 }
 
 /**

@@ -378,6 +378,20 @@ export class OAuthProxy {
       );
     }
 
+    // RFC 6749 §4.1.3: a supplied redirect_uri must match the authorization
+    // request. OAuth 2.1 draft-13 §10.2 permits omission. Older persisted codes
+    // have no recorded redirect URI, so keep them redeemable until they expire.
+    if (
+      request.redirect_uri &&
+      clientCode.redirectUri !== undefined &&
+      request.redirect_uri !== clientCode.redirectUri
+    ) {
+      throw new OAuthProxyError(
+        "invalid_grant",
+        "redirect_uri does not match the authorization request",
+      );
+    }
+
     // Without client authentication, PKCE is all that binds the code to
     // whoever asked for it, so an unauthenticated exchange must redeem an
     // S256-bound code. `authorize()` already insists on that from public
@@ -1114,6 +1128,7 @@ export class OAuthProxy {
       expiresAt: new Date(
         Date.now() + (this.config.authorizationCodeTtl || 300) * 1000,
       ),
+      redirectUri: transaction.clientCallbackUrl,
       transactionId: transaction.id,
       upstreamTokens,
     };

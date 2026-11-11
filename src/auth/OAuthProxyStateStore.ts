@@ -79,6 +79,7 @@ const clientCodeStorageSchema: z.ZodType<ClientCode> = z.object({
   codeChallengeMethod: z.string(),
   createdAt: storedDateSchema,
   expiresAt: storedDateSchema,
+  redirectUri: z.string().optional(),
   transactionId: z.string(),
   upstreamTokens: upstreamTokenSetStorageSchema,
   used: z.boolean().optional(),
