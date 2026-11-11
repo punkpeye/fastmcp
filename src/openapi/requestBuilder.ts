@@ -69,7 +69,7 @@ export async function executeRequest(
       case "header":
         headers.set(
           mapping.name,
-          encodeHeaderValue(value, mapping.style, mapping.explode),
+          serializeHeaderValue(value, mapping.style, mapping.explode),
         );
         break;
       case "path":
@@ -404,36 +404,6 @@ function encodeFormBody(payload: unknown): string {
   return params.toString();
 }
 
-/** Serialize flat simple-style header objects; retain other header values as-is. */
-function encodeHeaderValue(
-  value: unknown,
-  style: string | undefined,
-  explode: boolean | undefined,
-): string {
-  if (
-    (style === undefined || style === "simple") &&
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  ) {
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (
-      entries.every(([, item]) => item === null || typeof item !== "object")
-    ) {
-      return entries
-        .map(([key, item]) => {
-          const encodedKey = encodePathComponent(key);
-          const encodedValue = encodePathComponent(String(item));
-          return explode === true
-            ? `${encodedKey}=${encodedValue}`
-            : `${encodedKey},${encodedValue}`;
-        })
-        .join(",");
-    }
-  }
-  return String(value);
-}
-
 /** RFC 6570 simple and form expansion escape everything except RFC 3986 unreserved characters. */
 function encodePathComponent(value: string): string {
   return encodeURIComponent(value).replace(
@@ -499,6 +469,39 @@ async function resolveHeaders(
   return typeof headers === "function"
     ? await headers(context)
     : { ...headers };
+}
+
+/**
+ * Flat simple-style header objects use alternating keys/values, or key=value
+ * pairs when exploded. Unlike a path value, a header is sent as given: OpenAPI
+ * 3.2 rules out percent-encoding one, and scalar and array headers are not
+ * encoded either. Other styles/shapes retain their existing string conversion.
+ */
+function serializeHeaderValue(
+  value: unknown,
+  style: string | undefined,
+  explode: boolean | undefined,
+): string {
+  if (
+    (style === undefined || style === "simple") &&
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    const entries = Object.entries(value as Record<string, unknown>);
+
+    if (
+      entries.every(([, item]) => item === null || typeof item !== "object")
+    ) {
+      const separator = explode === true ? "=" : ",";
+
+      return entries
+        .map(([key, item]) => `${key}${separator}${String(item)}`)
+        .join(",");
+    }
+  }
+
+  return String(value);
 }
 
 /**

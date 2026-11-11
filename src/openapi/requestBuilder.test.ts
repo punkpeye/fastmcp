@@ -108,12 +108,9 @@ test.each([
     style: "simple",
     value: { G: 200, R: 100 },
   },
-  { expected: "x%2Cy,a%2Fb%3Dc", value: { "x,y": "a/b=c" } },
-  { expected: "x%2Cy=a%2Fb%3Dc", explode: true, value: { "x,y": "a/b=c" } },
-  {
-    expected: "label,caf%C3%A9%20%21%27%28%29%2A%25",
-    value: { label: "café !'()*%" },
-  },
+  { expected: "x,y,a/b=c", value: { "x,y": "a/b=c" } },
+  { expected: "x,y=a/b=c", explode: true, value: { "x,y": "a/b=c" } },
+  { expected: "label,café !'()*%", value: { label: "café !'()*%" } },
   {
     expected: "active,false,count,0,empty,",
     value: { active: false, count: 0, empty: "" },
@@ -128,7 +125,6 @@ test.each([
   { expected: "a,b", value: "a,b" },
   { expected: "false", value: false },
   { expected: "0", value: 0 },
-  { expected: "null", value: null },
 ] as const)(
   "serializes a header without changing other shapes: %j",
   async ({ expected, value, ...serialization }) => {

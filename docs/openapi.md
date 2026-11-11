@@ -129,7 +129,7 @@ Nested object/array properties and other path styles (such as `matrix` and `labe
 
 Flat object header parameters support `style: simple`, the default for headers. `{ R: 100, G: 200 }` is sent as `R,100,G,200`, or `R=100,G=200` with `explode: true`.
 
-Keys and scalar values are percent-encoded separately before adding separators, following OpenAPI's RFC 6570 simple serialization. For example, `{ "x,y": "a/b=c" }` becomes `x%2Cy,a%2Fb%3Dc`, or `x%2Cy=a%2Fb%3Dc` when exploded. Empty objects produce an empty header value.
+Keys and values are sent as given, like scalar and array headers: OpenAPI 3.2 rules out percent-encoding a header value. A `,` or `=` inside a key or value is therefore not escaped separately from the separators; `{ "x,y": "a/b=c" }` is sent as `x,y,a/b=c`. Empty objects produce an empty header value.
 
 Scalar and array headers retain their existing string conversion. Nested objects/arrays inside header objects and non-simple styles remain unsupported and retain the `"[object Object]"` fallback. Static or callback-provided `headers` values are unchanged.
 

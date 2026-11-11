@@ -19,8 +19,8 @@ test.each([
   "object headers reach HTTP intact: style=%s explode=%s referenced=%s",
   async (style, explode, referenced) => {
     const expected = explode
-      ? "active=false,count=0,name=caf%C3%A9%2Ctea%3Dgreen"
-      : "active,false,count,0,name,caf%C3%A9%2Ctea%3Dgreen";
+      ? "active=false,count=0,name=green tea @ 5:00/day"
+      : "active,false,count,0,name,green tea @ 5:00/day";
     const requests: { header?: string | string[]; url?: string }[] = [];
     const upstream = createServer((request, response) => {
       requests.push({ header: request.headers["x-filter"], url: request.url });
@@ -91,7 +91,7 @@ test.each([
           "X-Filter__header": {
             active: false,
             count: 0,
-            name: "café,tea=green",
+            name: "green tea @ 5:00/day",
           },
           "X-Filter__query": "query value",
         },
