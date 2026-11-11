@@ -3453,6 +3453,50 @@ function cookieHeaders(req: http.IncomingMessage): Record<string, string> {
 }
 
 /**
+ * Whether the address a server is bound to is on this machine alone:
+ * `localhost`, a name under it, or a loopback address, however it is spelled.
+ */
+function isLoopbackHost(host: string): boolean {
+  let name: string;
+
+  try {
+    // The URL parser writes an address one way: `127.1` and `0x7f.0.0.1` as
+    // `127.0.0.1`, `0:0:0:0:0:0:0:1` as `[::1]`.
+    name = new URL(
+      `http://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}`,
+    ).hostname;
+  } catch {
+    return false;
+  }
+
+  // A name may end with the dot of the root zone.
+  return isLoopbackHostname(name.replace(/\.$/, ""));
+}
+
+/**
+ * Whether a host name, as the URL parser writes it, is on this machine alone.
+ */
+function isLoopbackHostname(name: string): boolean {
+  return (
+    name === "localhost" ||
+    name.endsWith(".localhost") ||
+    /^127\.\d+\.\d+\.\d+$/.test(name) ||
+    name === "[::1]" ||
+    // `::ffff:127.0.0.1`, an IPv4 loopback address written for IPv6.
+    /^\[::ffff:7f[\da-f]{2}:[\da-f]{1,4}\]$/.test(name)
+  );
+}
+
+/** Whether `origin` is a page served from this machine. */
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    return isLoopbackHostname(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Whether `transport` is a Streamable HTTP server transport. Duck-typed because
  * mcp-proxy bundles its own copy of the SDK, so `instanceof` would not match.
  */
@@ -3674,6 +3718,18 @@ const OAUTH_INVALID_CLIENT_RESPONSE_HEADERS = {
 } as const;
 
 /**
+ * Which browser origins an HTTP server answers, and the CORS setting that
+ * goes with it.
+ */
+interface OriginPolicy {
+  /** Whether pages of `origin` are answered. Absent when every one is. */
+  allows?: (origin: string) => boolean;
+  cors: boolean | CorsOptions | undefined;
+  /** Why an origin is refused, for the log. */
+  refusal?: string;
+}
+
+/**
  * The scopes an auth object was granted, read from `auth.scopes` the way
  * `requireScopes()` reads it: an array or a `Set`, of which only the strings
  * count.
@@ -3687,6 +3743,71 @@ function grantedScopes(auth: FastMCPSessionAuth): string[] {
       : [];
 
   return values.filter((scope): scope is string => typeof scope === "string");
+}
+
+/**
+ * Text from a request, made safe to write to a log: anything but printable
+ * ASCII is escaped, so that it cannot pose as other output or steer a
+ * terminal.
+ */
+function printable(text: string): string {
+  return text.replace(
+    /[^\x20-\x7e]/g,
+    (character) =>
+      `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+/**
+ * The policy for the browser origins an HTTP server answers.
+ *
+ * A server bound to a loopback address is out of the network's reach, but not
+ * out of a browser's: any page the user has open can send it requests, and a
+ * page whose host name is re-pointed at 127.0.0.1 is same-origin with it. So
+ * unless `cors` says which origins the server means to answer, one bound to
+ * loopback answers pages served from loopback and no others. A server bound
+ * to another address is open to whoever can reach it, and is left as it was.
+ */
+function resolveOriginPolicy(
+  host: string,
+  cors: boolean | CorsOptions | undefined,
+): OriginPolicy {
+  // `true` asks for the CORS defaults, which answer every origin.
+  if (!isLoopbackHost(host) || cors === true) {
+    return { cors };
+  }
+
+  // An empty origin names none, as CORS reads it.
+  if (typeof cors === "object" && cors.origin) {
+    const { origin } = cors;
+
+    if (origin === "*") {
+      return { cors };
+    }
+
+    return {
+      allows:
+        typeof origin === "function"
+          ? origin
+          : (candidate) =>
+              (Array.isArray(origin) ? origin : [origin]).includes(candidate),
+      cors,
+      refusal: "It is not one of the origins httpStream.cors.origin allows.",
+    };
+  }
+
+  return {
+    allows: isLoopbackOrigin,
+    cors:
+      cors === false
+        ? false
+        : // No credentials either: as with every origin, they take one named
+          // in `cors.origin`. A page on another local port is same-site, so
+          // its requests would carry this server's cookies.
+          { ...cors, credentials: undefined, origin: isLoopbackOrigin },
+    refusal:
+      "A server bound to a loopback address answers pages served from loopback only; name the origins to answer in httpStream.cors.origin.",
+  };
 }
 
 /**
@@ -3718,6 +3839,22 @@ async function sendOAuthProxyResponse(
   }
 
   res.writeHead(response.status, headers).end(body);
+}
+
+/**
+ * The origin an `Origin` header names, as CORS compares it. A URL of a scheme
+ * whose pages have no origin of their own, such as an extension's
+ * `chrome-extension://…`, stands for itself, so that it can be allowed by
+ * name. A page with no origin, opened from a file or sandboxed, sends `null`.
+ */
+function serializeOrigin(header: string): string {
+  try {
+    const { origin } = new URL(header);
+
+    return origin === "null" ? header.trim() : origin;
+  } catch {
+    return header.trim();
+  }
 }
 
 function stripBasePath(
@@ -3835,6 +3972,11 @@ export class FastMCP<
   #prompts: InputPrompt<T>[] = [];
   /** The auth provider's base URL, when it supplied the OAuth config. */
   #providerResourceBase: string | undefined;
+  /**
+   * Origins already reported as refused, so that a page retrying does not
+   * fill the log. Capped, since the origin is whatever the request says.
+   */
+  #refusedOrigins = new Set<string>();
   #resources: Resource<T>[] = [];
   #resourcesTemplates: InputResourceTemplate<T>[] = [];
   #serverState: ServerState = ServerState.Stopped;
@@ -4398,6 +4540,11 @@ export class FastMCP<
       );
       this.#useEndpointAsResource(httpConfig.endpoint);
 
+      const originPolicy = resolveOriginPolicy(
+        httpConfig.host,
+        httpConfig.cors,
+      );
+
       if (httpConfig.stateless) {
         // Stateless mode - create new server instance for each request
         this.#logger.info(
@@ -4413,10 +4560,18 @@ export class FastMCP<
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
           ...(authenticate ? { authenticate } : {}),
-          beforeDispatch: ({ message, server }) =>
+          beforeDispatch: ({ message, request, server }) =>
+            this.#originRefusal(request, originPolicy) ??
             this.#answerScopeChallenge(message, server),
-          cors: httpConfig.cors,
+          cors: originPolicy.cors,
           createServer: async (request) => {
+            // Before a session exists, and before `authenticate` is asked.
+            const refusal = this.#originRefusal(request, originPolicy);
+
+            if (refusal) {
+              throw refusal;
+            }
+
             let auth: T | undefined;
 
             if (authenticate) {
@@ -4480,10 +4635,18 @@ export class FastMCP<
 
         this.#httpStreamServer = await startHTTPServer<FastMCPSession<T>>({
           ...(authenticate ? { authenticate } : {}),
-          beforeDispatch: ({ message, server }) =>
+          beforeDispatch: ({ message, request, server }) =>
+            this.#originRefusal(request, originPolicy) ??
             this.#answerScopeChallenge(message, server),
-          cors: httpConfig.cors,
+          cors: originPolicy.cors,
           createServer: async (request) => {
+            // Before a session exists, and before `authenticate` is asked.
+            const refusal = this.#originRefusal(request, originPolicy);
+
+            if (refusal) {
+              throw refusal;
+            }
+
             let auth: T | undefined;
 
             if (authenticate) {
@@ -5518,6 +5681,51 @@ export class FastMCP<
         method,
       });
     }
+  }
+
+  /**
+   * The 403 MCP asks for, for a request a browser sent on behalf of a page
+   * the server does not answer (see `resolveOriginPolicy`). Checked before a
+   * session is created, and for every message posted to one that exists. A
+   * request without an `Origin` header does not come from a page, and passes.
+   */
+  #originRefusal(
+    request: http.IncomingMessage,
+    policy: OriginPolicy,
+  ): Response | undefined {
+    const header = request.headers.origin;
+
+    // An empty header is no origin, as CORS reads it.
+    if (!policy.allows || !header) {
+      return undefined;
+    }
+
+    const origin = serializeOrigin(header);
+
+    if (policy.allows(origin)) {
+      return undefined;
+    }
+
+    const refused = printable(origin.slice(0, 200));
+
+    if (!this.#refusedOrigins.has(refused) && this.#refusedOrigins.size < 50) {
+      this.#refusedOrigins.add(refused);
+      this.#logger.warn(
+        `[FastMCP warning] Refused a request from the origin ${refused}. ${policy.refusal}`,
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        error: {
+          code: -32000,
+          message: `Forbidden: the origin ${refused} is not allowed`,
+        },
+        id: null,
+        jsonrpc: "2.0",
+      }),
+      { headers: { "Content-Type": "application/json" }, status: 403 },
+    );
   }
 
   #parseRuntimeConfig(

@@ -226,7 +226,11 @@ See the [https-server example](src/examples/https-server.ts) for a complete demo
 
 ##### CORS Configuration
 
-By default, FastMCP enables CORS with a standard set of allowed headers. You can customize the CORS behavior by passing a `cors` option:
+By default, FastMCP enables CORS with a standard set of allowed headers.
+
+A server bound to a loopback address, which is the default (`localhost`), answers browser requests from loopback origins only, such as `http://localhost:6274`. A page served from any other origin cannot open a session or send a message: those requests are refused with a 403. A local server is out of the network's reach but not out of a browser's: without this, any web page you visit could call its tools. Requests without an `Origin` header, which is every client that is not a web page, are not affected, and a server bound to another address answers every origin.
+
+To answer pages served from elsewhere, name their origins in `cors.origin`. That list replaces the loopback default, so include a local page's origin too if you use one. Credentials (`credentials: true`) are only granted to origins named there.
 
 ```ts
 server.start({
@@ -234,7 +238,7 @@ server.start({
   httpStream: {
     port: 8080,
     cors: {
-      origin: "http://localhost:3000",
+      origin: ["https://app.example.com", "http://localhost:6274"],
       allowedHeaders: [
         "Content-Type",
         "Authorization",
@@ -252,10 +256,10 @@ server.start({
 
 The `cors` option accepts:
 
-- `true` (default) - enable CORS with default settings
+- `true` - enable CORS for every origin
 - `false` - disable CORS entirely
 - An object with these fields:
-  - `origin` - a string, array of strings, or a function `(origin: string) => boolean`
+  - `origin` - a string, array of strings, or a function `(origin: string) => boolean`. On a server bound to loopback these are the origins it answers, and `"*"` answers all of them. An extension's or app's origin, such as `chrome-extension://…`, can be named as it is
   - `allowedHeaders` - a string or array of strings
   - `methods` - array of allowed HTTP methods
   - `exposedHeaders` - array of headers to expose
