@@ -4150,7 +4150,7 @@ export class FastMCP<
         eventStore?: EventStore;
         host?: string;
         port: number;
-        sseEndpoint?: null | string;
+        sseEndpoint?: `/${string}` | null;
         sslCa?: string;
         sslCert?: string;
         sslKey?: string;
@@ -5422,7 +5422,7 @@ export class FastMCP<
         eventStore?: EventStore;
         host?: string;
         port: number;
-        sseEndpoint?: null | string;
+        sseEndpoint?: `/${string}` | null;
         sslCa?: string;
         sslCert?: string;
         sslKey?: string;
@@ -5440,7 +5440,7 @@ export class FastMCP<
           eventStore?: EventStore;
           host: string;
           port: number;
-          sseEndpoint?: null | string;
+          sseEndpoint?: `/${string}` | null;
           sslCa?: string;
           sslCert?: string;
           sslKey?: string;

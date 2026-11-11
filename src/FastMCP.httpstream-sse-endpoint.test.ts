@@ -1,9 +1,11 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { expect, test } from "vitest";
 
 import { FastMCP } from "./FastMCP.js";
 import { getTestPort } from "./getTestPort.js";
 
-const startServer = async (sseEndpoint: null | string) => {
+const startServer = async (sseEndpoint: `/${string}` | null) => {
   const port = await getTestPort();
 
   const server = new FastMCP({
@@ -86,6 +88,17 @@ test("sseEndpoint moves the legacy SSE endpoint", async () => {
     const old = await openEventStream(port, "/sse");
     expect(old.status).toBe(404);
     await old.body?.cancel();
+
+    // A session opened on the moved endpoint still posts to /messages.
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    await client.connect(
+      new SSEClientTransport(new URL(`http://localhost:${port}/events`)),
+    );
+    try {
+      await client.ping();
+    } finally {
+      await client.close();
+    }
   } finally {
     await server.stop();
   }
