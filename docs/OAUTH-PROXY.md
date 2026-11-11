@@ -313,7 +313,7 @@ server.addTool({
 - [ ] Use strong secrets (minimum 32 bytes)
 - [ ] Set appropriate TTL values
 - [ ] Configure custom claims passthrough (enabled by default)
-- [ ] Implement rate limiting
+- [ ] Implement rate limiting, including on `/oauth/register`: registration is unauthenticated and every registration is kept
 - [ ] Monitor cleanup operations
 
 ## Testing

@@ -45,6 +45,14 @@ import {
 } from "./utils/tokenStore.js";
 
 /**
+ * The most a client registration may store, in bytes of JSON. Registration is
+ * open to anyone and a registration is kept for good, so this is what one
+ * anonymous request can make the server hold. Real registrations are a few
+ * hundred bytes.
+ */
+const MAX_CLIENT_REGISTRATION_BYTES = 32 * 1024;
+
+/**
  * Authorization request parameters owned by the proxy. Entries in
  * `extraAuthorizationParams` with these keys are ignored so configuration
  * can never override the security-critical core of the upstream request.
@@ -747,6 +755,33 @@ export class OAuthProxy {
       );
     }
 
+    const metadata: ProxyDCRClient["metadata"] = {
+      client_name: request.client_name,
+      client_uri: request.client_uri,
+      contacts: request.contacts,
+      jwks: request.jwks,
+      jwks_uri: request.jwks_uri,
+      logo_uri: request.logo_uri,
+      policy_uri: request.policy_uri,
+      scope: request.scope,
+      software_id: request.software_id,
+      software_version: request.software_version,
+      tos_uri: request.tos_uri,
+    };
+
+    // Checked before the redirect URIs are, so that an oversized list is
+    // refused rather than walked.
+    if (
+      Buffer.byteLength(
+        JSON.stringify({ metadata, redirect_uris: request.redirect_uris }),
+      ) > MAX_CLIENT_REGISTRATION_BYTES
+    ) {
+      throw new OAuthProxyError(
+        "invalid_client_metadata",
+        `Client metadata must not exceed ${MAX_CLIENT_REGISTRATION_BYTES} bytes`,
+      );
+    }
+
     // Validate redirect URIs
     for (const uri of request.redirect_uris) {
       if (!this.validateRedirectUri(uri)) {
@@ -787,19 +822,7 @@ export class OAuthProxy {
       callbackUrl: request.redirect_uris[0],
       clientId: proxyClientId,
       clientSecret: proxyClientSecret,
-      metadata: {
-        client_name: request.client_name,
-        client_uri: request.client_uri,
-        contacts: request.contacts,
-        jwks: request.jwks,
-        jwks_uri: request.jwks_uri,
-        logo_uri: request.logo_uri,
-        policy_uri: request.policy_uri,
-        scope: request.scope,
-        software_id: request.software_id,
-        software_version: request.software_version,
-        tos_uri: request.tos_uri,
-      },
+      metadata,
       redirectUris: request.redirect_uris,
       registeredAt: new Date(),
       tokenEndpointAuthMethod,

@@ -497,7 +497,7 @@ Built-in debugging capabilities:
 - [ ] Configure allowed redirect URI patterns
 - [ ] Use strong secrets (minimum 32 bytes)
 - [ ] Set appropriate TTL values
-- [ ] Implement rate limiting on token endpoints
+- [ ] Implement rate limiting on the token and registration endpoints: registration is unauthenticated and every registration is kept
 - [ ] Monitor cleanup operations
 - [ ] Implement proper key rotation procedures
 

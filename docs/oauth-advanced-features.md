@@ -288,7 +288,7 @@ const upstreamTokens = await proxy.loadUpstreamTokens(response.access_token);
 - [ ] Implement proper key rotation procedures
 - [ ] Monitor storage cleanup operations
 - [ ] Use HTTPS for all proxy endpoints
-- [ ] Implement rate limiting on token endpoints
+- [ ] Implement rate limiting on the token and registration endpoints: registration is unauthenticated and every registration is kept
 
 ### Key Management
 
