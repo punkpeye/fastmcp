@@ -427,6 +427,12 @@ export class OAuthProxy {
       if (!valid) {
         throw new OAuthProxyError("invalid_grant", "Invalid PKCE verifier");
       }
+    } else if (request.code_verifier) {
+      // RFC 9700 §4.8.2: a verifier requires a challenge at authorization.
+      throw new OAuthProxyError(
+        "invalid_request",
+        "code_verifier provided without a code_challenge",
+      );
     }
 
     // Return tokens based on token swap setting

@@ -319,6 +319,58 @@ describe("OAuth proxy client authentication", () => {
       expect(viaPost.response.status).toBe(200);
     });
 
+    it("rejects a code_verifier when no code_challenge was sent", async () => {
+      const http = await serve();
+      const { body: client } = await http.register();
+      const issued = await http.authorizeCode(client.client_id, {
+        pkce: false,
+      });
+
+      const redeemed = await http.redeem(issued, {
+        authorization: basic(client.client_id, client.client_secret!),
+        body: { code_verifier: PKCEUtils.generateVerifier() },
+      });
+
+      expect(redeemed.response.status).toBe(400);
+      expect(redeemed.body).toEqual({
+        error: "invalid_request",
+        error_description: "code_verifier provided without a code_challenge",
+      });
+      expect(redeemed.response.headers.get("cache-control")).toBe("no-store");
+      expect(redeemed.response.headers.get("pragma")).toBe("no-cache");
+      expect(redeemed.response.headers.get("content-type")).toContain(
+        "application/json",
+      );
+    });
+
+    it("redeems a code without a code_challenge or code_verifier", async () => {
+      const http = await serve();
+      const { body: client } = await http.register();
+
+      const redeemed = await http.redeem(
+        await http.authorizeCode(client.client_id, { pkce: false }),
+        { authorization: basic(client.client_id, client.client_secret!) },
+      );
+
+      expect(redeemed.response.status).toBe(200);
+      expect(redeemed.body.access_token).toBeTruthy();
+      expect(redeemed.body.token_type).toBe("Bearer");
+    });
+
+    it("redeems a code with its matching S256 code_verifier", async () => {
+      const http = await serve();
+      const { body: client } = await http.register();
+
+      const redeemed = await http.redeem(
+        await http.authorizeCode(client.client_id),
+        { authorization: basic(client.client_id, client.client_secret!) },
+      );
+
+      expect(redeemed.response.status).toBe(200);
+      expect(redeemed.body.access_token).toBeTruthy();
+      expect(redeemed.body.token_type).toBe("Bearer");
+    });
+
     it("cannot have a code redeemed without the secret even when it skipped PKCE", async () => {
       const http = await serve();
       const { body: client } = await http.register();
