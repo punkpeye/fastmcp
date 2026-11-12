@@ -1922,7 +1922,17 @@ export class OAuthProxy {
       id_token: z.string().optional(),
       refresh_expires_in: z.coerce.number().int().positive().optional(),
       refresh_token: z.string().optional(),
-      scope: z.string().optional(),
+      // GitHub separates scopes with commas; RFC 6749 allows commas inside
+      // a scope token, so other providers must keep them unchanged.
+      scope: z
+        .string()
+        .transform((scope) =>
+          this.config.upstreamTokenEndpoint ===
+          "https://github.com/login/oauth/access_token"
+            ? scope.split(/[ ,]+/).filter(Boolean).join(" ")
+            : scope,
+        )
+        .optional(),
       token_type: z.string().optional(),
     });
 
