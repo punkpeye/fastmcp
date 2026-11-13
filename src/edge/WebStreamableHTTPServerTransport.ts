@@ -98,7 +98,48 @@ interface PendingJsonResponse {
   responses: Map<RequestId, JSONRPCMessage>;
 }
 
-const MAXIMUM_MESSAGE_SIZE = 4 * 1024 * 1024; // 4MB
+export const MAXIMUM_MESSAGE_SIZE = 4 * 1024 * 1024; // 4MB
+
+/**
+ * Read a request body as text, giving up once it exceeds
+ * `MAXIMUM_MESSAGE_SIZE`. Returns `null` when the cap is exceeded so the
+ * caller can answer 413 without ever holding the whole body.
+ */
+export const readBodyWithLimit = async (
+  request: Request,
+): Promise<null | string> => {
+  if (!request.body) {
+    return "";
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      size += value.byteLength;
+      if (size > MAXIMUM_MESSAGE_SIZE) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const joined = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(joined);
+};
 
 /**
  * Web-standard Server transport for Streamable HTTP.
@@ -526,7 +567,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
         // A chunked request carries no Content-Length, so the header check
         // above cannot bound it. Measure the bytes actually read and stop at
         // the cap rather than buffering the whole body into memory.
-        const text = await this.readBodyWithLimit(request);
+        const text = await readBodyWithLimit(request);
         if (text === null) {
           return this.createErrorResponse(
             413,
@@ -875,45 +916,6 @@ export class WebStreamableHTTPServerTransport implements Transport {
    */
   private handleUnsupportedRequest(): Response {
     return this.createErrorResponse(405, -32000, "Method not allowed");
-  }
-
-  /**
-   * Read a request body as text, giving up once it exceeds
-   * `MAXIMUM_MESSAGE_SIZE`. Returns `null` when the cap is exceeded so the
-   * caller can answer 413 without ever holding the whole body.
-   */
-  private async readBodyWithLimit(request: Request): Promise<null | string> {
-    if (!request.body) {
-      return "";
-    }
-
-    const reader = request.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        size += value.byteLength;
-        if (size > MAXIMUM_MESSAGE_SIZE) {
-          await reader.cancel();
-          return null;
-        }
-        chunks.push(value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-
-    const joined = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      joined.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return new TextDecoder().decode(joined);
   }
 
   /**
