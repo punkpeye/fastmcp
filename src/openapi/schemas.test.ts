@@ -4,6 +4,7 @@ import type {
   BundledOpenApiDocument,
   HttpRoute,
   OpenApiParameter,
+  OpenApiResponse,
   OpenApiSchema,
 } from "./types.js";
 
@@ -1163,7 +1164,7 @@ test("buildOutputSchema combines all success schemas and retains their reference
   });
 });
 
-test.each([
+test.each<OpenApiResponse>([
   { content: {} },
   { content: { "application/json": { schema: { type: "array" } } } },
   { content: { "text/plain": { schema: { type: "string" } } } },

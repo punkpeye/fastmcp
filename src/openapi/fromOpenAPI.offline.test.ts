@@ -2030,11 +2030,12 @@ test.each([
       },
       servers: [{ url: "https://api.example.com" }],
     };
-    const fetchImpl = vi.fn<typeof fetch>(async () =>
-      new Response(JSON.stringify(payload), {
-        headers: { "content-type": "application/json" },
-        status,
-      }),
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify(payload), {
+          headers: { "content-type": "application/json" },
+          status,
+        }),
     );
     const server = await fromOpenAPI({ fetch: fetchImpl, spec });
     const client = await connect(server);
@@ -2042,7 +2043,10 @@ test.each([
     try {
       const { tools } = await client.listTools();
       expect(tools[0].outputSchema).toMatchObject({ type: "object" });
-      const result = await client.callTool({ arguments: {}, name: "createJob" });
+      const result = await client.callTool({
+        arguments: {},
+        name: "createJob",
+      });
       expect(result.isError).toBeFalsy();
       expect(result.structuredContent).toEqual(payload);
     } finally {

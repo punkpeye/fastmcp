@@ -310,8 +310,8 @@ export function buildOutputSchema(
   route: HttpRoute,
   sharedDefs: Record<string, OpenApiSchema> | undefined,
 ): JsonSchemaObject | undefined {
-  const successEntries = Object.entries(route.responses ?? {}).filter(([code]) =>
-    SUCCESS_STATUS_PATTERN.test(code),
+  const successEntries = Object.entries(route.responses ?? {}).filter(
+    ([code]) => SUCCESS_STATUS_PATTERN.test(code),
   );
 
   if (successEntries.length === 0) {
