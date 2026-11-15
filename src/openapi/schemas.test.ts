@@ -1104,7 +1104,7 @@ test("a query parameter's `style` is threaded into its parameterMap entry", () =
   });
 });
 
-test("buildOutputSchema picks the first 2xx application/json response schema", () => {
+test("buildOutputSchema ignores non-success response schemas", () => {
   const schema = buildOutputSchema(
     route({
       responses: {
@@ -1133,6 +1133,58 @@ test("buildOutputSchema picks the first 2xx application/json response schema", (
     type: "object",
   });
 });
+
+test("buildOutputSchema combines all success schemas and retains their referenced definitions", () => {
+  const completed = {
+    properties: { result: { $ref: "#/$defs/Result" } },
+    required: ["result"],
+    type: "object",
+  };
+  const accepted = {
+    properties: { job: { $ref: "#/$defs/Job" } },
+    required: ["job"],
+    type: "object",
+  };
+  const defs = { Job: { type: "string" }, Result: { type: "integer" } };
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": { content: { "application/json": { schema: completed } } },
+        "202": { content: { "application/json": { schema: accepted } } },
+      },
+    }),
+    defs,
+  );
+
+  expect(schema).toEqual({
+    $defs: defs,
+    anyOf: [completed, accepted],
+    type: "object",
+  });
+});
+
+test.each([
+  { content: {} },
+  { content: { "application/json": { schema: { type: "array" } } } },
+  { content: { "text/plain": { schema: { type: "string" } } } },
+])(
+  "buildOutputSchema skips structured output if any success is incompatible: %j",
+  (response) => {
+    expect(
+      buildOutputSchema(
+        route({
+          responses: {
+            "200": {
+              content: { "application/json": { schema: { type: "object" } } },
+            },
+            "202": response,
+          },
+        }),
+        undefined,
+      ),
+    ).toBeUndefined();
+  },
+);
 
 test("buildOutputSchema reads a JSON response declared with different casing or parameters, preferring an exact application/json", () => {
   const object = (name: string) => ({

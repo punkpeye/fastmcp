@@ -255,8 +255,9 @@ const SUCCESS_STATUS_PATTERN = /^2\d\d$/;
 const MAX_OUTPUT_SCHEMA_DEFS = 50;
 
 /**
- * Builds a tool's `outputSchema` from the route's first declared `2xx`
- * `application/json` response, or `undefined` if there isn't a usable one.
+ * Builds a tool's `outputSchema` from all declared `2xx` responses, combining
+ * object schemas with `anyOf`. Returns `undefined` if any success response
+ * lacks a usable JSON object schema, so valid successes stay plain text.
  *
  * Requires the schema to resolve to an explicit `type: "object"` — a bare
  * `$ref` (very common; a response schema is often just
@@ -309,33 +310,43 @@ export function buildOutputSchema(
   route: HttpRoute,
   sharedDefs: Record<string, OpenApiSchema> | undefined,
 ): JsonSchemaObject | undefined {
-  const successEntry = Object.entries(route.responses ?? {}).find(([code]) =>
+  const successEntries = Object.entries(route.responses ?? {}).filter(([code]) =>
     SUCCESS_STATUS_PATTERN.test(code),
   );
 
-  const declaredSchema = findMediaType(
-    successEntry?.[1].content,
-    "application/json",
-  )?.schema;
-
-  if (!declaredSchema) {
+  if (successEntries.length === 0) {
     return undefined;
   }
 
-  const schema = resolveComponentRef(declaredSchema, sharedDefs);
-  const rewritten = rewriteComponentRefs(schema, true) as OpenApiSchema;
-  const { type } = rewritten;
+  const schemas: OpenApiSchema[] = [];
+  for (const [, response] of successEntries) {
+    const declaredSchema = findMediaType(
+      response.content,
+      "application/json",
+    )?.schema;
 
-  const isObjectShaped =
-    type === "object" || (Array.isArray(type) && type.includes("object"));
+    if (!declaredSchema) {
+      return undefined;
+    }
 
-  if (!isObjectShaped) {
-    return undefined;
+    const schema = resolveComponentRef(declaredSchema, sharedDefs);
+    const rewritten = rewriteComponentRefs(schema, true) as OpenApiSchema;
+    const { type } = rewritten;
+
+    const isObjectShaped =
+      type === "object" || (Array.isArray(type) && type.includes("object"));
+
+    if (!isObjectShaped) {
+      return undefined;
+    }
+
+    // The protocol requires the literal string "object", not an array — see
+    // the doc comment above for why dropping "null" here is safe.
+    schemas.push({ ...rewritten, type: "object" });
   }
 
-  // The protocol requires the literal string "object", not an array — see
-  // the doc comment above for why dropping "null" here is safe.
-  const normalized = { ...rewritten, type: "object" };
+  const normalized =
+    schemas.length === 1 ? schemas[0] : { anyOf: schemas, type: "object" };
   const usedDefs = sharedDefs && filterReferencedDefs(normalized, sharedDefs);
 
   if (usedDefs && Object.keys(usedDefs).length > MAX_OUTPUT_SCHEMA_DEFS) {

@@ -1986,6 +1986,102 @@ test("OpenAPI 3.0's boolean exclusive bounds validate input and keep tools/list 
   }
 });
 
+test.each([
+  { payload: { id: "job-1" }, status: 200 },
+  { payload: { jobId: "job-1" }, status: 202 },
+])(
+  "outputSchema: accepts each declared success response ($status)",
+  async ({ payload, status }) => {
+    const spec = {
+      info: { title: "Jobs API", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/jobs": {
+          post: {
+            operationId: "createJob",
+            responses: {
+              200: {
+                content: {
+                  "application/json": {
+                    schema: {
+                      properties: { id: { type: "string" } },
+                      required: ["id"],
+                      type: "object",
+                    },
+                  },
+                },
+                description: "Completed",
+              },
+              202: {
+                content: {
+                  "application/json": {
+                    schema: {
+                      properties: { jobId: { type: "string" } },
+                      required: ["jobId"],
+                      type: "object",
+                    },
+                  },
+                },
+                description: "Accepted",
+              },
+            },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.com" }],
+    };
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify(payload), {
+        headers: { "content-type": "application/json" },
+        status,
+      }),
+    );
+    const server = await fromOpenAPI({ fetch: fetchImpl, spec });
+    const client = await connect(server);
+
+    try {
+      const { tools } = await client.listTools();
+      expect(tools[0].outputSchema).toMatchObject({ type: "object" });
+      const result = await client.callTool({ arguments: {}, name: "createJob" });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual(payload);
+    } finally {
+      await Promise.all(server.sessions.map((session) => session.close()));
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test("outputSchema: an additional empty success keeps plain-text success results", async () => {
+  const spec = structuredClone(WIDGETS_TYPED_SPEC);
+  Object.assign(spec.paths["/widgets/typed"].post.responses, {
+    204: { description: "No content" },
+  });
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response(null, { status: 204 }),
+  );
+  const server = await fromOpenAPI({ fetch: fetchImpl, spec });
+  const client = await connect(server);
+
+  try {
+    const { tools } = await client.listTools();
+    expect(
+      tools.find((tool) => tool.name === "createTypedWidget")?.outputSchema,
+    ).toBeUndefined();
+    const result = await client.callTool({
+      arguments: { name: "sprocket" },
+      name: "createTypedWidget",
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toBeUndefined();
+  } finally {
+    await Promise.all(server.sessions.map((session) => session.close()));
+    await client.close();
+    await server.stop();
+  }
+});
+
 test("outputSchema: a schema-matching JSON response returns structuredContent", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () =>

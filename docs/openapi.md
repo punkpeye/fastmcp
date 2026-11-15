@@ -85,7 +85,9 @@ Eligibility doesn't check the response's own content type, only the request shap
 
 ## Structured output
 
-When an operation declares a `2xx` `application/json` response schema, its tool is given an `outputSchema`, and a successful call returns `structuredContent` (the parsed response object) instead of just a text blob — so an agent can consume typed fields directly rather than parsing JSON out of a string.
+When every declared `2xx` response has a usable `application/json` object schema, its tool is given an `outputSchema`, and a successful call returns `structuredContent` (the parsed response object) instead of just a text blob — so an agent can consume typed fields directly rather than parsing JSON out of a string.
+
+When several success responses are declared, their object schemas are combined with `anyOf`, so a response matching any declared success schema is accepted. If any success response lacks a usable JSON object schema (for example, an empty `204` response), the tool keeps plain-text output instead.
 
 The response is checked against the advertised schema _before_ being returned as structured content. When a tool has an `outputSchema` but the response doesn't match, isn't a JSON object, is served as `text/plain`, or has an empty body, the call returns a tool error (`isError: true`) containing the response text. This keeps the response visible to clients that validate calls against the advertised schema. Tools without an `outputSchema` keep returning plain-text successes; for example, an array-typed response schema is never wired to `outputSchema` in the first place.
 
