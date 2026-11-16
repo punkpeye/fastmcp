@@ -77,28 +77,121 @@ export function strictInputSchema(
 /**
  * Converts Zod 4 tool parameters by what a call may send (`io: "input"`), so a
  * transformed field advertises the type it parses and a defaulted one is
- * optional. Input-side conversion leaves a plain `z.object()` open, since it
- * strips undeclared keys rather than rejecting them; this closes it, as
- * output-side conversion did, at any depth — including inside arrays, unions
- * and record values, which `strictInputSchema` does not reach. Explicit
- * catchalls (`z.looseObject()`, `.catchall()`) keep what they declare.
+ * optional. Close ordinary object occurrences after conversion, but leave
+ * intersection operands open to each other's keys. Child values start a new
+ * closure context; explicit catchalls, including .strict(), stay as declared.
  */
 export function zodInputSchema(
   schema: z.ZodType,
   target?: "draft-7",
 ): JsonSchema {
-  return z.toJSONSchema(schema, {
+  const jsonSchema = z.toJSONSchema(schema, {
     io: "input",
-    override: ({ jsonSchema, zodSchema }) => {
-      const def = zodSchema._zod.def;
-      if (
-        def.type === "object" &&
-        !def.catchall &&
-        jsonSchema.additionalProperties === undefined
-      ) {
-        jsonSchema.additionalProperties = false;
-      }
-    },
     target,
-  }) as JsonSchema;
+  }) as Record<string, unknown>;
+  const definitionsKey = target === "draft-7" ? "definitions" : "$defs";
+  const definitions: Record<string, unknown> = {};
+  const operands = new Map<string, string>();
+
+  const closeObjects = (value: unknown, operand = false): unknown => {
+    if (!value || typeof value !== "object") return value;
+    const result = { ...(value as Record<string, unknown>) };
+
+    if (
+      operand &&
+      typeof result.$ref === "string" &&
+      (result.$ref === "#" || result.$ref.startsWith("#/"))
+    ) {
+      const reference = result.$ref;
+      let name = operands.get(reference);
+      if (!name) {
+        const path = decodeURIComponent(reference.slice(1)).split("/").slice(1);
+        const referenced = path.reduce<unknown>(
+          (node, key) =>
+            node && typeof node === "object"
+              ? (node as Record<string, unknown>)[
+                  key.replace(/~1/g, "/").replace(/~0/g, "~")
+                ]
+              : undefined,
+          jsonSchema,
+        );
+        if (referenced && typeof referenced === "object") {
+          name = `__fastmcp_operand_${operands.size}`;
+          const existing = jsonSchema[definitionsKey] as object | undefined;
+          while (
+            Object.hasOwn(existing ?? {}, name) ||
+            Object.hasOwn(definitions, name)
+          )
+            name += "_";
+          // Reserve the reference before descending, including through child values.
+          operands.set(reference, name);
+          const copy = { ...(referenced as Record<string, unknown>) };
+          delete copy.$schema;
+          delete copy.$defs;
+          delete copy.definitions;
+          definitions[name] = closeObjects(copy, true);
+        }
+      }
+      if (name) result.$ref = `#/${definitionsKey}/${name}`;
+    }
+
+    if (
+      !operand &&
+      result.type === "object" &&
+      result.properties !== undefined &&
+      result.additionalProperties === undefined
+    ) {
+      result.additionalProperties = false;
+    }
+
+    for (const keyword of ["allOf", "anyOf", "oneOf"]) {
+      const branches = result[keyword];
+      if (Array.isArray(branches)) {
+        // A single allOf branch is Zod's draft-7 reference wrapper, not
+        // an intersection. Only intersections introduce a new exemption.
+        result[keyword] = branches.map((branch) =>
+          closeObjects(
+            branch,
+            operand || (keyword === "allOf" && branches.length > 1),
+          ),
+        );
+      }
+    }
+
+    for (const keyword of ["$defs", "definitions", "properties"]) {
+      const children = result[keyword];
+      if (children && typeof children === "object") {
+        result[keyword] = Object.fromEntries(
+          Object.entries(children).map(([key, child]) => [
+            key,
+            closeObjects(child),
+          ]),
+        );
+      }
+    }
+    for (const keyword of [
+      "additionalItems",
+      "additionalProperties",
+      "items",
+      "prefixItems",
+      "propertyNames",
+    ]) {
+      const child = result[keyword];
+      if (child !== undefined) {
+        result[keyword] = Array.isArray(child)
+          ? child.map((item) => closeObjects(item))
+          : closeObjects(child);
+      }
+    }
+    return result;
+  };
+
+  const closed = closeObjects(jsonSchema) as Record<string, unknown>;
+  if (operands.size > 0) {
+    closed[definitionsKey] = {
+      ...(closed[definitionsKey] as Record<string, unknown>),
+      ...definitions,
+    };
+  }
+  return closed as JsonSchema;
 }

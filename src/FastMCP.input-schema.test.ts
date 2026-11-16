@@ -234,6 +234,178 @@ const acceptsArguments = (schema: object, args: unknown) =>
 
 test.each([
   {
+    args: { cursor: "c1", limit: 10 },
+    name: "a Zod 4 intersection",
+    parameters: z.intersection(
+      z.object({ cursor: z.string() }),
+      z.object({ limit: z.number() }),
+    ),
+  },
+  {
+    args: { cursor: "c1", limit: 10 },
+    name: "a Zod 4 intersection with a union operand",
+    parameters: z
+      .union([
+        z.object({ cursor: z.string() }),
+        z.object({ offset: z.number() }),
+      ])
+      .and(z.object({ limit: z.number() })),
+  },
+])("lists and calls $name parameters", async ({ args, parameters }) => {
+  const server = new FastMCP({ name: "Intersections", version: "1.0.0" });
+  server.addTool({
+    execute: async (value) => JSON.stringify(value),
+    name: "pagination",
+    parameters,
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "intersections-client", version: "1.0.0" });
+
+  try {
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+    const schema = (await client.listTools()).tools[0].inputSchema;
+    expect(parameters.safeParse(args).success).toBe(true);
+    expect(acceptsArguments(schema, args)).toBe(true);
+    expect(acceptsArguments(schema, { ...args, limit: "wrong" })).toBe(false);
+    expect(
+      await client.callTool({ arguments: args, name: "pagination" }),
+    ).toEqual({ content: [{ text: JSON.stringify(args), type: "text" }] });
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});
+
+test.each(["before", "after"])(
+  "keeps nested and reused objects closed %s an intersection occurrence",
+  async (order) => {
+    const shared = z.object({ details: z.object({ name: z.string() }) });
+    const ordinary = z.array(shared);
+    const intersection = shared.and(z.object({ count: z.number() }));
+    const entries = [
+      ["ordinary", ordinary],
+      ["intersection", intersection],
+    ] as const;
+    const schema = await listInputSchema(
+      z.object(
+        Object.fromEntries(
+          order === "before" ? entries : [...entries].reverse(),
+        ),
+      ),
+    );
+    const args = {
+      intersection: { count: 1, details: { name: "Alice" } },
+      ordinary: [{ details: { name: "Alice" } }],
+    };
+
+    expect(acceptsArguments(schema, args)).toBe(true);
+    expect(
+      acceptsArguments(schema, {
+        ...args,
+        intersection: { count: 1, details: { extra: true, name: "Alice" } },
+      }),
+    ).toBe(false);
+    expect(
+      acceptsArguments(schema, {
+        ...args,
+        ordinary: [{ details: { name: "Alice" }, extra: true }],
+      }),
+    ).toBe(false);
+  },
+);
+
+test("keeps a deliberately strict intersection operand closed", async () => {
+  const parameters = z
+    .object({ name: z.string() })
+    .strict()
+    .and(z.object({ count: z.number().optional() }));
+  const schema = await listInputSchema(parameters);
+
+  expect(schema.allOf).toMatchObject([{ additionalProperties: false }, {}]);
+  expect(acceptsArguments(schema, { name: "Alice" })).toBe(true);
+  const extra = { count: 1, name: "Alice" };
+  expect(parameters.safeParse(extra).success).toBe(false);
+  expect(acceptsArguments(schema, extra)).toBe(false);
+});
+
+test("keeps a referenced operand's ordinary occurrences closed", async () => {
+  type Shared = {
+    children?: Shared[];
+    combinedChildren?: ({ count: number } & Shared)[];
+    details: { name: string };
+  };
+  const shared: z.ZodType<Shared> = z.object({
+    get children() {
+      return z.array(shared).optional();
+    },
+    get combinedChildren() {
+      return z.array(shared.and(z.object({ count: z.number() }))).optional();
+    },
+    details: z.object({ name: z.string() }),
+  });
+  const schema = await listInputSchema(
+    z.object({
+      combined: shared.and(z.object({ count: z.number() })),
+      ordinary: z.array(shared),
+    }),
+  );
+  const value = { details: { name: "Alice" } };
+  const args = {
+    combined: {
+      ...value,
+      combinedChildren: [
+        { ...value, combinedChildren: [{ ...value, count: 3 }], count: 2 },
+      ],
+      count: 1,
+    },
+    ordinary: [value],
+  };
+
+  expect(acceptsArguments(schema, args)).toBe(true);
+  expect(
+    acceptsArguments(schema, {
+      ...args,
+      ordinary: [{ ...value, extra: true }],
+    }),
+  ).toBe(false);
+  expect(
+    acceptsArguments(schema, {
+      ...args,
+      combined: { ...args.combined, children: [{ ...value, extra: true }] },
+    }),
+  ).toBe(false);
+});
+
+test.each([
+  {
+    name: "a description",
+    wrap: (schema: z.ZodType) => schema.describe("Recursive input"),
+  },
+  {
+    name: "a default",
+    wrap: (schema: z.ZodType) => schema.default({ name: "Alice" }),
+  },
+])("keeps a recursive object closed with $name", async ({ wrap }) => {
+  const shared = z.object({
+    get children() {
+      return z.array(shared).optional();
+    },
+    name: z.string(),
+  });
+  const schema = await listInputSchema(z.object({ value: wrap(shared) }));
+
+  expect(acceptsArguments(schema, { value: { name: "Alice" } })).toBe(true);
+  expect(
+    acceptsArguments(schema, { value: { extra: true, name: "Alice" } }),
+  ).toBe(false);
+});
+
+test.each([
+  {
     acceptsExtra: true,
     name: "allOf",
     schema: {

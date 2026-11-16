@@ -165,6 +165,43 @@ describe("EdgeFastMCP Standard Schema issue paths", () => {
 });
 
 describe("EdgeFastMCP", () => {
+  it("lists and calls Zod 4 intersection parameters", async () => {
+    const parameters = z.intersection(
+      z.object({ cursor: z.string() }),
+      z.object({ limit: z.number() }),
+    );
+    const server = new EdgeFastMCP({ name: "Intersections", version: "1.0.0" });
+    server.addTool({
+      description: "Accept pagination",
+      execute: async (args) => JSON.stringify(args),
+      name: "pagination",
+      parameters,
+    });
+    const client = new Client({
+      name: "intersections-client",
+      version: "1.0.0",
+    });
+    const transport = new StreamableHTTPClientTransport(
+      new URL("http://localhost/mcp"),
+      { fetch: async (input, init) => server.fetch(new Request(input, init)) },
+    );
+
+    try {
+      await client.connect(transport);
+      const schema = (await client.listTools()).tools[0].inputSchema;
+      const validate = new Ajv2020({ strict: false }).compile(schema);
+      const args = { cursor: "c1", limit: 10 };
+      expect(parameters.safeParse(args).success).toBe(true);
+      expect(validate(args)).toBe(true);
+      expect(validate({ ...args, limit: "wrong" })).toBe(false);
+      expect(
+        await client.callTool({ arguments: args, name: "pagination" }),
+      ).toEqual({ content: [{ text: JSON.stringify(args), type: "text" }] });
+    } finally {
+      await client.close();
+    }
+  });
+
   it.each(
     [
       {
