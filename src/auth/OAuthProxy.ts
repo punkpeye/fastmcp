@@ -378,18 +378,25 @@ export class OAuthProxy {
       );
     }
 
-    // RFC 6749 §4.1.3: a supplied redirect_uri must match the authorization
-    // request. OAuth 2.1 draft-13 §10.2 permits omission. Older persisted codes
-    // have no recorded redirect URI, so keep them redeemable until they expire.
-    if (
-      request.redirect_uri &&
-      clientCode.redirectUri !== undefined &&
-      request.redirect_uri !== clientCode.redirectUri
-    ) {
-      throw new OAuthProxyError(
-        "invalid_grant",
-        "redirect_uri does not match the authorization request",
-      );
+    // RFC 6749 §4.1.3: the token request repeats the authorization request's
+    // redirect_uri, and the two must match. OAuth 2.1 §10.2 lets a client
+    // leave it out because PKCE binds the code instead, so a code issued
+    // without a code_challenge still needs it. Older persisted codes have no
+    // recorded redirect URI, so keep them redeemable until they expire.
+    if (clientCode.redirectUri !== undefined) {
+      if (request.redirect_uri) {
+        if (request.redirect_uri !== clientCode.redirectUri) {
+          throw new OAuthProxyError(
+            "invalid_grant",
+            "redirect_uri does not match the authorization request",
+          );
+        }
+      } else if (!clientCode.codeChallenge) {
+        throw new OAuthProxyError(
+          "invalid_request",
+          "redirect_uri is required for a code issued without PKCE",
+        );
+      }
     }
 
     // Without client authentication, PKCE is all that binds the code to

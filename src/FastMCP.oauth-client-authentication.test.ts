@@ -1,13 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { mkdtemp, rm } from "fs/promises";
-import { tmpdir } from "os";
-import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DCRResponse, OAuthProxyConfig } from "./auth/types.js";
 
 import { OAuthProxy } from "./auth/OAuthProxy.js";
-import { DiskStore } from "./auth/utils/diskStore.js";
 import { JWTIssuer } from "./auth/utils/jwtIssuer.js";
 import { PKCEUtils } from "./auth/utils/pkce.js";
 import { MemoryTokenStorage } from "./auth/utils/tokenStore.js";
@@ -59,8 +55,7 @@ const expectInvalidGrant = (result: TokenResult) => {
 describe("OAuth proxy client authentication", () => {
   const servers: FastMCP[] = [];
   const proxies: OAuthProxy[] = [];
-  const storages: (DiskStore | MemoryTokenStorage)[] = [];
-  const storageDirectories: string[] = [];
+  const storages: MemoryTokenStorage[] = [];
 
   /**
    * Requests the proxy sent to the upstream token endpoint. Every exchange
@@ -124,10 +119,6 @@ describe("OAuth proxy client authentication", () => {
 
     for (const storage of storages.splice(0)) {
       storage.destroy();
-    }
-
-    for (const directory of storageDirectories.splice(0)) {
-      await rm(directory, { force: true, recursive: true });
     }
 
     vi.restoreAllMocks();
@@ -329,50 +320,32 @@ describe("OAuth proxy client authentication", () => {
       expect(result.response.headers.get("cache-control")).toBe("no-store");
     });
 
-    // OAuth 2.1 draft-13 §4.1.3 no longer requires redirect_uri in the token request.
-    it("redeems a code when redirect_uri is omitted", async () => {
+    // OAuth 2.1 §10.2: PKCE binds the code, so the client may leave it out.
+    it("redeems a PKCE-bound code when redirect_uri is omitted", async () => {
       const result = await redeem(undefined);
 
       expect(result.response.status).toBe(200);
       expect(result.body.access_token).toBeTruthy();
     });
 
-    it("keeps the redirect binding of a code persisted in DiskStore", async () => {
-      const directory = await mkdtemp(join(tmpdir(), "fastmcp-redirect-bind-"));
-      storageDirectories.push(directory);
-      const storage = new DiskStore({ directory });
-      storages.push(storage);
-      const issuer = await serve({
-        enableTokenSwap: false,
-        encryptionKey: false,
-        tokenStorage: storage,
-      });
-      const { body: client } = await issuer.register({
-        redirect_uris: [CALLBACK, OTHER_CALLBACK],
-      });
-      const issued = await issuer.authorizeCode(client.client_id, {
-        redirectUri: OTHER_CALLBACK,
-      });
-      const readerStorage = new DiskStore({ directory });
-      storages.push(readerStorage);
-      const reader = await serve({
-        enableTokenSwap: false,
-        encryptionKey: false,
-        tokenStorage: readerStorage,
+    it("needs redirect_uri to redeem a code issued without PKCE", async () => {
+      const http = await serve();
+      const { body: client } = await http.register();
+      const issued = await http.authorizeCode(client.client_id, {
+        pkce: false,
       });
 
-      const result = await reader.token(
-        {
-          code: issued.code,
-          code_verifier: issued.verifier,
-          grant_type: "authorization_code",
-          redirect_uri: CALLBACK,
-        },
+      const result = await http.token(
+        { code: issued.code, grant_type: "authorization_code" },
         basic(client.client_id, client.client_secret!),
       );
 
-      expectInvalidGrant(result);
-      expect(result.body.error_description).toMatch(/redirect_uri/);
+      expect(result.response.status).toBe(400);
+      expect(result.body).toEqual({
+        error: "invalid_request",
+        error_description:
+          "redirect_uri is required for a code issued without PKCE",
+      });
     });
   });
 
