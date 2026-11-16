@@ -2662,3 +2662,114 @@ test("headers() receives the call context, so a token can come from the session"
     await server.stop();
   }
 });
+
+test.each(["3.0.3", "3.1.0"])(
+  "a read-only property in a required list is not required to call the tool (OpenAPI %s)",
+  async (openapi) => {
+    const fetchImpl = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ id: 7, name: "rex" }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const pet = {
+      properties: {
+        id: { readOnly: true, type: "integer" },
+        name: { type: "string" },
+      },
+      required: ["id", "name"],
+      type: "object",
+    };
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        components: { schemas: { Pet: pet } },
+        info: { title: "Pets API", version: "1.0.0" },
+        openapi,
+        paths: {
+          "/pets": {
+            post: {
+              operationId: "createPet",
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Pet" },
+                  },
+                },
+                required: true,
+              },
+              responses: { 201: { description: "Created" } },
+            },
+          },
+          "/pets/{petId}": {
+            get: {
+              operationId: "getPet",
+              parameters: [
+                {
+                  in: "path",
+                  name: "petId",
+                  required: true,
+                  schema: { type: "integer" },
+                },
+              ],
+              responses: {
+                200: {
+                  content: {
+                    "application/json": {
+                      schema: { $ref: "#/components/schemas/Pet" },
+                    },
+                  },
+                  description: "OK",
+                },
+              },
+            },
+          },
+          "/pets/inline": {
+            post: {
+              operationId: "createInlinePet",
+              requestBody: {
+                content: { "application/json": { schema: pet } },
+                required: true,
+              },
+              responses: { 201: { description: "Created" } },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      const byRef = await client.callTool({
+        arguments: { body: { name: "rex" } },
+        name: "createPet",
+      });
+      const inline = await client.callTool({
+        arguments: { name: "rex" },
+        name: "createInlinePet",
+      });
+      const missingName = await client.callTool({
+        arguments: { body: {} },
+        name: "createPet",
+      });
+
+      expect(byRef.isError).toBeFalsy();
+      expect(inline.isError).toBeFalsy();
+      expect(missingName.isError).toBe(true);
+      expect(fetchImpl.mock.calls.map(([, init]) => init?.body)).toEqual([
+        JSON.stringify({ name: "rex" }),
+        JSON.stringify({ name: "rex" }),
+      ]);
+
+      // A response still carries the property, so the output schema keeps it.
+      const { tools } = await client.listTools();
+      expect(
+        tools.find((tool) => tool.name === "getPet")?.outputSchema?.required,
+      ).toEqual(["id", "name"]);
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);
