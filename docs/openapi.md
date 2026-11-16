@@ -98,7 +98,7 @@ An operation whose response schema is unusually large (more than 50 transitively
 Query parameters are serialized according to their declared `style`:
 
 - `deepObject` (e.g. Stripe's `created[gte]=...`, `expand[]=...` filters) expands as bracket-notation pairs.
-- `spaceDelimited` / `pipeDelimited` array values join into a single space- or pipe-separated value.
+- `spaceDelimited` / `pipeDelimited` array values join into a single space- or pipe-separated value, and object values join their keys and values in turn, such as `R|100|G|200` (decoded value).
 - `form` (the default when no style is declared) uses repeated keys for arrays — `tag=a&tag=b` — and property pairs for objects — `R=100&G=200`. With `explode: false`, arrays use a single comma-separated value, such as `fields=id%2Cname` (decoded value: `id,name`), and objects use alternating keys and values, such as `color=R%2C100%2CG%2C200` (decoded value: `R,100,G,200`). Values are URL-encoded; empty form-style arrays and objects are omitted.
 
 Query parameters with `allowReserved: true` preserve query-safe reserved characters such as `/`, `:`, `?`, and `,`, plus existing percent-encoded triples (`%2F` stays `%2F`). Raw `[]#&=+` remain encoded to preserve the query structure and values; HTTP(S) URL serialization also encodes apostrophes. Other unsafe characters and Unicode are percent-encoded. Parameter names and query parameters with `allowReserved: false` or no flag keep their existing encoding.
@@ -107,7 +107,7 @@ For form-style query arrays and objects, `explode` defaults to `true`. Form-body
 
 With `explode: false`, commas inside individual array items or object keys/values are not escaped separately from the separators. For example, `["x,y", "z"]` is sent as `fields=x%2Cy%2Cz`; a server that URL-decodes and then splits on commas cannot distinguish the comma inside the first item from a separator.
 
-Form-style query objects support scalar property values; nested objects/arrays require `deepObject` serialization. Object-valued `spaceDelimited`/`pipeDelimited` queries and cookies are still sent as the literal string `"[object Object]"` (percent-encoded for form-style cookies).
+Form-style, `spaceDelimited` and `pipeDelimited` query objects support scalar property values; nested objects/arrays require `deepObject` serialization. Object-valued cookies are still sent as the literal string `"[object Object]"` (percent-encoded for form-style cookies).
 
 Form-style cookie values (the default) are percent-encoded, leaving only letters, digits and `-._~` as they are, so a value such as `a; b=c` is sent as `a%3B%20b%3Dc` and cannot add a cookie of its own. With OpenAPI 3.2 `style: cookie` the value is sent as given, already escaped by the caller, and a value holding `;` or `,` is refused. Array items are encoded, or checked, one at a time and joined with commas.
 

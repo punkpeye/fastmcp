@@ -291,7 +291,13 @@ function appendQueryValue(
   }
 
   if (style === "spaceDelimited" || style === "pipeDelimited") {
-    const items = Array.isArray(value) ? value : [value];
+    // OpenAPI's style examples serialize an object as its keys and values in
+    // turn, `R|100|G|200`, the way `form` does with `explode: false`.
+    const items = Array.isArray(value)
+      ? value
+      : value !== null && typeof value === "object"
+        ? Object.entries(value as Record<string, unknown>).flat()
+        : [value];
     const separator = style === "spaceDelimited" ? " " : "|";
     query.append(name, items.map(String).join(separator));
     return;
