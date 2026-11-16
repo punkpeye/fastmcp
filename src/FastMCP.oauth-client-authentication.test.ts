@@ -21,12 +21,14 @@ import { getTestPort } from "./getTestPort.js";
  * token with the proxy's own upstream credentials attached.
  *
  * Driven through the server's HTTP endpoints, so the status codes and headers
- * are the ones a client sees. Only the upstream token endpoint is faked.
+ * are the ones a client sees. Only the upstream provider endpoints are faked.
  */
 
 const CALLBACK = "https://client.example.com/callback";
 const OTHER_CALLBACK = "https://client.example.com/other";
 const SIGNING_KEY = "client-authentication-test-signing-key";
+const UPSTREAM_AUTHORIZATION_ENDPOINT =
+  "https://provider.example.com/oauth/authorize";
 const UPSTREAM_TOKEN_ENDPOINT = "https://provider.example.com/oauth/token";
 
 const basic = (clientId: string, secret: string) =>
@@ -72,6 +74,18 @@ describe("OAuth proxy client authentication", () => {
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = input instanceof Request ? input.url : String(input);
+
+      if (url.startsWith(`${UPSTREAM_AUTHORIZATION_ENDPOINT}?`)) {
+        const params = new URL(url).searchParams;
+        const callback = new URL(params.get("redirect_uri")!);
+        callback.searchParams.set("code", "upstream-code");
+        callback.searchParams.set("state", params.get("state")!);
+
+        return new Response(null, {
+          headers: { Location: callback.toString() },
+          status: 302,
+        });
+      }
 
       if (url !== UPSTREAM_TOKEN_ENDPOINT) {
         return realFetch(input, init);
@@ -125,16 +139,18 @@ describe("OAuth proxy client authentication", () => {
   });
 
   /** A proxy behind a running server, and its endpoints as a client sees them. */
-  const serve = async (overrides: Partial<OAuthProxyConfig> = {}) => {
+  const serve = async (
+    overrides: Partial<OAuthProxyConfig> = {},
+    basePath?: `/${string}`,
+  ) => {
     const port = await getTestPort();
-    const base = `http://localhost:${port}`;
+    const base = `http://localhost:${port}${basePath ?? ""}`;
     const proxy = new OAuthProxy({
       allowedRedirectUriPatterns: ["https://client.example.com/*"],
       baseUrl: base,
       consentRequired: false,
       jwtSigningKey: SIGNING_KEY,
-      upstreamAuthorizationEndpoint:
-        "https://provider.example.com/oauth/authorize",
+      upstreamAuthorizationEndpoint: UPSTREAM_AUTHORIZATION_ENDPOINT,
       upstreamClientId: "proxy-client-id",
       upstreamClientSecret: "proxy-client-secret",
       upstreamTokenEndpoint: UPSTREAM_TOKEN_ENDPOINT,
@@ -151,7 +167,10 @@ describe("OAuth proxy client authentication", () => {
       },
       version: "1.0.0",
     });
-    await server.start({ httpStream: { port }, transportType: "httpStream" });
+    await server.start({
+      httpStream: { ...(basePath && { basePath }), port },
+      transportType: "httpStream",
+    });
     servers.push(server);
 
     const register = async (metadata: Record<string, unknown> = {}) => {
@@ -194,13 +213,15 @@ describe("OAuth proxy client authentication", () => {
 
       expect(response.status).toBe(302);
 
-      const state = new URL(response.headers.get("location")!).searchParams.get(
-        "state",
-      )!;
-      const callback = await fetch(
-        `${base}/oauth/callback?code=upstream-code&state=${encodeURIComponent(state)}`,
-        { redirect: "manual" },
-      );
+      const upstream = await fetch(response.headers.get("location")!, {
+        redirect: "manual",
+      });
+      expect(upstream.status).toBe(302);
+
+      const callback = await fetch(upstream.headers.get("location")!, {
+        redirect: "manual",
+      });
+      expect(callback.status, callback.url).toBe(302);
       const code = new URL(callback.headers.get("location")!).searchParams.get(
         "code",
       )!;
@@ -276,6 +297,25 @@ describe("OAuth proxy client authentication", () => {
       token,
     };
   };
+
+  it.each([undefined, "/issuer1"] as const)(
+    "completes authorization with a custom callback path (base path: %s)",
+    async (basePath) => {
+      const http = await serve({ redirectPath: "/auth/cb" }, basePath);
+      const { body: client } = await http.register();
+      const issued = await http.authorizeCode(client.client_id);
+
+      expect(upstreamTokenRequests[0].get("redirect_uri")).toBe(
+        `${http.base}/auth/cb`,
+      );
+
+      const result = await http.redeem(issued, {
+        authorization: basic(client.client_id, client.client_secret!),
+      });
+      expect(result.response.status).toBe(200);
+      expect(result.body.access_token).toBeTruthy();
+    },
+  );
 
   describe("authorization code redirect binding", () => {
     const issueCode = async () => {
