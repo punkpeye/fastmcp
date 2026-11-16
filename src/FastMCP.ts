@@ -2749,6 +2749,10 @@ export class FastMCPSession<
             ),
           );
         } catch (error) {
+          if (error instanceof McpError) {
+            throw error;
+          }
+
           const errorMessage =
             error instanceof Error ? error.message : String(error);
           throw new McpError(
@@ -2873,6 +2877,10 @@ export class FastMCPSession<
               ),
             );
           } catch (error) {
+            if (error instanceof McpError) {
+              throw error;
+            }
+
             const errorMessage =
               error instanceof Error ? error.message : String(error);
             throw new McpError(
