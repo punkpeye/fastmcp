@@ -1080,3 +1080,58 @@ test("a null query, header or cookie value is left out like an undefined one", a
   expect(headers.has("x-trace")).toBe(false);
   expect(headers.has("cookie")).toBe(false);
 });
+
+test.each([
+  {
+    expected: "?ids=a&ids=b",
+    label: "form array",
+    mapping: {},
+    value: ["a", null, "b"],
+  },
+  {
+    expected: "?ids=a%2Cb",
+    label: "form array with explode: false",
+    mapping: { explode: false },
+    value: ["a", null, "b"],
+  },
+  {
+    expected: "?a=1",
+    label: "form object",
+    mapping: {},
+    value: { a: 1, b: null },
+  },
+  {
+    expected: "?ids=a%2C1",
+    label: "form object with explode: false",
+    mapping: { explode: false },
+    value: { a: 1, b: null },
+  },
+  {
+    expected: "?ids=a%7Cb",
+    label: "pipeDelimited array",
+    mapping: { style: "pipeDelimited" },
+    value: ["a", null, "b"],
+  },
+  {
+    expected: "?ids%5Bgte%5D=1&ids%5Bin%5D=x",
+    label: "deepObject object",
+    mapping: { style: "deepObject" },
+    value: { gte: 1, in: ["x", null], lte: null },
+  },
+])(
+  "a null member of a $label query value is left out",
+  async ({ expected, mapping, value }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+    await executeRequest({
+      args: { ids: value },
+      fetchImpl,
+      parameterMap: { ids: { in: "query", name: "ids", ...mapping } },
+      route: route({ path: "/pets" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    expect(new URL(calledUrl).search).toBe(expected);
+  },
+);

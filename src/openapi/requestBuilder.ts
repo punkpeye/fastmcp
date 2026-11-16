@@ -283,6 +283,8 @@ function appendQueryValue(
   value: unknown,
   explode: boolean | undefined,
 ): void {
+  value = withoutNullMembers(value);
+
   if (style === "deepObject") {
     appendBracketPairs(query, name, value);
     return;
@@ -547,4 +549,26 @@ function serializeQuery(
       return `${name}=${expanded}`;
     })
     .join("&");
+}
+
+/**
+ * RFC 6570 treats a null list item or object member as undefined and leaves it
+ * out of the expansion, as `executeRequest` does for a null query value.
+ */
+function withoutNullMembers(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== null)
+      .map((item) => withoutNullMembers(item));
+  }
+
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== null)
+        .map(([key, item]) => [key, withoutNullMembers(item)]),
+    );
+  }
+
+  return value;
 }
