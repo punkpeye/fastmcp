@@ -25,6 +25,7 @@ import { getTestPort } from "./getTestPort.js";
  */
 
 const CALLBACK = "https://client.example.com/callback";
+const OTHER_CALLBACK = "https://client.example.com/other";
 const SIGNING_KEY = "client-authentication-test-signing-key";
 const UPSTREAM_TOKEN_ENDPOINT = "https://provider.example.com/oauth/token";
 
@@ -174,12 +175,15 @@ describe("OAuth proxy client authentication", () => {
     /** authorize -> upstream -> callback: the code the client is handed. */
     const authorizeCode = async (
       clientId: string,
-      { pkce = true }: { pkce?: boolean } = {},
+      {
+        pkce = true,
+        redirectUri = CALLBACK,
+      }: { pkce?: boolean; redirectUri?: string } = {},
     ) => {
       const pair = PKCEUtils.generatePair("S256");
       const response = await authorize({
         client_id: clientId,
-        redirect_uri: CALLBACK,
+        redirect_uri: redirectUri,
         response_type: "code",
         scope: "read",
         ...(pkce && {
@@ -272,6 +276,78 @@ describe("OAuth proxy client authentication", () => {
       token,
     };
   };
+
+  describe("authorization code redirect binding", () => {
+    const issueCode = async () => {
+      const http = await serve();
+      const { body: client } = await http.register({
+        redirect_uris: [CALLBACK, OTHER_CALLBACK],
+      });
+      const issued = await http.authorizeCode(client.client_id, {
+        redirectUri: OTHER_CALLBACK,
+      });
+
+      return { client, http, issued };
+    };
+
+    const redeem = async (redirectUri?: string) => {
+      const { client, http, issued } = await issueCode();
+
+      return http.token(
+        {
+          code: issued.code,
+          code_verifier: issued.verifier,
+          grant_type: "authorization_code",
+          redirect_uri: redirectUri,
+        },
+        basic(client.client_id, client.client_secret!),
+      );
+    };
+
+    it("redeems a code with the matching authorization redirect URI", async () => {
+      const result = await redeem(OTHER_CALLBACK);
+
+      expect(result.response.status).toBe(200);
+      expect(result.body.access_token).toBeTruthy();
+    });
+
+    it("rejects a different registered redirect URI", async () => {
+      const result = await redeem(CALLBACK);
+
+      expectInvalidGrant(result);
+      expect(result.body.error_description).toMatch(/redirect_uri/);
+      expect(result.body.access_token).toBeUndefined();
+      expect(result.response.headers.get("cache-control")).toBe("no-store");
+    });
+
+    // OAuth 2.1 §10.2: PKCE binds the code, so the client may leave it out.
+    it("redeems a PKCE-bound code when redirect_uri is omitted", async () => {
+      const result = await redeem(undefined);
+
+      expect(result.response.status).toBe(200);
+      expect(result.body.access_token).toBeTruthy();
+    });
+
+    it("needs redirect_uri to redeem a code issued without PKCE", async () => {
+      const http = await serve();
+      const { body: client } = await http.register();
+      const issued = await http.authorizeCode(client.client_id, {
+        pkce: false,
+      });
+
+      const result = await http.token(
+        { code: issued.code, grant_type: "authorization_code" },
+        basic(client.client_id, client.client_secret!),
+      );
+
+      expect(result.response.status).toBe(400);
+      expect(result.body).toEqual({
+        error: "invalid_request",
+        error_description:
+          "redirect_uri is required for a code issued without PKCE",
+      });
+    });
+  });
 
   describe("a confidential client", () => {
     it("redeems a code only with its own secret, by either secret method", async () => {
