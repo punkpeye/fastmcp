@@ -192,11 +192,14 @@ export function buildFlatSchema(
   const requiredBodyKeys: string[] = [];
   for (const [name, { required: isRequired, schema }] of bodyProperties) {
     const key = name === "__proto__" ? allocateAlias(`${name}__body`) : name;
-    properties[key] = rewriteComponentRefs(schema);
+    properties[key] = omitReadOnlyRequired(
+      rewriteComponentRefs(schema),
+      "schema",
+    ) as OpenApiSchema;
     parameterMap[key] = { in: "body", name };
     bodyKeys.push(key);
 
-    if (isRequired) {
+    if (isRequired && schema.readOnly !== true) {
       requiredBodyKeys.push(key);
     }
   }
@@ -226,7 +229,10 @@ export function buildFlatSchema(
   const usedDefs = sharedDefs && filterReferencedDefs(properties, sharedDefs);
 
   if (usedDefs) {
-    flatSchema.$defs = usedDefs;
+    flatSchema.$defs = omitReadOnlyRequired(usedDefs, "schemaMap") as Record<
+      string,
+      OpenApiSchema
+    >;
   }
 
   return {
@@ -710,6 +716,59 @@ function normalizeNullable(
   }
 
   return rest;
+}
+
+/**
+ * OpenAPI 3.0 (Schema Object, `readOnly`): a read-only property "SHOULD NOT be
+ * sent as part of the request", and if it is in a `required` list, "the
+ * required will take effect on the response only". A tool's input is the
+ * request, so its read-only names are dropped from every `required` list in
+ * it. Builds new nodes rather than editing them: the shared definitions are
+ * also used by output schemas, where the requirement stands.
+ */
+function omitReadOnlyRequired(value: unknown, mode: WalkMode): unknown {
+  if (mode === "data" || !value || typeof value !== "object") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => omitReadOnlyRequired(item, "schema"));
+  }
+
+  const node = Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+      key,
+      omitReadOnlyRequired(
+        child,
+        mode === "schemaMap" ? "schema" : childMode(key),
+      ),
+    ]),
+  );
+  const { properties, required } = node;
+
+  if (
+    mode === "schema" &&
+    Array.isArray(required) &&
+    properties &&
+    typeof properties === "object"
+  ) {
+    const writable = required.filter(
+      (name) =>
+        !(
+          typeof name === "string" &&
+          Object.hasOwn(properties, name) &&
+          (properties as Record<string, OpenApiSchema>)[name]?.readOnly === true
+        ),
+    );
+
+    if (writable.length > 0) {
+      node.required = writable;
+    } else {
+      delete node.required;
+    }
+  }
+
+  return node;
 }
 
 /**
