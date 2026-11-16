@@ -915,6 +915,27 @@ test.each(["spaceDelimited", "pipeDelimited"] as const)(
 );
 
 test.each([
+  { expected: "B 150 G 200 R 100", style: "spaceDelimited" },
+  { expected: "B|150|G|200|R|100", style: "pipeDelimited" },
+])(
+  "a $style query object joins its keys and values into one value",
+  async ({ expected, style }) => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+    await executeRequest({
+      args: { color: { B: 150, G: 200, R: 100 } },
+      fetchImpl,
+      parameterMap: { color: { in: "query", name: "color", style } },
+      route: route({ method: "get" }),
+      servers: [{ url: "https://api.example.com" }],
+    });
+
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    expect(new URL(calledUrl).searchParams.getAll("color")).toEqual([expected]);
+  },
+);
+
+test.each([
   { expected: ["0,7"], label: "numbers", style: "form", value: [0, 7] },
   {
     expected: ["true,false"],
