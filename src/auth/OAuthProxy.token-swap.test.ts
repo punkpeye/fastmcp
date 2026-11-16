@@ -1,7 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { TokenRequest, TokenStorage, UpstreamTokenSet } from "./types.js";
+import type {
+  TokenRequest,
+  TokenResponse,
+  TokenStorage,
+  UpstreamTokenSet,
+} from "./types.js";
 
 import { OAuthProxy } from "./OAuthProxy.js";
 import {
@@ -308,6 +313,156 @@ describe("OAuthProxy - Token Swap Pattern", () => {
       expect(result).toBeNull();
 
       proxy.destroy();
+    });
+  });
+
+  describe("Access token TTL when the upstream omits expires_in", () => {
+    let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      fetchSpy = vi.spyOn(globalThis, "fetch");
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+    });
+
+    // Form-encoded, as GitHub answers without an Accept header.
+    function mockUpstreamResponse(tokens: Record<string, string>) {
+      fetchSpy.mockResolvedValueOnce(
+        new Response(new URLSearchParams(tokens).toString(), {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+      );
+    }
+
+    async function exchangeCode(proxy: OAuthProxy) {
+      const redirectUri = "https://client.example.com/callback";
+      const client = await proxy.registerClient({
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_method: "none",
+      });
+      const pkce = PKCEUtils.generatePair("S256");
+      const authorization = await proxy.authorize({
+        client_id: client.client_id,
+        code_challenge: pkce.challenge,
+        code_challenge_method: "S256",
+        redirect_uri: redirectUri,
+        response_type: "code",
+      });
+      const state = new URL(
+        authorization.headers.get("Location")!,
+      ).searchParams.get("state")!;
+      const callback = await proxy.handleCallback(
+        new Request(
+          `${baseConfig.baseUrl}/oauth/callback?code=upstream-code&state=${encodeURIComponent(state)}`,
+        ),
+      );
+      const code = new URL(callback.headers.get("Location")!).searchParams.get(
+        "code",
+      )!;
+      const tokens = await proxy.exchangeAuthorizationCode({
+        client_id: client.client_id,
+        code,
+        code_verifier: pkce.verifier,
+        grant_type: "authorization_code",
+        redirect_uri: redirectUri,
+      });
+      return { client, tokens };
+    }
+
+    function accessTokenTtl(tokens: TokenResponse) {
+      const claims = JSON.parse(
+        Buffer.from(tokens.access_token.split(".")[1], "base64url").toString(),
+      ) as { exp: number; iat: number };
+      return { expires_in: tokens.expires_in, jwt: claims.exp - claims.iat };
+    }
+
+    it.each([
+      {
+        accessTokenTtl: 900,
+        expected: 900,
+        name: "uses accessTokenTtl",
+        upstream: {} as Record<string, string>,
+      },
+      {
+        accessTokenTtl: undefined,
+        expected: DEFAULT_ACCESS_TOKEN_TTL_NO_REFRESH,
+        name: "uses the no-refresh default",
+        upstream: {} as Record<string, string>,
+      },
+      {
+        accessTokenTtl: 900,
+        expected: 1234,
+        name: "still prefers an upstream expires_in",
+        upstream: { expires_in: "1234" },
+      },
+    ])("$name", async ({ accessTokenTtl: ttl, expected, upstream }) => {
+      const proxy = new OAuthProxy({ ...baseConfig, accessTokenTtl: ttl });
+      mockUpstreamResponse({
+        access_token: "upstream-access-token",
+        token_type: "Bearer",
+        ...upstream,
+      });
+
+      try {
+        const { tokens } = await exchangeCode(proxy);
+        expect(accessTokenTtl(tokens)).toEqual({
+          expires_in: expected,
+          jwt: expected,
+        });
+      } finally {
+        proxy.destroy();
+      }
+    });
+
+    it("applies accessTokenTtl after a refresh without expires_in", async () => {
+      const proxy = new OAuthProxy({ ...baseConfig, accessTokenTtl: 900 });
+      mockUpstreamResponse({
+        access_token: "upstream-access-token",
+        expires_in: "3600",
+        refresh_token: "upstream-refresh-token",
+        token_type: "Bearer",
+      });
+      mockUpstreamResponse({
+        access_token: "refreshed-upstream-access-token",
+        token_type: "Bearer",
+      });
+
+      try {
+        const { client, tokens } = await exchangeCode(proxy);
+        const refreshed = await proxy.exchangeRefreshToken({
+          client_id: client.client_id,
+          grant_type: "refresh_token",
+          refresh_token: tokens.refresh_token!,
+        });
+        expect(accessTokenTtl(refreshed)).toEqual({
+          expires_in: 900,
+          jwt: 900,
+        });
+      } finally {
+        proxy.destroy();
+      }
+    });
+
+    it("keeps the passthrough response at 3600 seconds", async () => {
+      const proxy = new OAuthProxy({
+        ...baseConfig,
+        accessTokenTtl: 900,
+        enableTokenSwap: false,
+      });
+      mockUpstreamResponse({
+        access_token: "upstream-access-token",
+        token_type: "Bearer",
+      });
+
+      try {
+        const { tokens } = await exchangeCode(proxy);
+        expect(tokens.access_token).toBe("upstream-access-token");
+        expect(tokens.expires_in).toBe(3600);
+      } finally {
+        proxy.destroy();
+      }
     });
   });
 
