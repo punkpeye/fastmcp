@@ -66,11 +66,15 @@ export function extractRoutes(document: BundledOpenApiDocument): HttpRoute[] {
  * `Authorization` "SHALL be ignored": the request body, the response and the
  * security scheme own those headers. Kept as a tool argument, it would let the
  * model replace the `Authorization` header configured through `headers`.
+ * `Proxy-Authorization` and `Cookie` carry credentials the same way, and
+ * cookies are declared with `in: cookie`, so both are ignored as well.
  */
 const IGNORED_HEADER_PARAMETERS = new Set([
   "accept",
   "authorization",
   "content-type",
+  "cookie",
+  "proxy-authorization",
 ]);
 
 function isIgnoredParameter(param: OpenApiParameter): boolean {

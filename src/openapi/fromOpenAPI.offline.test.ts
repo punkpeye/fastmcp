@@ -2396,6 +2396,61 @@ test("Accept, Content-Type and Authorization header parameters are ignored, as O
   }
 });
 
+test("Cookie and Proxy-Authorization header parameters are ignored, so a tool call cannot replace configured credentials", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("ok"));
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    headers: {
+      Cookie: "sid=configured",
+      "Proxy-Authorization": "Basic configured",
+    },
+    spec: {
+      info: { title: "Pets API", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "listPets",
+            parameters: [
+              { in: "header", name: "Cookie", schema: { type: "string" } },
+              {
+                in: "header",
+                name: "proxy-authorization",
+                schema: { type: "string" },
+              },
+              { in: "cookie", name: "theme", schema: { type: "string" } },
+            ],
+            responses: { 200: { description: "OK" } },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.com" }],
+    },
+  });
+  const client = await connect(server);
+
+  try {
+    const { tools } = await client.listTools();
+    expect(Object.keys(tools[0].inputSchema.properties ?? {})).toEqual([
+      "theme",
+    ]);
+
+    const result = await client.callTool({
+      arguments: { theme: "dark" },
+      name: "listPets",
+    });
+    expect(result.isError).toBeFalsy();
+    const [, init] = fetchImpl.mock.calls[0]!;
+    const headers = new Headers(init?.headers);
+    expect(headers.get("cookie")).toBe("sid=configured; theme=dark");
+    expect(headers.get("proxy-authorization")).toBe("Basic configured");
+  } finally {
+    await Promise.all(server.sessions.map((session) => session.close()));
+    await client.close();
+    await server.stop();
+  }
+});
+
 test("a header parameter without a name does not stop the spec from loading", async () => {
   await expect(
     fromOpenAPI({
