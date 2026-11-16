@@ -39,7 +39,11 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 import { strictInputSchema, zodInputSchema } from "../strictInputSchema.js";
-import { unsupportedProtocolVersion } from "./WebStreamableHTTPServerTransport.js";
+import {
+  MAXIMUM_MESSAGE_SIZE,
+  readBodyWithLimit,
+  unsupportedProtocolVersion,
+} from "./WebStreamableHTTPServerTransport.js";
 
 export { WebStreamableHTTPServerTransport } from "./WebStreamableHTTPServerTransport.js";
 export type {
@@ -358,10 +362,21 @@ export class EdgeFastMCP {
       );
     }
 
-    // Parse request body
+    // Parse request body, capped as the edge transport caps it. The
+    // Content-Length check answers early; a chunked body has none, so the
+    // bytes actually read are counted as well.
+    const tooLarge = `Request body too large. Maximum size is ${MAXIMUM_MESSAGE_SIZE} bytes`;
+    const contentLength = Number(request.headers.get("content-length") ?? "0");
+    if (contentLength > MAXIMUM_MESSAGE_SIZE) {
+      return this.#errorResponse(413, -32000, tooLarge);
+    }
     let body: unknown;
     try {
-      body = await request.json();
+      const text = await readBodyWithLimit(request);
+      if (text === null) {
+        return this.#errorResponse(413, -32000, tooLarge);
+      }
+      body = JSON.parse(text);
     } catch {
       return this.#errorResponse(400, -32700, "Parse error: Invalid JSON");
     }
