@@ -13,18 +13,19 @@ import type {
 export const DEFAULT_MAX_OPERATIONS = 40;
 
 const METHOD_PRIORITY: Record<HttpMethod, number> = {
-  delete: 4,
+  delete: 5,
   get: 0,
-  patch: 3,
-  post: 1,
-  put: 2,
+  head: 1,
+  patch: 4,
+  post: 2,
+  put: 3,
 };
 
 /**
  * Filters and orders routes into the set that becomes tools.
  *
  * Deprecated operations are excluded by default. Ordering is deterministic
- * (method priority GET→POST→PUT→PATCH→DELETE, then path) so that, combined
+ * (method priority GET→HEAD→POST→PUT→PATCH→DELETE, then path) so that, combined
  * with `maxTools`, truncation is legible rather than arbitrary.
  */
 export function selectRoutes(

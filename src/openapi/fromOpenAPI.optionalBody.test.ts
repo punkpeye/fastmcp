@@ -358,6 +358,7 @@ test.each(
         "name",
       ]);
       if (method === "head") {
+        expect(result.content).toEqual([{ text: "", type: "text" }]);
         expect(tools[0].outputSchema).toBeUndefined();
         expect(result.structuredContent).toBeUndefined();
       } else if (typedResponse) {

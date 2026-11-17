@@ -81,3 +81,38 @@ test("maxTools throws when the selection still exceeds it", () => {
   const routes = [route({ operationId: "a" }), route({ operationId: "b" })];
   expect(() => selectRoutes(routes, { maxTools: 1 })).toThrow(/maxTools/);
 });
+
+test("HEAD participates in deterministic method/path ordering and selection", () => {
+  const routes = [
+    route({ method: "head", operationId: "head-z", path: "/z" }),
+    route({ method: "delete", operationId: "delete" }),
+    route({ method: "head", operationId: "head-a", path: "/a" }),
+    route({ method: "post", operationId: "post" }),
+    route({ method: "get", operationId: "get" }),
+    route({ method: "patch", operationId: "patch" }),
+    route({ method: "put", operationId: "put" }),
+    route({ deprecated: true, method: "head", operationId: "old-head" }),
+  ];
+  expect(selectRoutes(routes, {}).map((r) => r.operationId)).toEqual([
+    "get",
+    "head-a",
+    "head-z",
+    "post",
+    "put",
+    "patch",
+    "delete",
+  ]);
+  expect(
+    selectRoutes(routes, {
+      exclude: (op) => op.operationId === "head-z",
+      include: (op) => op.method === "head",
+      maxTools: 1,
+    }).map((r) => r.operationId),
+  ).toEqual(["head-a"]);
+  expect(() =>
+    selectRoutes(routes, {
+      include: (op) => op.method === "head",
+      maxTools: 1,
+    }),
+  ).toThrow(/maxTools/);
+});
