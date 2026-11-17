@@ -103,7 +103,11 @@ describe("EdgeFastMCP prompt parameters", () => {
     expect(load).not.toHaveBeenCalled();
   });
 
-  it.each([
+  it.each<{
+    args: Record<string, string> | undefined;
+    expected: Record<string, string>;
+    label: string;
+  }>([
     { args: undefined, expected: {}, label: "omitted arguments" },
     { args: {}, expected: {}, label: "an empty map" },
     {
