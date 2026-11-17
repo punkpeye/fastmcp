@@ -222,3 +222,155 @@ test("optional body requirements follow aliased property names", async () => {
       .issues,
   ).toBeUndefined();
 });
+
+test.each(
+  (["get", "head"] as const).flatMap((method) =>
+    [
+      "application/json",
+      "application/x-www-form-urlencoded",
+      "multipart/form-data",
+    ].flatMap((contentType) =>
+      [false, true].flatMap((required) =>
+        [false, true].map((typedResponse) => ({
+          contentType,
+          method,
+          required,
+          typedResponse,
+        })),
+      ),
+    ),
+  ),
+)(
+  "$method ignores a $contentType request body (required=$required, typedResponse=$typedResponse)",
+  async ({ contentType, method, required, typedResponse }) => {
+    const requests: {
+      body: string;
+      contentType?: string;
+      method?: string;
+      url?: string;
+    }[] = [];
+    const upstream = createServer(async (request, response) => {
+      let body = "";
+      for await (const chunk of request) {
+        body += chunk;
+      }
+      requests.push({
+        body,
+        contentType: request.headers["content-type"],
+        method: request.method,
+        url: request.url,
+      });
+      if (typedResponse) {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ exists: true }));
+      } else {
+        response.end();
+      }
+    });
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    let server: FastMCP | undefined;
+    try {
+      upstream.listen(0, "127.0.0.1");
+      await once(upstream, "listening");
+      const address = upstream.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected a TCP listener");
+      }
+      server = await fromOpenAPI({
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        spec: {
+          info: { title: "Jobs API", version: "1.0.0" },
+          openapi: "3.1.0",
+          paths: {
+            "/jobs/{id}": {
+              [method]: {
+                operationId: "probeJob",
+                parameters: [
+                  {
+                    in: "path",
+                    name: "id",
+                    required: true,
+                    schema: { type: "string" },
+                  },
+                  {
+                    in: "query",
+                    name: "name",
+                    required: true,
+                    schema: { type: "string" },
+                  },
+                ],
+                requestBody: {
+                  content: {
+                    [contentType]: {
+                      schema: {
+                        properties: { payload: { type: "string" } },
+                        type: "object",
+                      },
+                    },
+                  },
+                  required,
+                },
+                responses: {
+                  200: {
+                    description: "OK",
+                    ...(typedResponse
+                      ? {
+                          content: {
+                            "application/json": {
+                              schema: {
+                                properties: { exists: { type: "boolean" } },
+                                required: ["exists"],
+                                type: "object",
+                              },
+                            },
+                          },
+                        }
+                      : {}),
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+      await Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+      const result = await client.callTool({
+        arguments: { id: "job-1", name: "nightly" },
+        name: "probeJob",
+      });
+      expect(result.isError).not.toBe(true);
+      expect(requests).toEqual([
+        {
+          body: "",
+          contentType: undefined,
+          method: method.toUpperCase(),
+          url: "/jobs/job-1?name=nightly",
+        },
+      ]);
+      const { tools } = await client.listTools();
+      expect(Object.keys(tools[0].inputSchema.properties ?? {})).toEqual([
+        "id",
+        "name",
+      ]);
+      if (method === "head") {
+        expect(tools[0].outputSchema).toBeUndefined();
+        expect(result.structuredContent).toBeUndefined();
+      } else if (typedResponse) {
+        expect(result.structuredContent).toEqual({ exists: true });
+      }
+    } finally {
+      await server?.sessions[0]?.close();
+      await client.close();
+      await server?.stop();
+      upstream.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        upstream.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  },
+);

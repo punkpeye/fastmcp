@@ -41,6 +41,8 @@ Tool inputs combine path, query, header, cookie, and body fields. If a parameter
 
 A top-level parameter or flattened body property named `__proto__` also receives an alias, because the schema validator does not validate that literal property name. For example, a path parameter becomes `__proto____path` and a body property becomes `__proto____body`; occupied aliases receive the same numeric suffixes. The HTTP field name remains `__proto__`. This does not rename properties inside nested or whole-body schemas.
 
+HEAD operations become tools too. Like GET, they ignore any declared request body because `fetch` cannot send one. HEAD responses remain empty text results without an `outputSchema`, even when the spec declares a JSON response schema.
+
 ## Choosing which operations become tools
 
 Turning every operation in a large spec into a tool produces a tool list most MCP clients can't work with well. There is no way to make this fully automatic, so `fromOpenAPI` asks you to choose:

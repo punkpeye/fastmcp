@@ -108,9 +108,9 @@ type WalkMode = "data" | "schema" | "schemaMap";
  * Generated aliases that still collide get `_2`, `_3`,
  * ... appended without displacing any bare parameter or body property.
  *
- * `GET` never contributes a request body: `fetch` (and the Fetch spec in
- * general) rejects a body on a GET request, so a tool built from a spec's
- * (legal, if unusual) `GET` + `requestBody` operation would be permanently
+ * `GET` and `HEAD` never contribute a request body: `fetch` (and the Fetch spec in
+ * general) rejects a body on either method, so a tool built from a spec's
+ * (legal, if unusual) `GET`/`HEAD` + `requestBody` operation would be permanently
  * broken. The request body is simply not flattened into the schema for such
  * a route, rather than surfacing a schema that can never actually be called.
  */
@@ -132,7 +132,9 @@ export function buildFlatSchema(
     unsupportedBodyContentType,
     wholeBodyKey,
   } = extractBodyProperties(
-    route.method === "get" ? undefined : route.requestBody,
+    route.method === "get" || route.method === "head"
+      ? undefined
+      : route.requestBody,
     sharedDefs,
   );
 
@@ -316,6 +318,11 @@ export function buildOutputSchema(
   route: HttpRoute,
   sharedDefs: Record<string, OpenApiSchema> | undefined,
 ): JsonSchemaObject | undefined {
+  // HEAD responses have no body, even when they reuse a GET response schema.
+  if (route.method === "head") {
+    return undefined;
+  }
+
   const successEntries = Object.entries(route.responses ?? {}).filter(
     ([code]) => SUCCESS_STATUS_PATTERN.test(code),
   );
