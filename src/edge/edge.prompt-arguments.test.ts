@@ -24,6 +24,54 @@ const getPrompt = async (server: EdgeFastMCP, params: unknown) => {
 };
 
 describe("EdgeFastMCP prompt parameters", () => {
+  it("keeps serving a batch after rejecting malformed prompt arguments", async () => {
+    const server = new EdgeFastMCP({ name: "Test", version: "1.0.0" });
+    const load = vi.fn(async (args: Record<string, string>) =>
+      args.changes.toUpperCase(),
+    );
+    server.addPrompt({
+      arguments: [{ name: "changes", required: true }],
+      load,
+      name: "commit",
+    });
+
+    const response = await server.fetch(
+      new Request("http://localhost/mcp", {
+        body: JSON.stringify([
+          {
+            id: 1,
+            jsonrpc: "2.0",
+            method: "prompts/get",
+            params: { arguments: { changes: 42 }, name: "commit" },
+          },
+          {
+            id: 2,
+            jsonrpc: "2.0",
+            method: "prompts/get",
+            params: { arguments: { changes: "" }, name: "commit" },
+          },
+        ]),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject([
+      { error: { code: ErrorCode.InvalidParams }, id: 1 },
+      {
+        id: 2,
+        result: {
+          messages: [{ content: { text: "", type: "text" }, role: "user" }],
+        },
+      },
+    ]);
+    expect(load).toHaveBeenCalledExactlyOnceWith({ changes: "" });
+  });
+
   it.each([
     { args: null, label: "null" },
     { args: [], label: "an empty array" },
