@@ -805,13 +805,30 @@ export class EdgeFastMCP {
       id,
       jsonrpc: "2.0",
       result: {
-        tools: this.#tools.map((tool) => ({
-          description: tool.description,
-          inputSchema: tool.parameters
+        tools: this.#tools.flatMap((tool) => {
+          const inputSchema = tool.parameters
             ? this.#schemaToJsonSchema(tool.parameters)
-            : { type: "object" },
-          name: tool.name,
-        })),
+            : { type: "object" };
+
+          // Arguments are always an object, so a tool whose parameters
+          // describe anything else could never be called, and the SDK client
+          // rejects a whole tools/list that advertises one. Omitted as in
+          // FastMCP.
+          if (inputSchema.type !== "object") {
+            this.#logger.warn(
+              `[FastMCP warning] Tool '${tool.name}' parameters must describe an object. Omitting the tool from tools/list.`,
+            );
+            return [];
+          }
+
+          return [
+            {
+              description: tool.description,
+              inputSchema,
+              name: tool.name,
+            },
+          ];
+        }),
       },
     } as JSONRPCMessage;
   }

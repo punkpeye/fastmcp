@@ -54,7 +54,7 @@ import { type CorsOptions, startHTTPServer } from "mcp-proxy";
 import { StrictEventEmitter } from "strict-event-emitter-types";
 import { setTimeout as delay } from "timers/promises";
 import parseURITemplate from "uri-templates";
-import { toJsonSchema } from "xsschema";
+import { type JsonSchema, toJsonSchema } from "xsschema";
 import { z } from "zod";
 
 import type { OAuthProxy } from "./auth/OAuthProxy.js";
@@ -3015,26 +3015,24 @@ export class FastMCPSession<
           tools: cachedToolsList,
         };
       }
-      cachedToolsList = await Promise.all(
+      const listedTools = await Promise.all(
         tools.map(async (tool) => {
           // A schema with no JSON Schema form (Date, BigInt, a valibot
           // transform) throws here; keep that from failing the whole list.
-          let inputSchema: SDKTool["inputSchema"];
+          let inputSchema: JsonSchema;
           try {
-            inputSchema = (
-              tool.parameters
-                ? strictInputSchema(
-                    tool.parameters["~standard"].vendor === "zod" &&
-                      "_zod" in tool.parameters
-                      ? zodInputSchema(tool.parameters as z.ZodType, "draft-7")
-                      : await toJsonSchema(tool.parameters),
-                  )
-                : {
-                    additionalProperties: false,
-                    properties: {},
-                    type: "object",
-                  }
-            ) as SDKTool["inputSchema"];
+            inputSchema = tool.parameters
+              ? strictInputSchema(
+                  tool.parameters["~standard"].vendor === "zod" &&
+                    "_zod" in tool.parameters
+                    ? zodInputSchema(tool.parameters as z.ZodType, "draft-7")
+                    : await toJsonSchema(tool.parameters),
+                )
+              : {
+                  additionalProperties: false,
+                  properties: {},
+                  type: "object",
+                };
           } catch (error) {
             this.#logger.warn(
               `[FastMCP warning] Tool '${tool.name}' parameters cannot be converted to JSON Schema; advertising a generic object schema.`,
@@ -3042,32 +3040,47 @@ export class FastMCPSession<
             );
             inputSchema = { type: "object" };
           }
+          if (inputSchema.type !== "object") {
+            this.#logger.warn(
+              `[FastMCP warning] Tool '${tool.name}' parameters must describe an object. Omitting the tool from tools/list.`,
+            );
+            return undefined;
+          }
 
-          let outputSchema: SDKTool["outputSchema"];
+          let outputSchema: JsonSchema | undefined;
           if (tool.outputSchema) {
             try {
               outputSchema = objectRootSchema(
                 await toJsonSchema(tool.outputSchema),
-              ) as SDKTool["outputSchema"];
+              );
             } catch (error) {
               this.#logger.warn(
                 `[FastMCP warning] Tool '${tool.name}' outputSchema cannot be converted to JSON Schema; advertising the tool without it.`,
                 error,
               );
             }
+            if (outputSchema && outputSchema.type !== "object") {
+              this.#logger.warn(
+                `[FastMCP warning] Tool '${tool.name}' outputSchema must describe an object. Omitting the tool from tools/list.`,
+              );
+              return undefined;
+            }
           }
 
           return {
             annotations: tool.annotations,
             description: tool.description,
-            inputSchema,
+            inputSchema: inputSchema as SDKTool["inputSchema"],
             name: tool.name,
-            ...(outputSchema && { outputSchema }),
+            ...(outputSchema && {
+              outputSchema: outputSchema as SDKTool["outputSchema"],
+            }),
             // Pass through _meta for MCP ext-apps UI support (issue #229)
             ...(tool._meta && { _meta: tool._meta }),
           };
         }),
       );
+      cachedToolsList = listedTools.filter((tool) => tool !== undefined);
 
       return {
         tools: cachedToolsList,
