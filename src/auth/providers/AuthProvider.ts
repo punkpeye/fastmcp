@@ -140,7 +140,7 @@ export abstract class AuthProvider<
     }
 
     const authHeader = request.headers?.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (!authHeader || !/^Bearer /i.test(authHeader)) {
       return undefined;
     }
 
