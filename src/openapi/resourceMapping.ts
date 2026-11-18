@@ -88,8 +88,34 @@ export function isEligibleForResource(
       return false;
     }
 
-    const type = resolveComponentRef(param.schema ?? {}, sharedDefs).type;
-    const types = Array.isArray(type) ? type : [type];
-    return !types.includes("array") && !types.includes("object");
+    return !hasStructuredType(param.schema ?? {}, sharedDefs);
+  });
+}
+
+function hasStructuredType(
+  schema: OpenApiSchema,
+  sharedDefs: Record<string, OpenApiSchema> | undefined,
+  seen = new Set<OpenApiSchema>(),
+): boolean {
+  const resolved = resolveComponentRef(schema, sharedDefs);
+  if (seen.has(resolved)) return false;
+  seen.add(resolved);
+
+  const types = Array.isArray(resolved.type) ? resolved.type : [resolved.type];
+  if (types.includes("array") || types.includes("object")) return true;
+
+  // Compositions describe the parameter itself, unlike properties/items.
+  return ["allOf", "anyOf", "oneOf"].some((key) => {
+    const branches = resolved[key];
+    return (
+      Array.isArray(branches) &&
+      branches.some(
+        (branch) =>
+          branch !== null &&
+          typeof branch === "object" &&
+          !Array.isArray(branch) &&
+          hasStructuredType(branch, sharedDefs, seen),
+      )
+    );
   });
 }

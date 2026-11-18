@@ -79,6 +79,8 @@ A `GET` stays a tool instead — even with `resources: true` — when:
 - any of its path/query parameters is array-typed, including component schema references and nullable arrays (OpenAPI's array query serialization and RFC 6570's don't match), or
 - any of its path/query parameters is object-typed, including component schema references and nullable objects (the URI template parser does not preserve the object shape needed for OpenAPI serialization).
 
+Array/object types inside `allOf`, `anyOf`, and `oneOf` branches, including nested compositions and component references, also keep the operation as a tool. Scalar-only compositions remain eligible for resources.
+
 This means a "get by ID" style endpoint typically becomes a resource template, while a "search/filter" endpoint with array- or object-valued query parameters typically stays a tool — which tends to match how each is actually used.
 
 There's no per-operation override for this — an eligible `GET` always maps to a resource when `resources: true`; use `exclude` if you want a specific one to stay a tool instead of being generated at all.
