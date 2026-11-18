@@ -538,6 +538,198 @@ test.each([
 
 test.each([
   {
+    keyword: "allOf",
+    schema: {
+      properties: {
+        plain: {
+          properties: { label: { type: "string" } },
+          required: ["label"],
+          type: "object",
+        },
+        value: {
+          allOf: [
+            {
+              properties: { age: { minimum: 0, type: "integer" } },
+              required: ["age"],
+              type: "object",
+            },
+          ],
+          properties: {
+            meta: {
+              properties: { tag: { type: "string" } },
+              required: ["tag"],
+              type: "object",
+            },
+            name: { type: "string" },
+          },
+          required: ["name"],
+          type: "object",
+        },
+      },
+      required: ["plain", "value"],
+      type: "object",
+    },
+    valid: [{ plain: { label: "ok" }, value: { age: 30, name: "Alice" } }],
+  },
+  {
+    keyword: "$ref with target $id",
+    schema: {
+      $defs: {
+        age: {
+          $id: "https://example.test/schemas/age",
+          properties: { age: { minimum: 0, type: "integer" } },
+          required: ["age"],
+          type: "object",
+        },
+      },
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      properties: {
+        plain: {
+          properties: { label: { type: "string" } },
+          required: ["label"],
+          type: "object",
+        },
+        value: {
+          $ref: "#/$defs/age",
+          properties: { name: { type: "string" } },
+          required: ["name"],
+          type: "object",
+        },
+      },
+      required: ["plain", "value"],
+      type: "object",
+    },
+    valid: [{ plain: { label: "ok" }, value: { age: 30, name: "Alice" } }],
+  },
+  {
+    keyword: "inline if",
+    schema: {
+      properties: {
+        plain: {
+          properties: { label: { type: "string" } },
+          required: ["label"],
+          type: "object",
+        },
+        value: {
+          else: {
+            properties: { phone: { type: "string" } },
+            required: ["phone"],
+          },
+          if: {
+            properties: { kind: { const: "email" } },
+            required: ["kind"],
+            type: "object",
+          },
+          properties: { kind: { enum: ["email", "sms"] } },
+          required: ["kind"],
+          then: {
+            properties: { address: { type: "string" } },
+            required: ["address"],
+          },
+          type: "object",
+        },
+      },
+      required: ["plain", "value"],
+      type: "object",
+    },
+    valid: [
+      {
+        plain: { label: "ok" },
+        value: { address: "alice@example.test", kind: "email" },
+      },
+      { plain: { label: "ok" }, value: { kind: "sms", phone: "5550100" } },
+    ],
+  },
+  {
+    keyword: "referenced if predicate",
+    schema: {
+      $defs: {
+        isEmail: {
+          properties: { kind: { const: "email" } },
+          required: ["kind"],
+          type: "object",
+        },
+      },
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      properties: {
+        plain: {
+          properties: { label: { type: "string" } },
+          required: ["label"],
+          type: "object",
+        },
+        value: {
+          else: {
+            properties: { phone: { type: "string" } },
+            required: ["phone"],
+          },
+          if: { $ref: "#/$defs/isEmail" },
+          properties: { kind: { enum: ["email", "sms"] } },
+          required: ["kind"],
+          then: {
+            properties: { address: { type: "string" } },
+            required: ["address"],
+          },
+          type: "object",
+        },
+      },
+      required: ["plain", "value"],
+      type: "object",
+    },
+    valid: [
+      {
+        plain: { label: "ok" },
+        value: { address: "alice@example.test", kind: "email" },
+      },
+      { plain: { label: "ok" }, value: { kind: "sms", phone: "5550100" } },
+    ],
+  },
+])(
+  "preserves nested composition and keeps ordinary nested objects closed ($keyword)",
+  async ({ schema, valid }) => {
+    const { Ajv2020 } = await import("ajv/dist/2020.js");
+    const server = new FastMCP({
+      name: "Nested Composition",
+      version: "1.0.0",
+    });
+    server.addTool({
+      execute: async (args) => JSON.stringify(args),
+      name: "echo",
+      parameters: jsonSchemaAdapter(schema),
+    });
+    const client = new Client({
+      name: "nested-composition-client",
+      version: "1.0.0",
+    });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+
+    try {
+      await Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+      const {
+        tools: [echo],
+      } = await client.listTools();
+      const validate = new Ajv2020({ strict: false }).compile(echo.inputSchema);
+
+      for (const args of valid) {
+        expect(validate(args), JSON.stringify(validate.errors)).toBe(true);
+        const result = await client.callTool({ arguments: args, name: "echo" });
+        expect(result.isError).toBeFalsy();
+      }
+      expect(
+        validate({ ...valid[0], plain: { extra: true, label: "ok" } }),
+      ).toBe(false);
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
+test.each([
+  {
     name: "a union that also admits a string",
     parameters: z.union([...objectBranches, z.string()]),
   },

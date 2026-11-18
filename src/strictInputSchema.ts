@@ -43,34 +43,7 @@ export function strictInputSchema(
   schema: JsonSchema,
   nested = false,
 ): JsonSchema {
-  const { $ref, additionalProperties, allOf, anyOf, oneOf, properties } =
-    schema;
-
-  if (!nested && ($ref || allOf || anyOf || oneOf)) {
-    return objectRootSchema(schema);
-  }
-
-  const keepsAdditionalProperties =
-    Object.keys(properties ?? {}).length === 0 &&
-    (typeof additionalProperties === "object" ||
-      additionalProperties === true ||
-      (nested && additionalProperties === undefined && !properties));
-
-  const strict = {
-    ...schema,
-    ...(keepsAdditionalProperties ? {} : { additionalProperties: false }),
-    ...(properties && {
-      properties: Object.fromEntries(
-        Object.entries(properties).map(([key, value]) => [
-          key,
-          typeof value === "object" && value.type === "object"
-            ? strictInputSchema(value, true)
-            : value,
-        ]),
-      ),
-    }),
-  };
-
+  const strict = strictSchemaNode(schema, nested, false);
   return nested ? strict : objectRootSchema(strict);
 }
 
@@ -199,4 +172,65 @@ export function zodInputSchema(
     };
   }
   return closed as JsonSchema;
+}
+
+function isSchemaRecord(value: unknown): value is JsonSchema {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function strictSchemaNode(
+  schema: JsonSchema,
+  nested: boolean,
+  operand: boolean,
+): JsonSchema {
+  const { $ref, additionalProperties, allOf, anyOf, oneOf, properties } =
+    schema;
+  const hasConditional = "if" in schema && schema.if !== undefined;
+  const hasComposition = Boolean(
+    $ref || allOf || anyOf || oneOf || hasConditional,
+  );
+  const isObjectSchema = nested
+    ? schema.type === "object"
+    : schema.type === undefined || schema.type === "object";
+
+  const keepsAdditionalProperties =
+    Object.keys(properties ?? {}).length === 0 &&
+    (typeof additionalProperties === "object" ||
+      additionalProperties === true ||
+      (nested && additionalProperties === undefined && !properties));
+
+  const closesNode =
+    !operand && !hasComposition && isObjectSchema && !keepsAdditionalProperties;
+
+  const next: Record<string, unknown> = {
+    ...schema,
+    ...(closesNode ? { additionalProperties: false } : {}),
+  };
+
+  if (properties) {
+    next.properties = Object.fromEntries(
+      Object.entries(properties).map(([key, value]) => [
+        key,
+        isSchemaRecord(value) ? strictSchemaNode(value, true, false) : value,
+      ]),
+    );
+  }
+
+  for (const keyword of ["allOf", "anyOf", "oneOf"] as const) {
+    const branches = (schema as Record<string, unknown>)[keyword];
+    if (Array.isArray(branches)) {
+      next[keyword] = branches.map((branch) =>
+        isSchemaRecord(branch) ? strictSchemaNode(branch, true, true) : branch,
+      );
+    }
+  }
+
+  for (const keyword of ["else", "then"] as const) {
+    const branch = (schema as Record<string, unknown>)[keyword];
+    if (isSchemaRecord(branch)) {
+      next[keyword] = strictSchemaNode(branch, true, true);
+    }
+  }
+
+  return next as JsonSchema;
 }
