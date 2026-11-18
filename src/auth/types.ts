@@ -235,7 +235,8 @@ export interface OAuthProxyConfig {
    * a host name does not reach into a longer one. A `?` in the host may also
    * be read as the start of the query, as in a URL. The patterns are checked
    * again at /oauth/authorize, so a registration they no longer allow cannot
-   * be used. Once
+   * be used. A URI with a fragment (`#…`) is refused whatever the patterns
+   * say, as RFC 6749 §3.1.2 requires. Once
    * registered, the same exact URI must be echoed back at /oauth/authorize —
    * the proxy performs an exact per-client match per RFC 6749 §3.1.2.3.
    *

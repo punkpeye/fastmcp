@@ -33,11 +33,15 @@ describe("allowedRedirectUriPatterns match the host a URI leads to", () => {
 
     return proxy.registerClient({ redirect_uris: [uri] }).then(
       () => true,
-      () => false,
+      (error: unknown) => {
+        expect(error).toMatchObject({ code: "invalid_redirect_uri" });
+        return false;
+      },
     );
   };
 
   it.each([
+    ["https://app.example.com#*", "https://app.example.com#"],
     // The rest of the pattern, carried where the host is not.
     ["https://*.example.com/*", "https://elsewhere.test/a.example.com/cb"],
     ["https://*.example.com/*", "https://elsewhere.test/?x=.example.com/cb"],
@@ -76,7 +80,7 @@ describe("allowedRedirectUriPatterns match the host a URI leads to", () => {
 
   it.each([
     ["https://*.example.com/*", "https://app.example.com/cb"],
-    ["https://*.example.com/*", "https://a.b.example.com/cb?x=1#y"],
+    ["https://*.example.com/*", "https://a.b.example.com/cb?x=1%23y"],
     ["https://*.EXAMPLE.com/*", "https://app.EXAMPLE.com/cb"],
     ["https://app-*.example.com/cb", "https://app-1.example.com/cb"],
     ["https://*", "https://anything.test/any/path?x=1"],
@@ -103,7 +107,6 @@ describe("allowedRedirectUriPatterns match the host a URI leads to", () => {
     ["https://*.example.com?x=*", "https://app.example.com?x=1"],
     ["https://app?.example.com?x=*", "https://app1.example.com?x=1"],
     ["https://app.example.com*", "https://app.example.com:8443/cb"],
-    ["https://app.example.com#*", "https://app.example.com#x"],
     ["https://*", "https://a.b.elsewhere.test:8443/cb"],
     // The host as its author would write it.
     ["https://bücher.example/*", "https://bücher.example/cb"],
@@ -140,6 +143,27 @@ describe("allowedRedirectUriPatterns match the host a URI leads to", () => {
     [undefined, "https://app.example.com/cb"],
   ])("%s still refuses %s", async (pattern, uri) => {
     expect(await accepts(pattern, uri)).toBe(false);
+  });
+
+  // RFC 6749 §3.1.2: a redirect URI MUST NOT include a fragment, whatever the
+  // pattern or the scheme. An encoded `%23` is part of the URI, not a fragment.
+  it.each([
+    [undefined, "http://localhost:54321/callback#frag"],
+    ["*", "https://app.example.com/cb#frag"],
+    ["https://*", "https://app.example.com/cb?x=1#frag"],
+    ["https://app.example.com/*", "https://app.example.com/cb#"],
+    ["myapp://*", "myapp://callback#frag"],
+    ["cursor://*", "cursor://anysphere.cursor-mcp/oauth/callback#"],
+    ["com.example.app:/oauth*", "com.example.app:/oauth2redirect#x"],
+  ])("%s refuses the fragment in %s", async (pattern, uri) => {
+    expect(await accepts(pattern, uri)).toBe(false);
+  });
+
+  it.each([
+    ["myapp://*", "myapp://callback%23frag"],
+    ["com.example.app:/oauth*", "com.example.app:/oauth2redirect?x=%23"],
+  ])("%s accepts the encoded # in %s", async (pattern, uri) => {
+    expect(await accepts(pattern, uri)).toBe(true);
   });
 
   it("refuses authorization for a registration its patterns no longer allow", async () => {
@@ -185,5 +209,50 @@ describe("allowedRedirectUriPatterns match the host a URI leads to", () => {
     expect((await authorize("https://client.example.com/cb")).status).toBe(200);
 
     tokenStorage.destroy();
+  });
+
+  it("refuses authorization for a stored redirect URI with a fragment", async () => {
+    const proxy = new OAuthProxy({
+      allowedRedirectUriPatterns: ["https://client.example.com/*"],
+      baseUrl: "https://proxy.example.com",
+      encryptionKey: false,
+      upstreamAuthorizationEndpoint: "https://provider.example/authorize",
+      upstreamClientId: "upstream-client",
+      upstreamClientSecret: "upstream-secret",
+      upstreamTokenEndpoint: "https://provider.example/token",
+    });
+
+    proxies.push(proxy);
+
+    // Registered before fragments were refused: registerClient() no longer
+    // takes it, so it is written to storage as that registration was.
+    const redirectUris = [
+      "https://client.example.com/cb#frag",
+      "https://client.example.com/cb",
+    ];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (proxy as any).stateStore.saveRegisteredClient({
+      callbackUrl: redirectUris[0],
+      clientId: "stored-client",
+      clientSecret: "stored-secret",
+      metadata: {},
+      redirectUris,
+      registeredAt: new Date(),
+      tokenEndpointAuthMethod: "client_secret_basic",
+    });
+
+    const authorize = (redirectUri: string) =>
+      proxy.authorize({
+        client_id: "stored-client",
+        redirect_uri: redirectUri,
+        response_type: "code",
+      });
+
+    await expect(authorize(redirectUris[0])).rejects.toMatchObject({
+      code: "invalid_request",
+      description: "redirect_uri is no longer allowed",
+    });
+    expect((await authorize(redirectUris[1])).status).toBe(200);
   });
 });
