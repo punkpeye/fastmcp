@@ -30,6 +30,7 @@ import {
   isInitializeRequest,
   JSONRPCMessage,
   LATEST_PROTOCOL_VERSION,
+  McpError,
   SUPPORTED_PROTOCOL_VERSIONS,
 } from "@modelcontextprotocol/sdk/types.js";
 import { StandardSchemaV1 } from "@standard-schema/spec";
@@ -590,6 +591,10 @@ export class EdgeFastMCP {
         result: { messages },
       } as JSONRPCMessage;
     } catch (error) {
+      if (error instanceof McpError) {
+        return this.#rpcError(id, error.code, error.message, error.data);
+      }
+
       return this.#rpcError(
         id,
         ErrorCode.InternalError,
@@ -668,6 +673,10 @@ export class EdgeFastMCP {
         result: { contents: [content] },
       } as JSONRPCMessage;
     } catch (error) {
+      if (error instanceof McpError) {
+        return this.#rpcError(id, error.code, error.message, error.data);
+      }
+
       return this.#rpcError(
         id,
         ErrorCode.InternalError,
@@ -814,9 +823,10 @@ export class EdgeFastMCP {
     id: null | number | string,
     code: number,
     message: string,
+    data?: unknown,
   ): JSONRPCMessage {
     return {
-      error: { code, message },
+      error: { code, ...(data !== undefined && { data }), message },
       id,
       jsonrpc: "2.0",
     } as JSONRPCMessage;
