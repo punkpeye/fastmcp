@@ -1169,7 +1169,7 @@ export class OAuthProxy {
       let errorCode = "server_error";
       let errorDescription: string | undefined;
       try {
-        const error = (await tokenResponse.json()) as {
+        const error = (await this.parseTokenResponseBody(tokenResponse)) as {
           error?: string;
           error_description?: string;
         };
@@ -1422,7 +1422,7 @@ export class OAuthProxy {
       let errorCode = "invalid_grant";
       let errorDescription: string | undefined;
       try {
-        const error = (await tokenResponse.json()) as {
+        const error = (await this.parseTokenResponseBody(tokenResponse)) as {
           error?: string;
           error_description?: string;
         };
@@ -1942,10 +1942,6 @@ export class OAuthProxy {
     scope?: string;
     token_type?: string;
   }> {
-    const contentType = (
-      response.headers.get("content-type") || ""
-    ).toLowerCase();
-
     // Define Zod schema for token response validation
     const tokenResponseSchema = z.object({
       access_token: z.string().min(1, "access_token cannot be empty"),
@@ -1967,15 +1963,9 @@ export class OAuthProxy {
       token_type: z.string().optional(),
     });
 
-    // Check if response is URL-encoded (e.g., GitHub Apps)
-    if (contentType.includes("application/x-www-form-urlencoded")) {
-      const text = await response.text();
-      const params = new URLSearchParams(text);
-
-      this.rejectUpstreamError({
-        error: params.get("error"),
-        error_description: params.get("error_description"),
-      });
+    const payload = await this.parseTokenResponseBody(response);
+    if (payload instanceof URLSearchParams) {
+      const params = payload;
 
       const rawData = {
         access_token: params.get("access_token") || "",
@@ -1994,10 +1984,36 @@ export class OAuthProxy {
       return tokenResponseSchema.parse(rawData);
     }
 
-    // Default to JSON parsing
-    const rawJson = await response.json();
-    this.rejectUpstreamError(rawJson);
-    return tokenResponseSchema.parse(rawJson);
+    this.rejectUpstreamError(payload);
+    return tokenResponseSchema.parse(payload);
+  }
+
+  private async parseTokenResponseBody(response: Response): Promise<unknown> {
+    const type = response.headers.get("content-type")?.toLowerCase() ?? "";
+    const formType = "application/x-www-form-urlencoded";
+    const isForm = response.ok
+      ? type.includes(formType)
+      : withoutOptionalWhitespace(type.split(";", 1)[0]) === formType;
+    if (!isForm) return response.json();
+
+    const text = await response.text();
+    const params = new URLSearchParams(text);
+    const error = params.get("error");
+    if (!response.ok) {
+      // A provider can send JSON even when it declares a form.
+      try {
+        return JSON.parse(text);
+      } catch (cause) {
+        if (!error) throw cause;
+      }
+    }
+    if (error) {
+      return {
+        error,
+        error_description: params.get("error_description") ?? undefined,
+      };
+    }
+    return params;
   }
 
   /**
@@ -2112,7 +2128,7 @@ export class OAuthProxy {
       let errorCode = "invalid_grant";
       let errorDescription: string | undefined = "Upstream refresh failed";
       try {
-        const error = (await tokenResponse.json()) as {
+        const error = (await this.parseTokenResponseBody(tokenResponse)) as {
           error?: string;
           error_description?: string;
         };
