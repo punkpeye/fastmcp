@@ -1,18 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { FastMCP } from "../FastMCP.js";
+import { getTestPort } from "../getTestPort.js";
 import { OAuthProxy } from "./OAuthProxy.js";
 import { PKCEUtils } from "./utils/pkce.js";
 
-/**
- * A passthrough-mode refresh request the proxy will forward: the upstream
- * refresh token is handed out by a code exchange, which binds it to the
- * client. No upstream call is made, so `fetch` can be mocked to fail first.
- */
-const issuePassthroughRefreshRequest = async (
-  proxy: OAuthProxy,
-  refreshToken: string,
-) => {
+const registerTransaction = async (proxy: OAuthProxy) => {
   const redirectUri = "http://localhost:3000/callback";
   const dcr = await proxy.registerClient({ redirect_uris: [redirectUri] });
   const pkce = PKCEUtils.generatePair("S256");
@@ -23,6 +17,13 @@ const issuePassthroughRefreshRequest = async (
     redirect_uri: redirectUri,
     response_type: "code",
   });
+  return { dcr, pkce, redirectUri, transaction };
+};
+
+// Issue a client-bound refresh token without contacting the upstream.
+const issueRefreshRequest = async (proxy: OAuthProxy, refreshToken: string) => {
+  const { dcr, pkce, redirectUri, transaction } =
+    await registerTransaction(proxy);
   const code = await (proxy as any).generateAuthorizationCode(transaction, {
     accessToken: "upstream-access-token",
     expiresIn: 3600,
@@ -32,7 +33,7 @@ const issuePassthroughRefreshRequest = async (
     tokenType: "Bearer",
   });
 
-  await proxy.exchangeAuthorizationCode({
+  const tokens = await proxy.exchangeAuthorizationCode({
     client_id: dcr.client_id,
     client_secret: dcr.client_secret,
     code,
@@ -43,9 +44,9 @@ const issuePassthroughRefreshRequest = async (
 
   return {
     client_id: dcr.client_id,
-    client_secret: dcr.client_secret,
+    client_secret: dcr.client_secret!,
     grant_type: "refresh_token" as const,
-    refresh_token: refreshToken,
+    refresh_token: tokens.refresh_token!,
   };
 };
 
@@ -462,6 +463,72 @@ describe("OAuthProxy - Token Response Parsing", () => {
   });
 
   describe("upstream error response handling", () => {
+    it.each([
+      "authorization-code exchange",
+      "passthrough refresh",
+      "token-swap refresh",
+    ])(
+      "returns the same HTTP error for form and JSON during %s",
+      async (path) => {
+        const port = await getTestPort();
+        const baseUrl = `http://localhost:${port}`;
+        const proxy = new OAuthProxy({
+          ...baseConfig,
+          baseUrl,
+          enableTokenSwap: path === "token-swap refresh",
+        });
+        const server = new FastMCP({
+          name: "test",
+          oauth: {
+            authorizationServer: proxy.getAuthorizationServerMetadata(),
+            enabled: true,
+            proxy,
+          },
+          version: "1.0.0",
+        });
+        const clientFetch = globalThis.fetch;
+        const send = async () => {
+          if (path === "authorization-code exchange") {
+            const { transaction } = await registerTransaction(proxy);
+            return clientFetch(
+              `${baseUrl}/oauth/callback?code=test&state=${transaction.id}`,
+              { redirect: "manual" },
+            );
+          }
+          const request = await issueRefreshRequest(proxy, "upstream-refresh");
+          return clientFetch(`${baseUrl}/oauth/token`, {
+            body: new URLSearchParams(request),
+            method: "POST",
+          });
+        };
+        const error = {
+          error: "bad_verification_code",
+          error_description: "Grant rejected + expired.",
+        };
+        const payload = { ...error, error_uri: "https://provider.com/docs" };
+        const upstream = vi.spyOn(globalThis, "fetch");
+        try {
+          await server.start({
+            httpStream: { port },
+            transportType: "httpStream",
+          });
+          for (const body of [
+            Response.json(payload, { status: 400 }),
+            new Response(new URLSearchParams(payload), { status: 400 }),
+          ]) {
+            upstream.mockResolvedValue(body);
+            const response = await send();
+            expect(response.status).toBe(400);
+            expect(await response.text()).toBe(JSON.stringify(error));
+          }
+        } finally {
+          upstream.mockRestore();
+          proxy.destroy();
+          await server.stop();
+        }
+      },
+    );
+
     it("should handle non-JSON error from upstream token endpoint without crashing", async () => {
       // Disable token swap so exchangeRefreshToken goes through handlePassthroughRefresh
       const proxy = new OAuthProxy({
@@ -469,28 +536,32 @@ describe("OAuthProxy - Token Response Parsing", () => {
         enableTokenSwap: false,
       });
 
-      const request = await issuePassthroughRefreshRequest(
-        proxy,
-        "test-refresh-token",
-      );
+      const request = await issueRefreshRequest(proxy, "test-refresh-token");
 
       // Mock global fetch to return an HTML error page (e.g. load balancer 502)
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () =>
-        new Response("<html><body>502 Bad Gateway</body></html>", {
-          headers: { "Content-Type": "text/html" },
-          status: 502,
-          statusText: "Bad Gateway",
-        });
+        new Response(
+          '<a href="/help?status=502&error=busy&retry=1">Bad Gateway</a>',
+          {
+            headers: {
+              "Content-Type":
+                'text/html; profile="application/x-www-form-urlencoded"',
+            },
+            status: 502,
+            statusText: "Bad Gateway",
+          },
+        );
 
       try {
-        // For HTTP-level errors (non-OAuth), description contains the HTTP status.
-        const err = await proxy
-          .exchangeRefreshToken(request)
-          .catch((e: any) => e);
-
-        expect(err.name).toBe("OAuthProxyError");
-        expect(err.description).toMatch(/Upstream returned HTTP 502/);
+        await expect(proxy.exchangeRefreshToken(request)).rejects.toMatchObject(
+          {
+            code: "invalid_grant",
+            description: "Upstream returned HTTP 502 Bad Gateway",
+            name: "OAuthProxyError",
+            statusCode: 400,
+          },
+        );
       } finally {
         globalThis.fetch = originalFetch;
         proxy.destroy();
@@ -503,10 +574,7 @@ describe("OAuthProxy - Token Response Parsing", () => {
         enableTokenSwap: false,
       });
 
-      const request = await issuePassthroughRefreshRequest(
-        proxy,
-        "expired-token",
-      );
+      const request = await issueRefreshRequest(proxy, "expired-token");
 
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () =>
