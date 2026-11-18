@@ -1,7 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { describe, expect, it } from "vitest";
+import { getEventListeners } from "node:events";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { FastMCP } from "./FastMCP.js";
@@ -10,6 +11,7 @@ import { getTestPort } from "./getTestPort.js";
 const runWithTestServer = async ({
   run,
   server: createServer,
+  stateless = false,
 }: {
   run: ({
     client,
@@ -19,12 +21,13 @@ const runWithTestServer = async ({
     server: FastMCP;
   }) => Promise<void>;
   server: () => Promise<FastMCP>;
+  stateless?: boolean;
 }) => {
   const port = await getTestPort();
   const server = await createServer();
 
   await server.start({
-    httpStream: { port },
+    httpStream: { port, stateless },
     transportType: "httpStream",
   });
 
@@ -40,6 +43,7 @@ const runWithTestServer = async ({
   await client.connect(transport);
 
   try {
+    await client.listTools();
     await run({ client, server });
   } finally {
     await client.close().catch(() => {});
@@ -75,12 +79,15 @@ const abortReason = (signal: AbortSignal, timeoutMs = 2000) =>
   });
 
 describe("Tool Execution AbortSignal and Cancellation", () => {
-  it("passes an active AbortSignal in tool execution context", async () => {
+  it("keeps a completed call's signal active after close", async () => {
     let capturedSignal: AbortSignal | undefined;
+    let notifyAfterClose: (() => Promise<void>) | undefined;
+    const logger = { ...console, error: vi.fn(), warn: vi.fn() };
 
     await runWithTestServer({
-      run: async ({ client }) => {
+      run: async ({ client, server }) => {
         const result = await client.callTool({
+          _meta: { progressToken: "test-progress" },
           arguments: {},
           name: "checkSignal",
         });
@@ -96,20 +103,68 @@ describe("Tool Execution AbortSignal and Cancellation", () => {
         // once its timeout would have elapsed.
         await new Promise((resolve) => setTimeout(resolve, 50));
         expect(capturedSignal?.aborted).toBe(false);
+
+        await server.stop();
+        expect(capturedSignal?.aborted).toBe(false);
+
+        logger.warn.mockClear();
+        logger.error.mockClear();
+        expect(notifyAfterClose).toBeDefined();
+        await notifyAfterClose!();
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(logger.warn).not.toHaveBeenCalled();
+        expect(logger.error).not.toHaveBeenCalled();
       },
       server: async () => {
-        const server = new FastMCP({ name: "Test", version: "1.0.0" });
+        const server = new FastMCP({ logger, name: "Test", version: "1.0.0" });
         server.addTool({
           description: "Checks signal in context",
           execute: async (_args, context) => {
             capturedSignal = context.signal;
+            notifyAfterClose = async () => {
+              await context.reportProgress({ progress: 1, total: 2 });
+              await context.streamContent({ text: "late", type: "text" });
+              context.log.info("after close");
+            };
             return "ok";
           },
           name: "checkSignal",
           parameters: z.object({}),
+          timeoutMs: 20,
         });
         return server;
       },
+    });
+  });
+
+  it("keeps a completed stateless HTTP call's signal active after the response", async () => {
+    let capturedSignal: AbortSignal | undefined;
+
+    await runWithTestServer({
+      run: async ({ client }) => {
+        await expect(
+          client.callTool({ arguments: {}, name: "work" }),
+        ).resolves.toEqual({
+          content: [{ text: "ok", type: "text" }],
+        });
+
+        // Allow the per-request stateless session to finish closing.
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(capturedSignal?.aborted).toBe(false);
+      },
+      server: async () => {
+        const server = new FastMCP({ name: "Test", version: "1.0.0" });
+        server.addTool({
+          execute: async (_args, context) => {
+            capturedSignal = context.signal;
+            return "ok";
+          },
+          name: "work",
+          parameters: z.object({}),
+        });
+        return server;
+      },
+      stateless: true,
     });
   });
 
@@ -191,6 +246,7 @@ describe("Tool Execution AbortSignal and Cancellation", () => {
       client.connect(clientTransport),
     ]);
 
+    await client.listTools();
     const call = client
       .callTool({ arguments: {}, name: "slowTool" })
       .catch(() => "dropped");
@@ -278,31 +334,41 @@ describe("Tool Execution AbortSignal and Cancellation", () => {
     });
   });
 
-  it("keeps the signal live for a tool that throws synchronously", async () => {
-    await runWithTestServer({
-      run: async ({ client }) => {
-        const result = await client.callTool({
-          arguments: {},
-          name: "throwsSync",
-        });
+  it("detaches the abort listener when a tool throws synchronously", async () => {
+    let sourceSignal: AbortSignal | undefined;
+    const compose = vi.spyOn(AbortSignal, "any");
 
-        expect(result).toMatchObject({ isError: true });
-      },
-      server: async () => {
-        const server = new FastMCP({ name: "Test", version: "1.0.0" });
-        server.addTool({
-          description: "Throws before returning a promise",
-          // Not `async`: this throws during the call itself, before FastMCP
-          // ever has a promise to hang cleanup off.
-          execute: () => {
-            throw new Error("boom");
-          },
-          name: "throwsSync",
-          parameters: z.object({}),
-          timeoutMs: 50,
-        });
-        return server;
-      },
-    });
+    try {
+      await runWithTestServer({
+        run: async ({ client }) => {
+          const result = await client.callTool({
+            arguments: {},
+            name: "throwsSync",
+          });
+
+          expect(result).toMatchObject({ isError: true });
+          expect(sourceSignal).toBeDefined();
+          expect(getEventListeners(sourceSignal!, "abort")).toEqual([]);
+        },
+        server: async () => {
+          const server = new FastMCP({ name: "Test", version: "1.0.0" });
+          server.addTool({
+            description: "Throws before returning a promise",
+            // Not `async`: this throws during the call itself, before FastMCP
+            // ever has a promise to hang cleanup off.
+            execute: () => {
+              sourceSignal = compose.mock.results.at(-1)?.value;
+              throw new Error("boom");
+            },
+            name: "throwsSync",
+            parameters: z.object({}),
+            timeoutMs: 50,
+          });
+          return server;
+        },
+      });
+    } finally {
+      compose.mockRestore();
+    }
   });
 });

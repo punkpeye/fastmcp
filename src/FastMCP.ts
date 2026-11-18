@@ -3141,22 +3141,29 @@ export class FastMCPSession<
         // signal after a successful call and run the tool's cleanup for it.
         const timeoutAbort = new AbortController();
 
-        // Composed rather than forwarded by hand: `AbortSignal.any()` needs
-        // no listener bookkeeping, so nothing leaks when `execute` throws
-        // synchronously, and Node holds the composite through a WeakRef, so
-        // a per-call signal cannot pin the session-scoped one.
-        const signal = AbortSignal.any([
+        // `AbortSignal.any()` avoids manual listeners on the long-lived sources.
+        // Forward only while this call is active, so a completed call's signal
+        // stays active when its session closes. The outer finally detaches the
+        // forwarding listener even when execute throws synchronously.
+        const sourceSignal = AbortSignal.any([
           timeoutAbort.signal,
           this.#abortController.signal,
           // Only ever aborted for an explicit `notifications/cancelled`; the
           // session signal above is what covers a client that simply left.
           ...(extra.signal ? [extra.signal] : []),
         ]);
+        const callAbort = new AbortController();
+        const forwardAbort = () => callAbort.abort(sourceSignal.reason);
+        sourceSignal.addEventListener("abort", forwardAbort, { once: true });
+        if (sourceSignal.aborted) {
+          forwardAbort();
+        }
+        const signal = callAbort.signal;
 
         const sendNotification: typeof extra.sendNotification = async (
           notification,
         ) => {
-          if (signal.aborted) {
+          if (sourceSignal.aborted) {
             return;
           }
 
@@ -3164,7 +3171,7 @@ export class FastMCPSession<
             await extra.sendNotification(notification);
           } catch (error) {
             // Do not retry a log on the standalone stream after an abort.
-            if (!signal.aborted) {
+            if (!sourceSignal.aborted) {
               throw error;
             }
           }
@@ -3421,6 +3428,8 @@ export class FastMCPSession<
             ],
             isError: true,
           };
+        } finally {
+          sourceSignal.removeEventListener("abort", forwardAbort);
         }
 
         return result;
