@@ -2424,9 +2424,9 @@ export class FastMCPSession<
       return () => {};
     }
 
-    // A non-positive interval would fire on every tick and flood the stream.
+    // Node clamps intervals below 1 ms to 1 ms.
     const intervalMs =
-      config.intervalMs && config.intervalMs > 0
+      config.intervalMs && config.intervalMs >= 1
         ? config.intervalMs
         : STREAM_KEEPALIVE_DEFAULT_INTERVAL_MS;
 
