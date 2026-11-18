@@ -728,6 +728,118 @@ test.each([
   },
 );
 
+const metaObject = {
+  properties: { tag: { type: "string" } },
+  type: "object",
+};
+
+test.each([
+  {
+    accepted: [{ value: { age: 1, meta: { tag: "t" }, name: "a" } }],
+    name: "an allOf branch",
+    rejected: [{ value: { age: 1, meta: { extra: true }, name: "a" } }],
+    schema: {
+      properties: {
+        value: {
+          allOf: [
+            {
+              properties: { age: { type: "integer" }, meta: metaObject },
+              type: "object",
+            },
+          ],
+          properties: { name: { type: "string" } },
+          type: "object",
+        },
+      },
+      type: "object",
+    },
+  },
+  {
+    accepted: [{ value: { age: 1, meta: { tag: "t" }, name: "a" } }],
+    name: "the properties of an object with allOf",
+    rejected: [{ value: { age: 1, meta: { extra: true }, name: "a" } }],
+    schema: {
+      properties: {
+        value: {
+          allOf: [{ properties: { age: { type: "integer" } }, type: "object" }],
+          properties: { meta: metaObject, name: { type: "string" } },
+          type: "object",
+        },
+      },
+      type: "object",
+    },
+  },
+  {
+    accepted: [{ value: { meta: { tag: "t" } } }, { value: null }],
+    name: "an anyOf branch",
+    rejected: [{ value: { meta: { extra: true } } }],
+    schema: {
+      properties: {
+        value: {
+          anyOf: [
+            { properties: { meta: metaObject }, type: "object" },
+            { type: "null" },
+          ],
+        },
+      },
+      type: "object",
+    },
+  },
+  {
+    accepted: [
+      { value: { kind: "a", meta: { tag: "t" } } },
+      { value: { kind: "b", meta: { tag: "t" } } },
+    ],
+    name: "then and else",
+    rejected: [
+      { value: { kind: "a", meta: { extra: true } } },
+      { value: { kind: "b", meta: { extra: true } } },
+    ],
+    schema: {
+      properties: {
+        value: {
+          else: { properties: { meta: metaObject }, type: "object" },
+          if: {
+            properties: { kind: { const: "a" } },
+            required: ["kind"],
+          },
+          properties: { kind: { enum: ["a", "b"] } },
+          required: ["kind"],
+          then: { properties: { meta: metaObject }, type: "object" },
+          type: "object",
+        },
+      },
+      type: "object",
+    },
+  },
+  {
+    accepted: [{ age: 1, meta: { tag: "t" }, name: "a" }],
+    name: "a root with allOf",
+    rejected: [{ age: 1, meta: { extra: true }, name: "a" }],
+    schema: {
+      allOf: [{ properties: { age: { type: "integer" } }, type: "object" }],
+      properties: { meta: metaObject, name: { type: "string" } },
+      type: "object",
+    },
+  },
+])(
+  "closes ordinary objects inside $name, but not the composed objects",
+  async ({ accepted, rejected, schema }) => {
+    const advertised = await listInputSchema(jsonSchemaAdapter(schema));
+
+    for (const args of accepted) {
+      expect(acceptsArguments(advertised, args), JSON.stringify(args)).toBe(
+        true,
+      );
+    }
+    for (const args of rejected) {
+      expect(acceptsArguments(advertised, args), JSON.stringify(args)).toBe(
+        false,
+      );
+    }
+  },
+);
+
 test.each([
   {
     name: "a union that also admits a string",

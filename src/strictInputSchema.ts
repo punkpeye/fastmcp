@@ -29,10 +29,13 @@ export function objectRootSchema(schema: JsonSchema): JsonSchema {
  *
  * A plain object that declares an empty `properties`, or a bare one at the
  * top of the input, is still closed: that is how a schema says "no keys" —
- * `z.object({})`, or a tool without arguments. Root schemas with `allOf`,
- * `anyOf`, `oneOf`, or `$ref` are left as declared, even with their own
- * `properties`: `additionalProperties` only sees adjacent properties, so
- * adding it would reject keys declared by a branch or reference target.
+ * `z.object({})`, or a tool without arguments. An object with `allOf`,
+ * `anyOf`, `oneOf`, `$ref`, or `if`, at the root or nested, keeps its own
+ * `additionalProperties` as declared, as do the branches of a composition and
+ * the `then` and `else` of a condition: `additionalProperties` only sees
+ * adjacent properties, so adding it would reject keys declared by a branch,
+ * reference target, or condition. The ordinary objects among their
+ * `properties` are closed like any other.
  *
  * The root is given an object type (see `objectRootSchema`).
  *
