@@ -1588,6 +1588,16 @@ test.each([
     openapi: "3.0.3",
     schema: { $ref: "#/components/schemas/TagList" },
   },
+  ...(["allOf", "anyOf", "oneOf"] as const).map((composition) => ({
+    label: `${composition} array reference`,
+    openapi: "3.1.0",
+    schema: {
+      [composition]: [
+        { $ref: "#/components/schemas/TagList" },
+        ...(composition === "allOf" ? [] : [{ type: "null" }]),
+      ],
+    },
+  })),
 ])(
   "resources: true — a referenced $label stays a callable tool alongside scalar resource templates",
   async ({ openapi, schema }) => {

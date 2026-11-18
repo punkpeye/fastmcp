@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import type { HttpRoute } from "./types.js";
+import type { HttpRoute, OpenApiSchema } from "./types.js";
 
 import {
   buildResourceMapping,
@@ -143,6 +143,69 @@ test.each(["path", "query"] as const)(
         ),
       ).toBe(false);
     }
+  },
+);
+
+test.each(["allOf", "anyOf", "oneOf"] as const)(
+  "%s array/object parameters make a route ineligible",
+  (composition) => {
+    for (const location of ["path", "query"] as const) {
+      for (const type of ["array", "object"]) {
+        for (const schema of [
+          { [composition]: [{ type }] },
+          { [composition]: [{ $ref: "#/components/schemas/Value" }] },
+        ]) {
+          expect(
+            isEligibleForResource(
+              route({ parameters: [{ in: location, name: "value", schema }] }),
+              { Value: { type } },
+            ),
+          ).toBe(false);
+        }
+      }
+    }
+  },
+);
+
+test.each(["allOf", "anyOf", "oneOf"] as const)(
+  "%s scalar parameters remain eligible",
+  (composition) => {
+    expect(
+      isEligibleForResource(
+        route({
+          parameters: [
+            {
+              in: "query",
+              name: "value",
+              schema: { [composition]: [{ $ref: "#/components/schemas/Id" }] },
+            },
+          ],
+        }),
+        { Id: { type: "string" } },
+      ),
+    ).toBe(true);
+  },
+);
+
+test.each([undefined, "object", "array"])(
+  "nested compositions terminate on cycles and still detect %s branches",
+  (type) => {
+    const choices: OpenApiSchema[] = [{ $ref: "#/$defs/Value" }];
+    if (type) choices.push({ type });
+    expect(
+      isEligibleForResource(
+        route({
+          parameters: [
+            {
+              in: "query",
+              name: "value",
+              schema: { $ref: "#/components/schemas/Value" },
+            },
+          ],
+        }),
+        { Value: { allOf: [{ anyOf: [{ oneOf: choices }] }] } },
+      ),
+    ).toBe(type === undefined);
   },
 );
 
