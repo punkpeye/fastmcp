@@ -108,6 +108,7 @@ describe("DiskStore", () => {
 
   it("should clean up expired entries", async () => {
     const store = new DiskStore({ directory: TEST_DIR });
+    expect.soft(store["cleanupInterval"]?.hasRef()).toBe(false);
 
     // Save items with short TTL
     await store.save("key1", "value1", 1);
