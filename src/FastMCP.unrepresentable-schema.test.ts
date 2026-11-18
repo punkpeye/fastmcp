@@ -164,3 +164,38 @@ describe("tools/list with a schema that has no JSON Schema form", () => {
     }
   });
 });
+
+describe("tools/list with a non-object schema root", () => {
+  it.each(["parameters", "outputSchema"] as const)(
+    "omits only the tool with non-object %s",
+    async (field) => {
+      const logger = createLogger();
+      const server = createServer(logger);
+
+      server.addTool({
+        execute: async () => "example",
+        [field]: z.string(),
+        name: "nonObject",
+      });
+
+      const client = await connect(server);
+
+      try {
+        const { tools } = await client.listTools();
+
+        expect(tools.map((tool) => tool.name)).toEqual(["add"]);
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            `Tool 'nonObject' ${field} must describe an object`,
+          ),
+        );
+      } finally {
+        try {
+          await client.close();
+        } finally {
+          await server.stop();
+        }
+      }
+    },
+  );
+});
