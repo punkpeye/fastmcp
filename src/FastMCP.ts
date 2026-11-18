@@ -3177,13 +3177,14 @@ export class FastMCPSession<
           }
         };
 
+        let toolSettled = false;
         try {
           const reportProgress = async (progress: Progress) => {
             // Progress notifications must reference the progressToken supplied by
             // the client in the initiating request. If the client did not request
             // progress, there is nothing to associate the update with, and sending
             // a notification without a token produces an invalid message.
-            if (progressToken === undefined) {
+            if (toolSettled || progressToken === undefined) {
               return;
             }
 
@@ -3219,6 +3220,10 @@ export class FastMCPSession<
           // Streams partial results while a tool is still executing
           // Enables progressive rendering and real-time feedback
           const streamContent = async (content: Content | Content[]) => {
+            if (toolSettled) {
+              return;
+            }
+
             const contentArray = Array.isArray(content) ? content : [content];
 
             try {
@@ -3305,6 +3310,7 @@ export class FastMCPSession<
             executeToolPromise,
             aborted,
           ]).finally(() => {
+            toolSettled = true;
             clearTimeout(timeoutId);
             stopWaitingForAbort();
             stopStreamKeepalive();
@@ -3394,6 +3400,8 @@ export class FastMCPSession<
             );
           }
         } catch (error) {
+          // A synchronous execute throw skips the race's cleanup.
+          toolSettled = true;
           if (error instanceof UserError) {
             let structuredContent = error.extras;
             if (structuredContent && tool.outputSchema) {
