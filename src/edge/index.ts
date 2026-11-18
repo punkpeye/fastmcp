@@ -539,6 +539,20 @@ export class EdgeFastMCP {
     const promptName = params?.name as string;
     const promptArgs = params?.arguments as Record<string, string> | undefined;
 
+    if (
+      promptArgs !== undefined &&
+      (promptArgs === null ||
+        typeof promptArgs !== "object" ||
+        Array.isArray(promptArgs) ||
+        Object.values(promptArgs).some((value) => typeof value !== "string"))
+    ) {
+      return this.#rpcError(
+        id,
+        ErrorCode.InvalidParams,
+        "Prompt arguments must be an object with string values",
+      );
+    }
+
     const prompt = this.#prompts.find((p) => p.name === promptName);
     if (!prompt) {
       return this.#rpcError(
