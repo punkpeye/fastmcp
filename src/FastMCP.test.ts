@@ -29,6 +29,7 @@ import {
   FastMCPSession,
   imageContent,
   type LoadContext,
+  OAuthProvider,
   SessionError,
   type TextContent,
   UnexpectedStateError,
@@ -6211,6 +6212,58 @@ test("stateless mode rejects invalid authentication token", async () => {
     expect(response.status).toBe(401);
   } finally {
     await server.stop();
+  }
+});
+
+test("stateless OAuth accepts the Bearer scheme case-insensitively", async () => {
+  const port = await getTestPort();
+  const baseUrl = `http://localhost:${port}`;
+  const auth = new OAuthProvider({
+    authorizationEndpoint: `${baseUrl}/authorize`,
+    baseUrl,
+    clientId: "client",
+    clientSecret: "secret",
+    tokenEndpoint: `${baseUrl}/token`,
+  });
+  const proxy = auth.getProxy();
+  const upstreamTokens = {
+    accessToken: "upstream",
+    expiresIn: 3600,
+    issuedAt: new Date(),
+    scope: [],
+    tokenType: "Bearer",
+  };
+  vi.spyOn(proxy, "loadUpstreamTokens").mockImplementation(async (token) =>
+    token === "AbC9" ? upstreamTokens : null,
+  );
+  const server = new FastMCP({ auth, name: "Test", version: "1.0.0" });
+
+  try {
+    await server.start({
+      httpStream: { port, stateless: true },
+      transportType: "httpStream",
+    });
+
+    for (const [authorization, status] of [
+      ["bearer AbC9", 200],
+      ["BEARER AbC9", 200],
+      ["Bearer", 401],
+    ] as const) {
+      const response = await fetch(`${baseUrl}/mcp`, {
+        body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "ping" }),
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      await response.text();
+      expect.soft(response.status, authorization).toBe(status);
+    }
+  } finally {
+    await server.stop();
+    proxy.destroy();
   }
 });
 
