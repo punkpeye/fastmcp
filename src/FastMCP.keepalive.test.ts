@@ -303,10 +303,10 @@ describe("FastMCP stream keepalive", () => {
     expect(keepalivesSeen()).toBe(afterResponse);
   });
 
-  it("ignores a non-positive interval instead of flooding the stream", async () => {
+  it.each([0, 0.5])("uses the default for %s ms", async (intervalMs) => {
     const server = new FastMCP({
       name: "Test",
-      streamKeepalive: { enabled: true, intervalMs: 0 },
+      streamKeepalive: { enabled: true, intervalMs },
       version: "1.0.0",
     });
 
@@ -324,7 +324,7 @@ describe("FastMCP stream keepalive", () => {
 
     await client.callTool({ arguments: {}, name: "slow" });
 
-    // 0 must fall back to the default interval, not fire every tick.
+    // The tool finishes before the first keepalive at the default interval.
     expect(keepalivesSeen()).toBe(0);
   });
 });
