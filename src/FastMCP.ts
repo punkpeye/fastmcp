@@ -5320,8 +5320,11 @@ export class FastMCP<
           return;
         }
 
-        // Callback endpoint - GET /oauth/callback
-        if (req.method === "GET" && oauthPath === "/oauth/callback") {
+        // Callback endpoint - GET at the configured redirect path
+        if (
+          req.method === "GET" &&
+          oauthPath === oauthProxy.getRedirectPath()
+        ) {
           try {
             const mockRequest = new Request(`http://${host}${req.url}`, {
               headers: cookieHeaders(req),

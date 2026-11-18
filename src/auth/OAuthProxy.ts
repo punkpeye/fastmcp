@@ -625,6 +625,13 @@ export class OAuthProxy {
   }
 
   /**
+   * Get the configured OAuth callback path, including the default.
+   */
+  getRedirectPath(): string {
+    return this.config.redirectPath!;
+  }
+
+  /**
    * Handle OAuth callback from upstream provider
    */
   async handleCallback(request: Request): Promise<Response> {
