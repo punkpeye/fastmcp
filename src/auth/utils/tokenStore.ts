@@ -146,6 +146,7 @@ export class MemoryTokenStorage implements TokenStorage {
       () => void this.cleanup(),
       cleanupIntervalMs,
     );
+    this.cleanupInterval.unref?.();
   }
 
   async cleanup(): Promise<void> {

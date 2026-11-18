@@ -116,11 +116,9 @@ export class OAuthProxy {
   private consentManager: ConsentManager;
   private jwtIssuer?: JWTIssuer;
   /**
-   * The fallback storage this proxy created for itself, if any. It runs a
-   * cleanup timer that keeps the event loop alive, so `destroy()` has to stop
-   * it — and once the storage is wrapped for encryption it is reachable
-   * through nothing else. A caller-supplied storage is deliberately not
-   * recorded here: its lifetime belongs to the caller.
+   * The fallback storage this proxy created for itself, if any. Keep a
+   * reference so `destroy()` can stop its cleanup timer even when the storage
+   * is wrapped for encryption. Caller-supplied storage has its own lifetime.
    */
   private ownedTokenStorage: MemoryTokenStorage | null = null;
   /**
@@ -2269,6 +2267,7 @@ export class OAuthProxy {
     this.cleanupInterval = setInterval(() => {
       this.cleanup();
     }, 60000); // Run every minute
+    this.cleanupInterval.unref?.();
   }
 
   /**
