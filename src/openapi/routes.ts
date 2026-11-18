@@ -9,7 +9,14 @@ import type {
   RawPathItem,
 } from "./types.js";
 
-const HTTP_METHODS: HttpMethod[] = ["get", "put", "post", "delete", "patch"];
+const HTTP_METHODS: HttpMethod[] = [
+  "get",
+  "head",
+  "put",
+  "post",
+  "delete",
+  "patch",
+];
 
 /**
  * Walks a bundled document's `paths` into a flat list of routes, resolving

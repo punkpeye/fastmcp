@@ -109,7 +109,7 @@ export interface FromOpenAPIOptions {
   version?: `${number}.${number}.${number}`;
 }
 
-export type HttpMethod = "delete" | "get" | "patch" | "post" | "put";
+export type HttpMethod = "delete" | "get" | "head" | "patch" | "post" | "put";
 
 export interface HttpRoute {
   deprecated: boolean;
@@ -120,8 +120,8 @@ export interface HttpRoute {
   requestBody?: OpenApiRequestBody;
   /**
    * Keyed by HTTP status code (e.g. `"200"`), as declared in the spec.
-   * Populated regardless of `method` — unlike `requestBody`, there's no
-   * equivalent to the GET-never-has-a-body rule for responses.
+   * Populated regardless of `method`. HEAD response metadata does not
+   * produce a tool output schema, since HEAD responses have no body.
    */
   responses?: Record<string, OpenApiResponse>;
   /** The first non-empty server list at operation, path, or document level. */
