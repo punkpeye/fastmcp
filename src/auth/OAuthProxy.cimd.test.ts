@@ -393,6 +393,23 @@ describe("OAuthProxy CIMD support", () => {
     proxy.destroy();
   });
 
+  it("rejects a CIMD document with a fragment in its redirect URIs", async () => {
+    const proxy = new OAuthProxy({ ...baseConfig, enableCimd: true });
+    mockFetchRouting(() =>
+      clientMetadataResponse({
+        redirect_uris: [REDIRECT_URI, `${REDIRECT_URI}#frag`],
+      }),
+    );
+
+    try {
+      await expect(proxy.authorize(buildAuthParams())).rejects.toMatchObject({
+        code: "invalid_client",
+      });
+    } finally {
+      proxy.destroy();
+    }
+  });
+
   it("rejects a CIMD document that does not vouch for the requested redirect_uri", async () => {
     const proxy = new OAuthProxy({ ...baseConfig, enableCimd: true });
     mockFetchRouting(() =>

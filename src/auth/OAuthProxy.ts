@@ -2346,6 +2346,12 @@ export class OAuthProxy {
       return false;
     }
 
+    // RFC 6749 §3.1.2 forbids fragments. The href retains the delimiter
+    // even for an empty fragment.
+    if (parsed.href.includes("#")) {
+      return false;
+    }
+
     const patterns = this.config.allowedRedirectUriPatterns;
 
     // Explicitly set to empty array → strict mode, reject everything.

@@ -33,11 +33,15 @@ describe("allowedRedirectUriPatterns match the host a URI leads to", () => {
 
     return proxy.registerClient({ redirect_uris: [uri] }).then(
       () => true,
-      () => false,
+      (error: unknown) => {
+        expect(error).toMatchObject({ code: "invalid_redirect_uri" });
+        return false;
+      },
     );
   };
 
   it.each([
+    ["https://app.example.com#*", "https://app.example.com#"],
     // The rest of the pattern, carried where the host is not.
     ["https://*.example.com/*", "https://elsewhere.test/a.example.com/cb"],
     ["https://*.example.com/*", "https://elsewhere.test/?x=.example.com/cb"],
@@ -76,7 +80,7 @@ describe("allowedRedirectUriPatterns match the host a URI leads to", () => {
 
   it.each([
     ["https://*.example.com/*", "https://app.example.com/cb"],
-    ["https://*.example.com/*", "https://a.b.example.com/cb?x=1#y"],
+    ["https://*.example.com/*", "https://a.b.example.com/cb?x=1%23y"],
     ["https://*.EXAMPLE.com/*", "https://app.EXAMPLE.com/cb"],
     ["https://app-*.example.com/cb", "https://app-1.example.com/cb"],
     ["https://*", "https://anything.test/any/path?x=1"],
@@ -103,7 +107,6 @@ describe("allowedRedirectUriPatterns match the host a URI leads to", () => {
     ["https://*.example.com?x=*", "https://app.example.com?x=1"],
     ["https://app?.example.com?x=*", "https://app1.example.com?x=1"],
     ["https://app.example.com*", "https://app.example.com:8443/cb"],
-    ["https://app.example.com#*", "https://app.example.com#x"],
     ["https://*", "https://a.b.elsewhere.test:8443/cb"],
     // The host as its author would write it.
     ["https://bücher.example/*", "https://bücher.example/cb"],
