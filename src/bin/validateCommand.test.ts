@@ -1,4 +1,4 @@
-import { execa } from "execa";
+import { execa, execaNode } from "execa";
 import {
   mkdir,
   mkdtemp,
@@ -461,6 +461,57 @@ describe("the structure check script", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("boom");
   });
+});
+
+describe("fastmcp validate", () => {
+  it(
+    "validates a server with FastMCP installed only in the child project",
+    { timeout: 60_000 },
+    async () => {
+      const parent = await makeTemporaryDirectory();
+      const file = join("project", "server.mts");
+      const project = join(parent, "project");
+      const pkg = join(project, "node_modules", "fastmcp");
+      const src = dirname(import.meta.dirname);
+
+      // The parent supplies npx tsc and tsx. Only the child can import fastmcp.
+      await symlink(
+        join(dirname(src), "node_modules"),
+        join(parent, "node_modules"),
+        "junction",
+      );
+      await mkdir(pkg, { recursive: true });
+      await symlink(src, join(pkg, "src"), "junction");
+      await writeFile(
+        join(pkg, "package.json"),
+        JSON.stringify({
+          exports: "./src/FastMCP.ts",
+          name: "fastmcp",
+          type: "module",
+        }),
+      );
+      await writeFile(
+        join(project, "tsconfig.json"),
+        JSON.stringify({ extends: "@tsconfig/node24/tsconfig.json" }),
+      );
+      await writeFile(
+        join(parent, file),
+        'import { FastMCP } from "fastmcp";\nexport default new FastMCP({ name: "test", version: "1.0.0" });\n',
+      );
+
+      const result = await execaNode(
+        join(import.meta.dirname, "fastmcp.ts"),
+        ["validate", file],
+        {
+          cwd: parent,
+          env: { npm_config_offline: "true" },
+          nodeOptions: ["--import", "tsx"],
+          timeout: 45_000,
+        },
+      );
+      expect(result.stdout).toContain("All validations passed");
+    },
+  );
 });
 
 describe("formatCommandFailure", () => {
