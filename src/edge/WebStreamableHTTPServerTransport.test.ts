@@ -14,7 +14,7 @@ type TransportInternals = {
   _jsonResponseCollectors: Map<string, unknown>;
   _requestToStreamMapping: Map<number | string, string>;
   _standaloneStreamOpened: boolean;
-  _streamMapping: Map<string, WritableStreamDefaultWriter<Uint8Array>>;
+  _streamMapping: Map<string, { terminate: () => Promise<void> }>;
 };
 
 /** Let a settled `writer.closed` run its cleanup before asserting on it. */
@@ -114,6 +114,30 @@ const createToolCall = (id: number, name: string) => ({
   params: { arguments: {}, name },
 });
 
+const logEvent = (data: string) =>
+  ({
+    jsonrpc: "2.0",
+    method: "notifications/message",
+    params: { data, level: "info" },
+  }) as const;
+
+const withinDeadline = async <T>(operation: Promise<T>): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("SSE deadline exceeded")),
+          2000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /**
  * Reads an SSE body to completion, resolving to null if the stream never
  * finishes, so a routing regression fails the test rather than hanging it.
@@ -203,6 +227,117 @@ describe("WebStreamableHTTPServerTransport", () => {
     expect(body).toContain("data: ");
     expect(body).toContain('"serverInfo"');
     expect(body).toContain("TestServer");
+  });
+
+  it.each([
+    ["notifications/cancelled", 202],
+    ["DELETE", 204],
+    ["close()", undefined],
+  ] as const)("settles %s with an unread write", async (action, status) => {
+    const transport = new WebStreamableHTTPServerTransport({
+      enableJsonResponse: true,
+      sessionIdGenerator: () => "test-session",
+    });
+    const server = createHangingToolServer();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(
+        createInitializeRequest("application/json"),
+      );
+      const cancelling = action === "notifications/cancelled";
+      const response = await transport.handleRequest(
+        cancelling
+          ? createPostRequest(
+              createToolCall(2, "one"),
+              "text/event-stream",
+              "test-session",
+            )
+          : createGetRequest(),
+      );
+      expect(response.status).toBe(200);
+      reader = response.body!.getReader();
+      const write = vi.spyOn(WritableStreamDefaultWriter.prototype, "write");
+      const onerror = vi.fn();
+      transport.onerror = onerror;
+      const sending = transport.send(
+        logEvent("unread"),
+        cancelling ? { relatedRequestId: 2 } : undefined,
+      );
+      await vi.waitFor(() => {
+        const [writer] = write.mock.contexts;
+        expect(
+          writer instanceof WritableStreamDefaultWriter && writer.desiredSize,
+        ).toBe(0);
+      });
+
+      const stopping =
+        action === "close()"
+          ? transport.close()
+          : transport.handleRequest(
+              cancelling
+                ? createPostRequest(
+                    createCancelledNotification(2),
+                    "application/json",
+                    "test-session",
+                  )
+                : createDeleteRequest(),
+            );
+      const [result] = await withinDeadline(Promise.all([stopping, sending]));
+      expect(result?.status).toBe(status);
+      expect(onerror).toHaveBeenCalledWith(expect.any(Error));
+      expect((await withinDeadline(reader.read())).done).toBe(true);
+    } finally {
+      await reader?.cancel();
+      reader?.releaseLock();
+      await server.close();
+    }
+  });
+
+  it("drains queued events and the final POST response in order", async () => {
+    const transport = new WebStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+    const response = await transport.handleRequest(
+      createPostRequest(
+        [createToolCall(2, "one"), createToolCall(3, "two")],
+        "text/event-stream",
+      ),
+    );
+    const reader = response.body!.getReader();
+    try {
+      const messages = [
+        logEvent("first"),
+        logEvent("second"),
+        { id: 2, jsonrpc: "2.0", result: {} },
+      ] as const;
+      const delivered = vi.fn();
+      const sending = Promise.all(
+        messages.map((message) =>
+          transport.send(message, { relatedRequestId: 2 }).then(delivered),
+        ),
+      );
+      const cancelled = await withinDeadline(
+        transport.handleRequest(
+          createPostRequest(createCancelledNotification(3), "application/json"),
+        ),
+      );
+      expect(cancelled.status).toBe(202);
+      expect(delivered).not.toHaveBeenCalled();
+
+      for (const message of messages) {
+        const { value } = await withinDeadline(reader.read());
+        expect(new TextDecoder().decode(value)).toBe(
+          `data: ${JSON.stringify(message)}\n\n`,
+        );
+      }
+      expect((await withinDeadline(reader.read())).done).toBe(true);
+      await withinDeadline(sending);
+    } finally {
+      await reader.cancel();
+      reader.releaseLock();
+      await transport.close();
+    }
   });
 
   it("should respond with JSON when enableJsonResponse is set", async () => {
@@ -539,11 +674,11 @@ describe("WebStreamableHTTPServerTransport", () => {
 
     const internals = transport as unknown as TransportInternals;
     internals._streamMapping.set("old-stream", {
-      close: vi.fn(async () => {
+      terminate: vi.fn(async () => {
         markStreamCloseStarted?.();
         await streamCloseGate;
       }),
-    } as unknown as WritableStreamDefaultWriter<Uint8Array>);
+    });
 
     const closing = transport.close();
     await streamCloseStarted;
@@ -832,11 +967,8 @@ describe("WebStreamableHTTPServerTransport", () => {
 
   it("does not register a replay's stream once its session has been deleted", async () => {
     // The replay is detached from the request that started it, so a DELETE can
-    // land while it is still running. That teardown clears `_streamMapping`
-    // but cannot close this writer, which is not in it yet — registering it
-    // afterwards would leave a stream for a dead session that nothing closes,
-    // and re-latch `_standaloneStreamOpened` so the next session on this
-    // instance writes its standalone events to the previous client.
+    // land before the store returns a stream id. A late result must never
+    // register the replay into the next session.
     let releaseReplay: (() => void) | undefined;
     const replayGate = new Promise<void>((resolve) => {
       releaseReplay = resolve;
@@ -845,7 +977,9 @@ describe("WebStreamableHTTPServerTransport", () => {
     const transport = new WebStreamableHTTPServerTransport({
       enableJsonResponse: true,
       eventStore: {
-        replayEventsAfter: async () => {
+        replayEventsAfter: async (_id, { send }) => {
+          // Even a store that tolerates a disconnected reader can return late.
+          await send("evt-1", logEvent("replay")).catch(() => {});
           await replayGate;
           return "_GET_stream";
         },
@@ -860,16 +994,22 @@ describe("WebStreamableHTTPServerTransport", () => {
     const resuming = await transport.handleRequest(createGetRequest("evt-0"));
     expect(resuming.status).toBe(200);
 
-    const deleted = await transport.handleRequest(createDeleteRequest());
-    expect(deleted.status).toBe(204);
-
-    releaseReplay?.();
+    const reader = resuming.body!.getReader();
+    try {
+      const deleted = await withinDeadline(
+        transport.handleRequest(createDeleteRequest()),
+      );
+      expect(deleted.status).toBe(204);
+      await withinDeadline(reader.closed);
+    } finally {
+      releaseReplay?.();
+      await reader.cancel();
+      reader.releaseLock();
+    }
     await flushMicrotasks();
 
     expect(internals._streamMapping.size).toBe(0);
     expect(internals._standaloneStreamOpened).toBe(false);
-    // The reconnect's stream ends with its session instead of hanging open.
-    expect(await readSSEBody(resuming)).toBe("");
   });
 
   it("should not remove a replacement stream when an old writer closes", async () => {
@@ -883,16 +1023,14 @@ describe("WebStreamableHTTPServerTransport", () => {
     const first = await transport.handleRequest(createGetRequest());
     const streamMapping = (transport as unknown as TransportInternals)
       ._streamMapping;
-    const replacementStream = new TransformStream<Uint8Array>();
-    const replacementWriter = replacementStream.writable.getWriter();
-    streamMapping.set("_GET_stream", replacementWriter);
+    const replacement = { terminate: vi.fn() };
+    streamMapping.set("_GET_stream", replacement);
 
     await first.body?.cancel("old client disconnected");
     await Promise.resolve();
 
-    expect(streamMapping.get("_GET_stream")).toBe(replacementWriter);
+    expect(streamMapping.get("_GET_stream")).toBe(replacement);
     streamMapping.delete("_GET_stream");
-    await replacementWriter.abort();
   });
 
   it("should release a POST SSE stream when the client cancels", async () => {
@@ -1209,11 +1347,11 @@ describe("WebStreamableHTTPServerTransport", () => {
 
     const internals = transport as unknown as TransportInternals;
     internals._streamMapping.set("old-stream", {
-      close: vi.fn(async () => {
+      terminate: vi.fn(async () => {
         markStreamCloseStarted?.();
         await streamCloseGate;
       }),
-    } as unknown as WritableStreamDefaultWriter<Uint8Array>);
+    });
 
     const deleting = transport.handleRequest(createDeleteRequest());
     await streamCloseStarted;
