@@ -597,6 +597,47 @@ describe("EdgeFastMCP", () => {
     },
   );
 
+  it("omits only the tool whose parameters are not an object from tools/list", async () => {
+    const logger = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      log: vi.fn(),
+      warn: vi.fn(),
+    };
+    const server = new EdgeFastMCP({
+      logger,
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    server.addTool({
+      description: "Takes a string",
+      execute: async () => "never called",
+      name: "nonObject",
+      parameters: z.string(),
+    });
+    server.addTool({
+      description: "Echo input",
+      execute: async ({ message }) => message,
+      name: "plain",
+      parameters: z.object({ message: z.string() }),
+    });
+
+    const result = await postResult(server, "tools/list");
+
+    expect(result.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      "plain",
+    ]);
+    // The SDK client rejects the whole list if any root is not an object.
+    expect(ListToolsResultSchema.safeParse(result).success).toBe(true);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Tool 'nonObject' parameters must describe an object",
+      ),
+    );
+  });
+
   it("keeps the generic Standard Schema fallback in tools/list", async () => {
     const server = new EdgeFastMCP({ name: "TestServer", version: "1.0.0" });
     server.addTool({

@@ -165,16 +165,26 @@ describe("tools/list with a schema that has no JSON Schema form", () => {
   });
 });
 
+const nonObjectRoots = (["parameters", "outputSchema"] as const).flatMap(
+  (field) =>
+    [
+      ["a string", z.string()],
+      ["an array", z.array(z.string())],
+      ["a number", z.number()],
+      ["null", z.null()],
+    ].map(([root, schema]) => [field, root, schema] as const),
+);
+
 describe("tools/list with a non-object schema root", () => {
-  it.each(["parameters", "outputSchema"] as const)(
-    "omits only the tool with non-object %s",
-    async (field) => {
+  it.each(nonObjectRoots)(
+    "omits only the tool whose %s is %s",
+    async (field, _root, schema) => {
       const logger = createLogger();
       const server = createServer(logger);
 
       server.addTool({
         execute: async () => "example",
-        [field]: z.string(),
+        [field]: schema,
         name: "nonObject",
       });
 
