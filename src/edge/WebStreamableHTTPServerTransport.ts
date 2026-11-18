@@ -98,6 +98,49 @@ interface PendingJsonResponse {
   responses: Map<RequestId, JSONRPCMessage>;
 }
 
+const createSSEStream = () => {
+  const { readable, writable } = new TransformStream<Uint8Array>();
+  const reader = readable.getReader();
+  const writer = writable.getWriter();
+  let cancelled = false;
+  let forwarding: Promise<void> | undefined;
+
+  // Keep the transform's reader so teardown can cancel it even when the
+  // runtime has locked the response body. Pull only on downstream demand.
+  const body = new ReadableStream<Uint8Array>(
+    {
+      cancel(reason) {
+        cancelled = true;
+        return reader.cancel(reason);
+      },
+      pull(controller) {
+        forwarding = reader.read().then(({ done, value }) => {
+          if (!done && !cancelled) controller.enqueue(value);
+        });
+        return forwarding;
+      },
+      start(controller) {
+        void reader.closed
+          .then(async () => {
+            // The final read may still be handing its chunk to the response.
+            await forwarding;
+            if (!cancelled) controller.close();
+          })
+          .catch((error: unknown) => controller.error(error));
+      },
+    },
+    { highWaterMark: 0 },
+  );
+
+  return {
+    readable: body,
+    terminate: () => reader.cancel(new Error("SSE stream ended")),
+    writer,
+  };
+};
+
+type SSEStream = ReturnType<typeof createSSEStream>;
+
 export const MAXIMUM_MESSAGE_SIZE = 4 * 1024 * 1024; // 4MB
 
 /**
@@ -162,7 +205,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
    * send during that window has nothing to test against; persist rather than
    * drop, since over-storing for the length of a replay beats losing an event.
    */
-  private _replaysInFlight = 0;
+  private _replaysInFlight = new Set<SSEStream>();
 
   private _requestToStreamMapping = new Map<RequestId, StreamId>();
 
@@ -193,10 +236,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
    */
   private _streamGeneration = 0;
 
-  private _streamMapping = new Map<
-    StreamId,
-    WritableStreamDefaultWriter<Uint8Array>
-  >();
+  private _streamMapping = new Map<StreamId, SSEStream>();
   private sessionIdGenerator: (() => string) | undefined;
 
   /**
@@ -291,7 +331,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
         return;
       }
 
-      const writer = this._streamMapping.get(streamId);
+      const writer = this._streamMapping.get(streamId)?.writer;
       // With an event store the message must be persisted even if the client
       // has already disconnected, so a reconnect with Last-Event-Id can replay
       // it. The live write to the SSE stream is best-effort on top of that.
@@ -324,21 +364,23 @@ export class WebStreamableHTTPServerTransport implements Transport {
         // alone on disconnect, so this is the only thing that reclaims them,
         // and giving up on a failed write strands the entry until the session
         // ends.
-        if (requestId !== undefined && isResponse) {
+        if (
+          requestId !== undefined &&
+          isResponse &&
+          this._requestToStreamMapping.get(requestId) === streamId
+        ) {
           this._requestToStreamMapping.delete(requestId);
           const streamInUse = Array.from(
             this._requestToStreamMapping.values(),
           ).includes(streamId);
-          if (!streamInUse) {
-            this._streamMapping.delete(streamId);
-            if (writer) {
-              try {
-                await writer.close();
-              } catch (error) {
-                this.onerror?.(
-                  error instanceof Error ? error : new Error(String(error)),
-                );
-              }
+          if (writer && !streamInUse) {
+            // Keep the draining writer reachable until trackStream sees EOF.
+            try {
+              await writer.close();
+            } catch (error) {
+              this.onerror?.(
+                error instanceof Error ? error : new Error(String(error)),
+              );
             }
           }
         }
@@ -500,11 +542,10 @@ export class WebStreamableHTTPServerTransport implements Transport {
     }
 
     // Create SSE stream
-    const { readable, writable } = new TransformStream<Uint8Array>();
-    const writer = writable.getWriter();
-    this.trackStream(this._standaloneSseStreamId, writer);
+    const stream = createSSEStream();
+    this.trackStream(this._standaloneSseStreamId, stream);
 
-    return new Response(readable, {
+    return new Response(stream.readable, {
       headers: {
         ...this.getResponseHeaders(),
         "Cache-Control": "no-cache, no-transform",
@@ -730,9 +771,9 @@ export class WebStreamableHTTPServerTransport implements Transport {
           });
         });
       } else {
-        const { readable, writable } = new TransformStream<Uint8Array>();
-        this.trackStream(streamId, writable.getWriter());
-        sseReadable = readable;
+        const stream = createSSEStream();
+        this.trackStream(streamId, stream);
+        sseReadable = stream.readable;
       }
     }
 
@@ -813,6 +854,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
       );
     }
 
+    const generation = this._streamGeneration;
     // `getStreamIdForEventId` is optional, so this only asks stores that can
     // answer which stream the reconnect would land on before any work is done.
     // Unlike the SDK's Node transport, an event id the store does not
@@ -822,6 +864,9 @@ export class WebStreamableHTTPServerTransport implements Transport {
     if (this._eventStore.getStreamIdForEventId) {
       const existingStreamId =
         await this._eventStore.getStreamIdForEventId(lastEventId);
+      if (this._streamGeneration !== generation) {
+        return this.createErrorResponse(404, -32001, "Session not found");
+      }
       if (
         existingStreamId !== undefined &&
         this._streamMapping.has(existingStreamId)
@@ -835,9 +880,8 @@ export class WebStreamableHTTPServerTransport implements Transport {
     }
 
     const eventStore = this._eventStore;
-    const generation = this._streamGeneration;
-    const { readable, writable } = new TransformStream<Uint8Array>();
-    const writer = writable.getWriter();
+    const stream = createSSEStream();
+    const { readable, writer } = stream;
 
     // The replay deliberately runs detached. Nothing reads `readable` until
     // this Response is handed back to the runtime, and a TransformStream's
@@ -848,7 +892,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     // transport has the same ordering for the same reason: it flushes the 200
     // headers before replaying. The cost is that once the headers are out,
     // nothing below can be reported as a status code.
-    this._replaysInFlight += 1;
+    this._replaysInFlight.add(stream);
     void (async () => {
       try {
         const streamId = await eventStore.replayEventsAfter(lastEventId, {
@@ -858,11 +902,8 @@ export class WebStreamableHTTPServerTransport implements Transport {
         });
 
         // `close()` or a DELETE may have ended the session while the replay
-        // was running. That teardown could not close this writer — it was not
-        // in `_streamMapping` yet — so end it here rather than registering it
-        // into a session that no longer exists.
+        // was running. Teardown already ended this replay's stream.
         if (this._streamGeneration !== generation) {
-          await this.closeQuietly(writer);
           return;
         }
 
@@ -885,14 +926,14 @@ export class WebStreamableHTTPServerTransport implements Transport {
           return;
         }
 
-        this.trackStream(streamId, writer);
+        this.trackStream(streamId, stream);
       } catch (error) {
         this.onerror?.(
           error instanceof Error ? error : new Error(String(error)),
         );
         await this.closeQuietly(writer);
       } finally {
-        this._replaysInFlight -= 1;
+        this._replaysInFlight.delete(stream);
       }
     })().catch(() => {
       // Only reachable if `onerror` itself threw, so there is nowhere left to
@@ -952,13 +993,11 @@ export class WebStreamableHTTPServerTransport implements Transport {
       return;
     }
 
-    // Nothing will ever be written to this stream again; close it rather than
-    // leaving the client reading a stream that can only hang.
-    const writer = this._streamMapping.get(streamId);
+    const stream = this._streamMapping.get(streamId);
     this._streamMapping.delete(streamId);
-    if (writer) {
+    if (stream) {
       try {
-        await writer.close();
+        await stream.terminate();
       } catch (error) {
         this.onerror?.(
           error instanceof Error ? error : new Error(String(error)),
@@ -1050,7 +1089,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
       // than the latch. Belt and braces: it keeps a writer reaching this point
       // without `trackStream` from producing an SSE event with no `id:`.
       writer !== undefined ||
-      this._replaysInFlight > 0
+      this._replaysInFlight.size > 0
     );
   }
 
@@ -1062,39 +1101,33 @@ export class WebStreamableHTTPServerTransport implements Transport {
    */
   private async teardownStreams(): Promise<void> {
     this._streamGeneration += 1;
-    // Snapshot and reset before awaiting anything. `writer.close()` yields, so
-    // a stream registered during that window would otherwise be wiped by a
-    // clear() belonging to the session that preceded it — routed to but never
-    // closed, or closed out from under the client that just opened it,
-    // depending on where in the loop it landed.
-    const writers = [...this._streamMapping.values()];
+    // A replay can be writing before its store has returned the stream id.
+    const streams = [...this._streamMapping.values(), ...this._replaysInFlight];
+    this._replaysInFlight.clear();
     this._streamMapping.clear();
     // Per-session, like the session id: this instance stays usable, and the
     // next session starts having opened no standalone stream of its own.
     this._standaloneStreamOpened = false;
     this.releasePendingRequests();
 
-    for (const writer of writers) {
+    for (const stream of streams) {
       try {
-        await writer.close();
+        await stream.terminate();
       } catch {
         // Already closed, errored, or cancelled by the client.
       }
     }
   }
 
-  private trackStream(
-    streamId: StreamId,
-    writer: WritableStreamDefaultWriter<Uint8Array>,
-  ): void {
+  private trackStream(streamId: StreamId, stream: SSEStream): void {
     // Latched here rather than at each call site so a new way of opening the
     // standalone stream cannot forget to record it.
     if (streamId === this._standaloneSseStreamId) {
       this._standaloneStreamOpened = true;
     }
-    this._streamMapping.set(streamId, writer);
+    this._streamMapping.set(streamId, stream);
     const removeStreamIfCurrent = () => {
-      if (this._streamMapping.get(streamId) !== writer) {
+      if (this._streamMapping.get(streamId) !== stream) {
         return;
       }
       this._streamMapping.delete(streamId);
@@ -1114,7 +1147,10 @@ export class WebStreamableHTTPServerTransport implements Transport {
         }
       }
     };
-    void writer.closed.then(removeStreamIfCurrent, removeStreamIfCurrent);
+    void stream.writer.closed.then(
+      removeStreamIfCurrent,
+      removeStreamIfCurrent,
+    );
   }
 
   /**
