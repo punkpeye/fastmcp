@@ -43,7 +43,6 @@ export const DEFAULT_TYPE_CHECK_OPTIONS = [
 export const STRUCTURE_CHECK_SCRIPT = `
 (async () => {
   try {
-    const { FastMCP } = await import("fastmcp");
     await import(process.argv[1]);
     console.log("[FastMCP] ✓ Server structure validation passed");
   } catch (error) {
