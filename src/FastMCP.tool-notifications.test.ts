@@ -4,6 +4,52 @@ import { describe, expect, it, vi } from "vitest";
 
 import { FastMCP } from "./FastMCP.js";
 
+it("stops progress and streamed content after the tool returns", async () => {
+  let notifyAfterResult: (() => Promise<void>) | undefined;
+  const server = new FastMCP({ name: "Test", version: "1.0.0" });
+  server.addTool({
+    execute: async (_args, { reportProgress, streamContent }) => {
+      void reportProgress({ progress: 1, total: 2 });
+      notifyAfterResult = async () => {
+        await reportProgress({ progress: 2, total: 2 });
+        await streamContent({ text: "late", type: "text" });
+      };
+      return "done";
+    },
+    name: "work",
+  });
+
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1.0.0" });
+  const onprogress = vi.fn();
+  const session = server.connect(serverTransport);
+
+  try {
+    await Promise.all([session, client.connect(clientTransport)]);
+    await client.listTools();
+    await expect(
+      client.callTool({ name: "work" }, undefined, { onprogress }),
+    ).resolves.toEqual({ content: [{ text: "done", type: "text" }] });
+    expect(onprogress).toHaveBeenCalledExactlyOnceWith({
+      progress: 1,
+      total: 2,
+    });
+
+    const send = vi.spyOn(serverTransport, "send");
+    expect(notifyAfterResult).toBeDefined();
+    await notifyAfterResult!();
+    expect(send).not.toHaveBeenCalled();
+  } finally {
+    try {
+      await client.close();
+    } finally {
+      const connectedSession = await session.catch(() => undefined);
+      await (connectedSession ?? serverTransport).close();
+    }
+  }
+});
+
 describe("tool notifications after abort", () => {
   it.each(["cancel", "timeout", "close"])(
     "stops notifications and timers after %s",
