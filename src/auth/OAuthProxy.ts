@@ -53,8 +53,11 @@ const DEFAULT_PORTS: Record<string, string | undefined> = {
   "wss:": "443",
 };
 
-/** The value of a consent cookie: 32 random bytes, as `generateId()` makes. */
-const CONSENT_COOKIE_VALUE = /^[\w-]{43}$/;
+/** Transaction IDs and consent cookies contain 32 random bytes in base64url. */
+const GENERATED_ID = /^[\w-]{43}$/;
+
+/** RFC 6749 Appendix A.7 and A.8 use NQSCHAR for both error fields. */
+const OAUTH_ERROR_TEXT = /^[\x20-\x21\x23-\x5b\x5d-\x7e]+$/;
 
 /**
  * The most a client registration may store, in bytes of JSON. Registration is
@@ -636,17 +639,24 @@ export class OAuthProxy {
    */
   async handleCallback(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const code = url.searchParams.get("code");
+    const code = url.searchParams.get("code") ?? "";
     const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
+    const description = url.searchParams.get("error_description") || undefined;
 
-    // Check for errors from upstream
     if (error) {
-      const errorDescription = url.searchParams.get("error_description");
-      throw new OAuthProxyError(error, errorDescription || undefined);
-    }
-
-    if (!code || !state) {
+      // Some stores normalize keys. Check the stored ID before spending it.
+      if (
+        !state ||
+        url.searchParams.getAll("state").length !== 1 ||
+        !GENERATED_ID.test(state) ||
+        !OAUTH_ERROR_TEXT.test(error) ||
+        (description && !OAUTH_ERROR_TEXT.test(description)) ||
+        (await this.stateStore.getTransaction(state))?.id !== state
+      ) {
+        throw new OAuthProxyError(error, description);
+      }
+    } else if (!code || !state) {
       throw new OAuthProxyError(
         "invalid_request",
         "Missing code or state parameter",
@@ -657,6 +667,13 @@ export class OAuthProxy {
     // prevents the same state from being replayed against this or any other
     // instance sharing the storage.
     const transaction = await this.stateStore.consumeTransaction(state);
+    if (
+      error &&
+      (transaction?.id !== state ||
+        transaction.expiresAt.getTime() <= Date.now())
+    ) {
+      throw new OAuthProxyError(error, description);
+    }
     if (!transaction) {
       throw new OAuthProxyError("invalid_request", "Invalid or expired state");
     }
@@ -687,6 +704,13 @@ export class OAuthProxy {
       );
     }
 
+    if (error) {
+      return this.redirectToClient(transaction, {
+        error,
+        error_description: description,
+      });
+    }
+
     // Exchange code with upstream provider
     const upstreamTokens = await this.exchangeUpstreamCode(code, transaction);
 
@@ -696,20 +720,7 @@ export class OAuthProxy {
       upstreamTokens,
     );
 
-    // Redirect to client callback with code
-    const redirectUrl = new URL(transaction.clientCallbackUrl);
-    redirectUrl.searchParams.set("code", clientCode);
-    redirectUrl.searchParams.set("state", transaction.state);
-    if (this.config.authorizationResponseIss) {
-      redirectUrl.searchParams.set("iss", this.config.baseUrl);
-    }
-
-    return new Response(null, {
-      headers: {
-        Location: redirectUrl.toString(),
-      },
-      status: 302,
-    });
+    return this.redirectToClient(transaction, { code: clientCode });
   }
 
   /**
@@ -763,22 +774,9 @@ export class OAuthProxy {
           "Transaction callback URL is not registered",
         );
       }
-      const redirectUrl = new URL(transaction.clientCallbackUrl);
-      redirectUrl.searchParams.set("error", "access_denied");
-      redirectUrl.searchParams.set(
-        "error_description",
-        "User denied authorization",
-      );
-      redirectUrl.searchParams.set("state", transaction.state);
-      if (this.config.authorizationResponseIss) {
-        redirectUrl.searchParams.set("iss", this.config.baseUrl);
-      }
-
-      return new Response(null, {
-        headers: {
-          Location: redirectUrl.toString(),
-        },
-        status: 302,
+      return this.redirectToClient(transaction, {
+        error: "access_denied",
+        error_description: "User denied authorization",
       });
     }
 
@@ -1096,7 +1094,7 @@ export class OAuthProxy {
       ) {
         const value = withoutOptionalWhitespace(pair.slice(separator + 1));
 
-        return CONSENT_COOKIE_VALUE.test(value) ? value : undefined;
+        return GENERATED_ID.test(value) ? value : undefined;
       }
     }
 
@@ -2011,6 +2009,24 @@ export class OAuthProxy {
    */
   private passthroughRefreshKey(refreshToken: string): string {
     return `passthrough-refresh:${sha256(refreshToken)}`;
+  }
+
+  private redirectToClient(
+    transaction: OAuthTransaction,
+    params: { code: string } | Pick<OAuthError, "error_description" | "error">,
+  ): Response {
+    const url = new URL(transaction.clientCallbackUrl);
+    for (const [name, value] of Object.entries(params)) {
+      if (value !== undefined) url.searchParams.set(name, value);
+    }
+    url.searchParams.set("state", transaction.state);
+    if (this.config.authorizationResponseIss) {
+      url.searchParams.set("iss", this.config.baseUrl);
+    }
+    return new Response(null, {
+      headers: { Location: url.toString() },
+      status: 302,
+    });
   }
 
   /**

@@ -389,6 +389,77 @@ describe("OAuth proxy client authentication", () => {
     });
   });
 
+  describe("upstream authorization errors", () => {
+    const denial = {
+      error: "access_denied",
+      error_description: "The user denied access",
+    };
+    const clientState = "client +state";
+
+    const denialCallback = async () => {
+      const http = await serve({ transactionTtl: 60 });
+      const { body: client } = await http.register();
+      const response = await http.authorize({
+        client_id: client.client_id,
+        redirect_uri: CALLBACK,
+        response_type: "code",
+        state: clientState,
+      });
+      const upstream = new URL(response.headers.get("location")!);
+      const callback = new URL(upstream.searchParams.get("redirect_uri")!);
+      callback.search = new URLSearchParams({
+        ...denial,
+        state: upstream.searchParams.get("state")!,
+      }).toString();
+      return callback;
+    };
+
+    const expectJsonDenial = async (url: URL) => {
+      const response = await fetch(url, { redirect: "manual" });
+      expect(response.status).toBe(400);
+      expect(response.headers.get("location")).toBeNull();
+      expect(await response.json()).toEqual(denial);
+    };
+
+    it("delivers a denial once, for the exact upstream state", async () => {
+      const callback = await denialCallback();
+      const state = callback.searchParams.get("state")!;
+      for (const states of [
+        [],
+        ["malformed!"],
+        ["A".repeat(43)],
+        [state, state],
+      ]) {
+        const invalid = new URL(callback);
+        invalid.searchParams.delete("state");
+        for (const value of states) invalid.searchParams.append("state", value);
+        await expectJsonDenial(invalid);
+      }
+
+      const response = await fetch(callback, { redirect: "manual" });
+      expect(response.status).toBe(302);
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin + location.pathname).toBe(CALLBACK);
+      expect(Object.fromEntries(location.searchParams)).toEqual({
+        ...denial,
+        iss: callback.origin,
+        state: clientState,
+      });
+      await expectJsonDenial(callback);
+    });
+
+    it("keeps a denial at the proxy once its transaction expires", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const callback = await denialCallback();
+        vi.setSystemTime(Date.now() + 60_000);
+        await expectJsonDenial(callback);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("a confidential client", () => {
     it("redeems a code only with its own secret, by either secret method", async () => {
       const http = await serve();
