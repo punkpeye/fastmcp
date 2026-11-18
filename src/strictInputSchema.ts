@@ -158,7 +158,12 @@ export function zodInputSchema(
       }
     }
 
-    for (const keyword of ["$defs", "definitions", "properties"]) {
+    for (const keyword of [
+      "$defs",
+      "definitions",
+      "patternProperties",
+      "properties",
+    ]) {
       const children = result[keyword];
       if (children && typeof children === "object") {
         result[keyword] = Object.fromEntries(

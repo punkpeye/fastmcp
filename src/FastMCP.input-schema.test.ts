@@ -404,6 +404,27 @@ test.each([
   ).toBe(false);
 });
 
+// Zod 4.3+ converts a `looseRecord` with a regex key to `patternProperties`.
+// The Zod this repo pins predates it, so the keyword is attached by hand.
+test("closes objects under patternProperties", async () => {
+  const schema = await listInputSchema(
+    z.object({
+      values: z.object({}).meta({
+        patternProperties: {
+          "^x-": { properties: { a: { type: "string" } }, type: "object" },
+        },
+      }),
+    }),
+  );
+
+  expect(acceptsArguments(schema, { values: { "x-k": { a: "v" } } })).toBe(
+    true,
+  );
+  expect(
+    acceptsArguments(schema, { values: { "x-k": { a: "v", extra: true } } }),
+  ).toBe(false);
+});
+
 test.each([
   {
     acceptsExtra: true,
