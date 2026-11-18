@@ -330,6 +330,8 @@ A pattern is matched against the redirect URI as written, and the host the URI l
 
 Patterns are checked again when a client asks for authorization, so tightening them also stops clients that registered under the old ones.
 
+A redirect URI with a fragment (`#…`) is refused whatever the patterns say, as RFC 6749 §3.1.2 requires; an encoded `%23` is part of the URI, not a fragment.
+
 ### Client ID Metadata Documents (CIMD)
 
 Some MCP clients — VS Code among them — identify themselves with an HTTPS URL

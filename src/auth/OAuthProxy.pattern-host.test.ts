@@ -145,6 +145,27 @@ describe("allowedRedirectUriPatterns match the host a URI leads to", () => {
     expect(await accepts(pattern, uri)).toBe(false);
   });
 
+  // RFC 6749 §3.1.2: a redirect URI MUST NOT include a fragment, whatever the
+  // pattern or the scheme. An encoded `%23` is part of the URI, not a fragment.
+  it.each([
+    [undefined, "http://localhost:54321/callback#frag"],
+    ["*", "https://app.example.com/cb#frag"],
+    ["https://*", "https://app.example.com/cb?x=1#frag"],
+    ["https://app.example.com/*", "https://app.example.com/cb#"],
+    ["myapp://*", "myapp://callback#frag"],
+    ["cursor://*", "cursor://anysphere.cursor-mcp/oauth/callback#"],
+    ["com.example.app:/oauth*", "com.example.app:/oauth2redirect#x"],
+  ])("%s refuses the fragment in %s", async (pattern, uri) => {
+    expect(await accepts(pattern, uri)).toBe(false);
+  });
+
+  it.each([
+    ["myapp://*", "myapp://callback%23frag"],
+    ["com.example.app:/oauth*", "com.example.app:/oauth2redirect?x=%23"],
+  ])("%s accepts the encoded # in %s", async (pattern, uri) => {
+    expect(await accepts(pattern, uri)).toBe(true);
+  });
+
   it("refuses authorization for a registration its patterns no longer allow", async () => {
     // Registrations are kept, here in storage two deployments share: one made
     // when the allow-list let more through, and one it still allows.
@@ -188,5 +209,50 @@ describe("allowedRedirectUriPatterns match the host a URI leads to", () => {
     expect((await authorize("https://client.example.com/cb")).status).toBe(200);
 
     tokenStorage.destroy();
+  });
+
+  it("refuses authorization for a stored redirect URI with a fragment", async () => {
+    const proxy = new OAuthProxy({
+      allowedRedirectUriPatterns: ["https://client.example.com/*"],
+      baseUrl: "https://proxy.example.com",
+      encryptionKey: false,
+      upstreamAuthorizationEndpoint: "https://provider.example/authorize",
+      upstreamClientId: "upstream-client",
+      upstreamClientSecret: "upstream-secret",
+      upstreamTokenEndpoint: "https://provider.example/token",
+    });
+
+    proxies.push(proxy);
+
+    // Registered before fragments were refused: registerClient() no longer
+    // takes it, so it is written to storage as that registration was.
+    const redirectUris = [
+      "https://client.example.com/cb#frag",
+      "https://client.example.com/cb",
+    ];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (proxy as any).stateStore.saveRegisteredClient({
+      callbackUrl: redirectUris[0],
+      clientId: "stored-client",
+      clientSecret: "stored-secret",
+      metadata: {},
+      redirectUris,
+      registeredAt: new Date(),
+      tokenEndpointAuthMethod: "client_secret_basic",
+    });
+
+    const authorize = (redirectUri: string) =>
+      proxy.authorize({
+        client_id: "stored-client",
+        redirect_uri: redirectUri,
+        response_type: "code",
+      });
+
+    await expect(authorize(redirectUris[0])).rejects.toMatchObject({
+      code: "invalid_request",
+      description: "redirect_uri is no longer allowed",
+    });
+    expect((await authorize(redirectUris[1])).status).toBe(200);
   });
 });
