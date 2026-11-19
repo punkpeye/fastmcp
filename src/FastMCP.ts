@@ -4058,9 +4058,7 @@ export class FastMCP<
   ) {
     this.#prompts = this.#prompts.filter((p) => p.name !== prompt.name);
     this.#prompts.push(prompt);
-    if (this.#serverState === ServerState.Running) {
-      this.#promptsListChanged(this.#prompts);
-    }
+    this.#promptsListChanged(this.#prompts);
   }
 
   /**
@@ -4079,9 +4077,7 @@ export class FastMCP<
     }
     this.#prompts = Array.from(promptsByName.values());
 
-    if (this.#serverState === ServerState.Running) {
-      this.#promptsListChanged(this.#prompts);
-    }
+    this.#promptsListChanged(this.#prompts);
   }
 
   /**
@@ -4093,9 +4089,7 @@ export class FastMCP<
     );
 
     this.#resources.push(resource);
-    if (this.#serverState === ServerState.Running) {
-      this.#resourcesListChanged(this.#resources);
-    }
+    this.#resourcesListChanged(this.#resources);
   }
 
   /**
@@ -4111,9 +4105,7 @@ export class FastMCP<
       this.#resources.push(resource);
     }
 
-    if (this.#serverState === ServerState.Running) {
-      this.#resourcesListChanged(this.#resources);
-    }
+    this.#resourcesListChanged(this.#resources);
   }
 
   /**
@@ -4127,9 +4119,7 @@ export class FastMCP<
     );
 
     this.#resourcesTemplates.push(resource);
-    if (this.#serverState === ServerState.Running) {
-      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
-    }
+    this.#resourceTemplatesListChanged(this.#resourcesTemplates);
   }
 
   /**
@@ -4145,9 +4135,7 @@ export class FastMCP<
       this.#resourcesTemplates.push(resource);
     }
 
-    if (this.#serverState === ServerState.Running) {
-      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
-    }
+    this.#resourceTemplatesListChanged(this.#resourcesTemplates);
   }
 
   /**
@@ -4159,9 +4147,7 @@ export class FastMCP<
     // Remove existing tool with the same name
     this.#tools = this.#tools.filter((t) => t.name !== tool.name);
     this.#tools.push(tool as unknown as Tool<T>);
-    if (this.#serverState === ServerState.Running) {
-      this.#toolsListChanged(this.#tools);
-    }
+    this.#toolsListChanged(this.#tools);
   }
 
   /**
@@ -4178,9 +4164,7 @@ export class FastMCP<
     }
     this.#tools = Array.from(toolsByName.values());
 
-    if (this.#serverState === ServerState.Running) {
-      this.#toolsListChanged(this.#tools);
-    }
+    this.#toolsListChanged(this.#tools);
   }
 
   /**
@@ -4335,9 +4319,7 @@ export class FastMCP<
    */
   public removePrompt(name: string) {
     this.#prompts = this.#prompts.filter((p) => p.name !== name);
-    if (this.#serverState === ServerState.Running) {
-      this.#promptsListChanged(this.#prompts);
-    }
+    this.#promptsListChanged(this.#prompts);
   }
 
   /**
@@ -4347,9 +4329,7 @@ export class FastMCP<
     for (const name of names) {
       this.#prompts = this.#prompts.filter((p) => p.name !== name);
     }
-    if (this.#serverState === ServerState.Running) {
-      this.#promptsListChanged(this.#prompts);
-    }
+    this.#promptsListChanged(this.#prompts);
   }
 
   /**
@@ -4357,9 +4337,7 @@ export class FastMCP<
    */
   public removeResource(name: string) {
     this.#resources = this.#resources.filter((r) => r.name !== name);
-    if (this.#serverState === ServerState.Running) {
-      this.#resourcesListChanged(this.#resources);
-    }
+    this.#resourcesListChanged(this.#resources);
   }
 
   /**
@@ -4369,9 +4347,7 @@ export class FastMCP<
     for (const name of names) {
       this.#resources = this.#resources.filter((r) => r.name !== name);
     }
-    if (this.#serverState === ServerState.Running) {
-      this.#resourcesListChanged(this.#resources);
-    }
+    this.#resourcesListChanged(this.#resources);
   }
 
   /**
@@ -4381,9 +4357,7 @@ export class FastMCP<
     this.#resourcesTemplates = this.#resourcesTemplates.filter(
       (t) => t.name !== name,
     );
-    if (this.#serverState === ServerState.Running) {
-      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
-    }
+    this.#resourceTemplatesListChanged(this.#resourcesTemplates);
   }
 
   /**
@@ -4395,9 +4369,7 @@ export class FastMCP<
         (t) => t.name !== name,
       );
     }
-    if (this.#serverState === ServerState.Running) {
-      this.#resourceTemplatesListChanged(this.#resourcesTemplates);
-    }
+    this.#resourceTemplatesListChanged(this.#resourcesTemplates);
   }
 
   /**
@@ -4406,9 +4378,7 @@ export class FastMCP<
   public removeTool(name: string) {
     // Remove existing tool with the same name
     this.#tools = this.#tools.filter((t) => t.name !== name);
-    if (this.#serverState === ServerState.Running) {
-      this.#toolsListChanged(this.#tools);
-    }
+    this.#toolsListChanged(this.#tools);
   }
 
   /**
@@ -4418,9 +4388,7 @@ export class FastMCP<
     for (const name of names) {
       this.#tools = this.#tools.filter((t) => t.name !== name);
     }
-    if (this.#serverState === ServerState.Running) {
-      this.#toolsListChanged(this.#tools);
-    }
+    this.#toolsListChanged(this.#tools);
   }
 
   /**
@@ -4757,7 +4725,8 @@ export class FastMCP<
 
   /**
    * Stops transports created by `start()`. Transports passed to `connect()`
-   * remain open and belong to the caller.
+   * remain open and belong to the caller, and continue receiving registration
+   * updates until they are closed.
    */
   public async stop() {
     await Promise.all(
@@ -5901,7 +5870,7 @@ export class FastMCP<
    * Notifies all sessions that the prompts list has changed.
    */
   #promptsListChanged(prompts: Prompt<T>[]) {
-    for (const session of this.#sessions) {
+    for (const session of [...this.#sessions]) {
       session.promptsListChanged(prompts);
     }
   }
@@ -5944,7 +5913,7 @@ export class FastMCP<
    * Notifies all sessions that the resources list has changed.
    */
   #resourcesListChanged(resources: Resource<T>[]) {
-    for (const session of this.#sessions) {
+    for (const session of [...this.#sessions]) {
       session.resourcesListChanged(resources);
     }
   }
@@ -5953,7 +5922,7 @@ export class FastMCP<
    * Notifies all sessions that the resource templates list has changed.
    */
   #resourceTemplatesListChanged(templates: InputResourceTemplate<T>[]) {
-    for (const session of this.#sessions) {
+    for (const session of [...this.#sessions]) {
       session.resourceTemplatesListChanged(templates);
     }
   }
@@ -5962,7 +5931,7 @@ export class FastMCP<
    * Notifies all sessions that the tools list has changed.
    */
   #toolsListChanged(tools: Tool<T>[]) {
-    for (const session of this.#sessions) {
+    for (const session of [...this.#sessions]) {
       session.toolsListChanged(tools);
     }
   }
