@@ -3,8 +3,11 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   ContentBlockSchema,
   ListRootsRequestSchema,
+  PromptListChangedNotificationSchema,
   ResourceLink,
   ResourceLinkSchema,
+  ResourceListChangedNotificationSchema,
+  ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -30,6 +33,201 @@ const connectInMemory = async (server: FastMCP) => {
 };
 
 describe("FastMCP in-memory transport", () => {
+  it.each([false, true])(
+    "keeps caller-owned sessions' tools current after stop (batch: %s)",
+    async (batch) => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      server.addTool({ execute: async () => "old", name: "old" });
+      const connections = [
+        await connectInMemory(server),
+        await connectInMemory(server),
+      ];
+      const notifications = connections.map(({ client }) => {
+        const changed = vi.fn();
+        client.setNotificationHandler(
+          ToolListChangedNotificationSchema,
+          changed,
+        );
+        return changed;
+      });
+
+      try {
+        await server.stop();
+        const tool = { execute: async () => "new", name: "new" };
+        if (batch) {
+          server.addTools([tool]);
+          server.removeTools(["old"]);
+        } else {
+          server.addTool(tool);
+          server.removeTool("old");
+        }
+
+        for (const { client, session } of connections) {
+          expect(session.isReady).toBe(true);
+          expect(
+            (await client.listTools()).tools.map((tool) => tool.name),
+          ).toEqual(["new"]);
+          expect(await client.callTool({ name: "new" })).toEqual({
+            content: [{ text: "new", type: "text" }],
+          });
+          await expect(client.callTool({ name: "old" })).rejects.toThrow(
+            "Unknown tool",
+          );
+        }
+        for (const changed of notifications) {
+          await expect.poll(() => changed.mock.calls.length).toBe(2);
+        }
+      } finally {
+        for (const { client, session } of connections) {
+          await client.close();
+          await session.close();
+        }
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "keeps caller-owned sessions' resources current after stop (batch: %s)",
+    async (batch) => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      server.addResource({
+        load: async () => ({ text: "old" }),
+        name: "old",
+        uri: "file:///old",
+      });
+      const { client, session } = await connectInMemory(server);
+      const changed = vi.fn();
+      client.setNotificationHandler(
+        ResourceListChangedNotificationSchema,
+        changed,
+      );
+
+      try {
+        await server.stop();
+        const resource = {
+          load: async () => ({ text: "new" }),
+          name: "new",
+          uri: "file:///new",
+        };
+        if (batch) {
+          server.addResources([resource]);
+          server.removeResources(["old"]);
+        } else {
+          server.addResource(resource);
+          server.removeResource("old");
+        }
+
+        expect(
+          (await client.listResources()).resources.map(
+            (resource) => resource.uri,
+          ),
+        ).toEqual(["file:///new"]);
+        expect(await client.readResource({ uri: "file:///new" })).toMatchObject(
+          { contents: [{ text: "new" }] },
+        );
+        await expect(
+          client.readResource({ uri: "file:///old" }),
+        ).rejects.toThrow("Resource not found");
+        await expect.poll(() => changed.mock.calls.length).toBe(2);
+      } finally {
+        await client.close();
+        await session.close();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "keeps caller-owned sessions' resource templates current after stop (batch: %s)",
+    async (batch) => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      server.addResourceTemplate({
+        arguments: [{ name: "id" }],
+        load: async () => ({ text: "old" }),
+        name: "old",
+        uriTemplate: "file:///old/{id}",
+      });
+      const { client, session } = await connectInMemory(server);
+      const changed = vi.fn();
+      client.setNotificationHandler(
+        ResourceListChangedNotificationSchema,
+        changed,
+      );
+
+      try {
+        await server.stop();
+        const resource = {
+          arguments: [{ name: "id" }],
+          load: async () => ({ text: "new" }),
+          name: "new",
+          uriTemplate: "file:///new/{id}",
+        };
+        if (batch) {
+          server.addResourceTemplates([resource]);
+          server.removeResourceTemplates(["old"]);
+        } else {
+          server.addResourceTemplate(resource);
+          server.removeResourceTemplate("old");
+        }
+
+        expect(
+          (await client.listResourceTemplates()).resourceTemplates.map(
+            (resource) => resource.uriTemplate,
+          ),
+        ).toEqual(["file:///new/{id}"]);
+        expect(
+          await client.readResource({ uri: "file:///new/1" }),
+        ).toMatchObject({ contents: [{ text: "new" }] });
+        await expect(
+          client.readResource({ uri: "file:///old/1" }),
+        ).rejects.toThrow("Resource not found");
+        await expect.poll(() => changed.mock.calls.length).toBe(2);
+      } finally {
+        await client.close();
+        await session.close();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "keeps caller-owned sessions' prompts current after stop (batch: %s)",
+    async (batch) => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      server.addPrompt({ load: async () => "old", name: "old" });
+      const { client, session } = await connectInMemory(server);
+      const changed = vi.fn();
+      client.setNotificationHandler(
+        PromptListChangedNotificationSchema,
+        changed,
+      );
+
+      try {
+        await server.stop();
+        const prompt = { load: async () => "new", name: "new" };
+        if (batch) {
+          server.addPrompts([prompt]);
+          server.removePrompts(["old"]);
+        } else {
+          server.addPrompt(prompt);
+          server.removePrompt("old");
+        }
+
+        expect(
+          (await client.listPrompts()).prompts.map((prompt) => prompt.name),
+        ).toEqual(["new"]);
+        expect(await client.getPrompt({ name: "new" })).toMatchObject({
+          messages: [{ content: { text: "new" } }],
+        });
+        await expect(client.getPrompt({ name: "old" })).rejects.toThrow(
+          "Unknown prompt",
+        );
+        await expect.poll(() => changed.mock.calls.length).toBe(2);
+      } finally {
+        await client.close();
+        await session.close();
+      }
+    },
+  );
+
   it("serves tools registered on the FastMCP instance", async () => {
     const server = new FastMCP({ name: "Test", version: "1.0.0" });
 
