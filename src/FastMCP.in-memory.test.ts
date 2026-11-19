@@ -29,10 +29,125 @@ const connectInMemory = async (server: FastMCP) => {
     client.connect(clientTransport),
   ]);
 
-  return { client, session };
+  return { client, serverTransport, session };
 };
 
 describe("FastMCP in-memory transport", () => {
+  it.each(["tools", "resources", "resource templates", "prompts"])(
+    "updates remaining sessions' %s when another closes during notification",
+    async (registry) => {
+      const server = new FastMCP({ name: "Test", version: "1.0.0" });
+      server.addTool({ execute: async () => "old", name: "old" });
+      server.addResource({
+        load: async () => ({ text: "old" }),
+        name: "old",
+        uri: "file:///old",
+      });
+      server.addResourceTemplate({
+        arguments: [{ name: "id" }],
+        load: async () => ({ text: "old" }),
+        name: "old",
+        uriTemplate: "file:///old/{id}",
+      });
+      server.addPrompt({ load: async () => "old", name: "old" });
+      const first = await connectInMemory(server);
+      const second = await connectInMemory(server);
+      const changed = vi.fn();
+      if (registry === "tools") {
+        second.client.setNotificationHandler(
+          ToolListChangedNotificationSchema,
+          changed,
+        );
+      } else if (registry === "prompts") {
+        second.client.setNotificationHandler(
+          PromptListChangedNotificationSchema,
+          changed,
+        );
+      } else {
+        second.client.setNotificationHandler(
+          ResourceListChangedNotificationSchema,
+          changed,
+        );
+      }
+      const send = first.serverTransport.send.bind(first.serverTransport);
+      // A transport may detect closure and report it synchronously from send().
+      first.serverTransport.send = async (message, options) => {
+        if ("method" in message && message.method.endsWith("/list_changed")) {
+          const onclose = first.serverTransport.onclose;
+          first.serverTransport.onclose = undefined;
+          onclose?.();
+          await first.serverTransport.close();
+          return;
+        }
+        await send(message, options);
+      };
+
+      try {
+        await server.stop();
+        switch (registry) {
+          case "prompts":
+            server.addPrompt({ load: async () => "new", name: "new" });
+            expect(
+              (await second.client.listPrompts()).prompts.map(
+                (prompt) => prompt.name,
+              ),
+            ).toEqual(["old", "new"]);
+            expect(
+              await second.client.getPrompt({ name: "new" }),
+            ).toMatchObject({ messages: [{ content: { text: "new" } }] });
+            break;
+          case "resources":
+            server.addResource({
+              load: async () => ({ text: "new" }),
+              name: "new",
+              uri: "file:///new",
+            });
+            expect(
+              (await second.client.listResources()).resources.map(
+                (resource) => resource.uri,
+              ),
+            ).toEqual(["file:///old", "file:///new"]);
+            expect(
+              await second.client.readResource({ uri: "file:///new" }),
+            ).toMatchObject({ contents: [{ text: "new" }] });
+            break;
+          case "resource templates":
+            server.addResourceTemplate({
+              arguments: [{ name: "id" }],
+              load: async () => ({ text: "new" }),
+              name: "new",
+              uriTemplate: "file:///new/{id}",
+            });
+            expect(
+              (
+                await second.client.listResourceTemplates()
+              ).resourceTemplates.map((resource) => resource.uriTemplate),
+            ).toEqual(["file:///old/{id}", "file:///new/{id}"]);
+            expect(
+              await second.client.readResource({ uri: "file:///new/1" }),
+            ).toMatchObject({ contents: [{ text: "new" }] });
+            break;
+          case "tools":
+            server.addTool({ execute: async () => "new", name: "new" });
+            expect(
+              (await second.client.listTools()).tools.map((tool) => tool.name),
+            ).toEqual(["old", "new"]);
+            expect(await second.client.callTool({ name: "new" })).toMatchObject(
+              { content: [{ text: "new" }] },
+            );
+            break;
+        }
+        expect(server.sessions).toEqual([second.session]);
+        await expect.poll(() => changed.mock.calls.length).toBe(1);
+      } finally {
+        await first.client.close();
+        await first.session.close();
+        await second.client.close();
+        await second.session.close();
+      }
+    },
+  );
+
   it.each([false, true])(
     "keeps caller-owned sessions' tools current after stop (batch: %s)",
     async (batch) => {
@@ -56,9 +171,15 @@ describe("FastMCP in-memory transport", () => {
         const tool = { execute: async () => "new", name: "new" };
         if (batch) {
           server.addTools([tool]);
-          server.removeTools(["old"]);
         } else {
           server.addTool(tool);
+        }
+        for (const changed of notifications) {
+          await expect.poll(() => changed.mock.calls.length).toBe(1);
+        }
+        if (batch) {
+          server.removeTools(["old"]);
+        } else {
           server.removeTool("old");
         }
 
@@ -111,9 +232,13 @@ describe("FastMCP in-memory transport", () => {
         };
         if (batch) {
           server.addResources([resource]);
-          server.removeResources(["old"]);
         } else {
           server.addResource(resource);
+        }
+        await expect.poll(() => changed.mock.calls.length).toBe(1);
+        if (batch) {
+          server.removeResources(["old"]);
+        } else {
           server.removeResource("old");
         }
 
@@ -163,9 +288,13 @@ describe("FastMCP in-memory transport", () => {
         };
         if (batch) {
           server.addResourceTemplates([resource]);
-          server.removeResourceTemplates(["old"]);
         } else {
           server.addResourceTemplate(resource);
+        }
+        await expect.poll(() => changed.mock.calls.length).toBe(1);
+        if (batch) {
+          server.removeResourceTemplates(["old"]);
+        } else {
           server.removeResourceTemplate("old");
         }
 
@@ -205,9 +334,13 @@ describe("FastMCP in-memory transport", () => {
         const prompt = { load: async () => "new", name: "new" };
         if (batch) {
           server.addPrompts([prompt]);
-          server.removePrompts(["old"]);
         } else {
           server.addPrompt(prompt);
+        }
+        await expect.poll(() => changed.mock.calls.length).toBe(1);
+        if (batch) {
+          server.removePrompts(["old"]);
+        } else {
           server.removePrompt("old");
         }
 

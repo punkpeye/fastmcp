@@ -5870,7 +5870,7 @@ export class FastMCP<
    * Notifies all sessions that the prompts list has changed.
    */
   #promptsListChanged(prompts: Prompt<T>[]) {
-    for (const session of this.#sessions) {
+    for (const session of [...this.#sessions]) {
       session.promptsListChanged(prompts);
     }
   }
@@ -5913,7 +5913,7 @@ export class FastMCP<
    * Notifies all sessions that the resources list has changed.
    */
   #resourcesListChanged(resources: Resource<T>[]) {
-    for (const session of this.#sessions) {
+    for (const session of [...this.#sessions]) {
       session.resourcesListChanged(resources);
     }
   }
@@ -5922,7 +5922,7 @@ export class FastMCP<
    * Notifies all sessions that the resource templates list has changed.
    */
   #resourceTemplatesListChanged(templates: InputResourceTemplate<T>[]) {
-    for (const session of this.#sessions) {
+    for (const session of [...this.#sessions]) {
       session.resourceTemplatesListChanged(templates);
     }
   }
@@ -5931,7 +5931,7 @@ export class FastMCP<
    * Notifies all sessions that the tools list has changed.
    */
   #toolsListChanged(tools: Tool<T>[]) {
-    for (const session of this.#sessions) {
+    for (const session of [...this.#sessions]) {
       session.toolsListChanged(tools);
     }
   }
