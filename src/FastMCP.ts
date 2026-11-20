@@ -4228,16 +4228,20 @@ export class FastMCP<
    * Embeds a resource by URI, making it easy to include resources in tool responses.
    *
    * @param uri - The URI of the resource to embed
+   * @param context - The calling tool's context; its `session` reaches the loader as `auth`
    * @returns Promise<ResourceContent> - The embedded resource content
    */
-  public async embedded(uri: string): Promise<ResourceContent["resource"]> {
+  public async embedded(
+    uri: string,
+    context?: LoadContext<T>,
+  ): Promise<ResourceContent["resource"]> {
     // First, try to find a direct resource match
     const directResource = this.#resources.find(
       (resource) => resource.uri === uri,
     );
 
     if (directResource) {
-      const result = await directResource.load();
+      const result = await directResource.load(context?.session, context);
       const results = Array.isArray(result) ? result : [result];
       const firstResult = results[0];
 
@@ -4274,6 +4278,8 @@ export class FastMCP<
 
       const result = await template.load(
         params as ResourceTemplateArgumentsToObject<typeof template.arguments>,
+        context?.session,
+        context,
       );
 
       const results = Array.isArray(result) ? result : [result];
