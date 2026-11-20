@@ -2,7 +2,7 @@
   "mcpServers": {
     "context7": {
       "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"],
+      "args": ["-y", "@upstash/context7-mcp@4.7.3"],
       "env": {
         "DEFAULT_MINIMUM_TOKENS": ""
       }

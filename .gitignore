@@ -1,6 +1,9 @@
 dist
 node_modules
 !.prettierignore
+.env
+.env.*
+!.env.example
 .envrc
 .idea
 CLAUDE.local.md

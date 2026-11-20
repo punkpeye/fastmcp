@@ -782,7 +782,7 @@ export class WebStreamableHTTPServerTransport implements Transport {
     // and nothing else would ever drop its routing entry. Release it here.
     for (const message of messages) {
       const cancelled = CancelledNotificationSchema.safeParse(message);
-      if (cancelled.success) {
+      if (cancelled.success && cancelled.data.params.requestId !== undefined) {
         await this.releaseCancelledRequest(cancelled.data.params.requestId);
       }
     }
