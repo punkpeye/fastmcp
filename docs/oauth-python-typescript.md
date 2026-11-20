@@ -560,12 +560,12 @@ For **server-side OAuth proxy**, migration is straightforward with minimal code 
 
 ### Python FastMCP
 
-- Repository: [jlowin/fastmcp](https://github.com/jlowin/fastmcp)
-- Documentation: [fastmcp.io](https://fastmcp.io)
+- Repository: [PrefectHQ/fastmcp](https://github.com/PrefectHQ/fastmcp)
+- Documentation: [gofastmcp.com](https://gofastmcp.com)
 
 ### TypeScript FastMCP
 
-- Repository: [FastMCP TypeScript](https://github.com/your-org/fastmcp)
+- Repository: [punkpeye/fastmcp](https://github.com/punkpeye/fastmcp)
 - Documentation: See `docs/` directory
   - [OAuth Proxy Features](oauth-proxy-features.md)
   - [OAuth Proxy Guide](oauth-proxy-guide.md)

@@ -409,6 +409,6 @@ See [Implementation Guide](oauth-proxy-guide.md#troubleshooting) for more soluti
 
 For issues, questions, or contributions:
 
-- Report bugs in the [issue tracker](https://github.com/your-org/fastmcp/issues)
+- Report bugs in the [issue tracker](https://github.com/punkpeye/fastmcp/issues)
 - Check [examples](../src/examples/) for working code
 - Review [documentation](oauth-proxy-guide.md) for detailed guidance
