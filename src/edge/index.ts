@@ -869,6 +869,17 @@ export class EdgeFastMCP {
           unknown
         >;
       }
+      // Standard Schema 1.0's types predate the JSON Schema extension.
+      const standard = schema["~standard"] as {
+        jsonSchema?: {
+          input: (options: { target: "draft-07" }) => JsonSchema;
+        };
+      } & StandardSchemaV1.Props;
+      if (standard.jsonSchema) {
+        return strictInputSchema(
+          standard.jsonSchema.input({ target: "draft-07" }),
+        ) as Record<string, unknown>;
+      }
       // For StandardSchema, fall back to a generic object schema
       return { type: "object" };
     } catch {
