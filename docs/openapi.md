@@ -85,7 +85,9 @@ This means a "get by ID" style endpoint typically becomes a resource template, w
 
 There's no per-operation override for this — an eligible `GET` always maps to a resource when `resources: true`; use `exclude` if you want a specific one to stay a tool instead of being generated at all.
 
-Eligibility doesn't check the response's own content type, only the request shape. A `GET` returning binary data (an image, a PDF, ...) can still become a resource, and its response is read as text, not as the binary-safe `blob` a resource can also return — corrupting non-text bytes. If your spec has binary-returning `GET`s you want as resources, use `exclude` to keep them as tools instead until this is addressed.
+Eligibility checks the request shape, not the response's content type. Resource reads use the HTTP response's `Content-Type`: binary responses (for example, images, PDFs and `application/octet-stream`) return a base64-encoded `blob` with that media type, preserving the original bytes. Static resources, resource templates and `embedded()` all support these results.
+
+`text/*`, JSON, XML (including `+json` and `+xml` media types), JavaScript, ECMAScript and form-urlencoded responses retain their existing text handling. Responses without a `Content-Type` also keep the existing text/JSON detection; binary endpoints must send a suitable `Content-Type`. Tool responses retain their existing text/structured-output handling.
 
 ## Structured output
 

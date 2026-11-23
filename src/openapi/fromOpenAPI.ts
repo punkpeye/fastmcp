@@ -1,4 +1,3 @@
-import type { ResourceResult } from "../FastMCP.js";
 import type { ParameterMapping } from "./schemas.js";
 import type { HttpRoute } from "./types.js";
 import type { FromOpenAPIOptions } from "./types.js";
@@ -7,7 +6,11 @@ import { FastMCP } from "../FastMCP.js";
 import { jsonSchemaAdapter } from "../jsonSchemaAdapter.js";
 import { loadSpec } from "./loadSpec.js";
 import { generateNames } from "./naming.js";
-import { executeRequest, type ExecuteRequestResult } from "./requestBuilder.js";
+import {
+  executeRequest,
+  type ExecuteRequestResult,
+  executeResourceRequest,
+} from "./requestBuilder.js";
 import {
   buildResourceMapping,
   isEligibleForResource,
@@ -159,9 +162,7 @@ function registerResource(
     server.addResource({
       description,
       load: async (_auth, context) =>
-        wrapAsResourceResult(
-          await executeRequest({ ...execOptions, args: {}, context }),
-        ),
+        executeResourceRequest({ ...execOptions, args: {}, context }),
       name,
       uri: mapping.uri,
     });
@@ -173,13 +174,11 @@ function registerResource(
     arguments: mapping.args,
     description,
     load: async (args, _auth, context) =>
-      wrapAsResourceResult(
-        await executeRequest({
-          ...execOptions,
-          args: args as Record<string, unknown>,
-          context,
-        }),
-      ),
+      executeResourceRequest({
+        ...execOptions,
+        args: args as Record<string, unknown>,
+        context,
+      }),
     name,
     uriTemplate: mapping.uriTemplate,
   });
@@ -215,17 +214,4 @@ async function resolveToolResult(
   }
 
   return { content: [{ text, type: "text" }], isError: true };
-}
-
-function wrapAsResourceResult({ text }: ExecuteRequestResult): ResourceResult {
-  // Content-sniffed rather than relying on executeRequest's header-gated
-  // `json` field (which exists for the tool/outputSchema path): a server
-  // that returns valid JSON without a matching content-type header should
-  // still be recognized here, same as before this field existed.
-  try {
-    JSON.parse(text);
-    return { mimeType: "application/json", text };
-  } catch {
-    return { mimeType: "text/plain", text };
-  }
 }

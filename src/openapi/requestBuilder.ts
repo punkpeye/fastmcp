@@ -1,4 +1,8 @@
-import type { FastMCPSessionAuth, LoadContext } from "../FastMCP.js";
+import type {
+  FastMCPSessionAuth,
+  LoadContext,
+  ResourceResult,
+} from "../FastMCP.js";
 import type { ParameterMapping } from "./schemas.js";
 import type { FromOpenAPIOptions, HttpRoute, OpenApiServer } from "./types.js";
 
@@ -31,148 +35,41 @@ export interface ExecuteRequestResult {
 export async function executeRequest(
   options: ExecuteRequestOptions,
 ): Promise<ExecuteRequestResult> {
-  const baseUrl = resolveBaseUrl(
-    options.servers,
-    options.origin,
-    options.baseUrlOverride,
-  );
+  return readTextResponse(await fetchResponse(options));
+}
 
-  const pathParams: Record<string, string> = Object.create(null);
-  const queryParts: string[] = [];
-  // A plain object keys headers case-sensitively, so a caller-supplied
-  // header (e.g. "Content-Type") wouldn't be recognized as the same header
-  // as one this function sets internally (e.g. "content-type") — `Headers`
-  // normalizes casing, so `.set()` correctly overrides rather than
-  // combining into a comma-joined, malformed value.
-  const headers = new Headers(
-    await resolveHeaders(options.headers, options.context),
-  );
-  const bodyProps: Record<string, unknown> = Object.create(null);
+/** Resources can carry bytes directly, unlike the tool's text response path. */
+export async function executeResourceRequest(
+  options: ExecuteRequestOptions,
+): Promise<ResourceResult> {
+  const response = await fetchResponse(options);
+  const mimeType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    .trim()
+    .toLowerCase();
 
-  for (const [key, value] of Object.entries(options.args)) {
-    const mapping = options.parameterMap[key];
-
-    if (!mapping || value === undefined) {
-      continue;
-    }
-
-    // RFC 6570, which OpenAPI's parameter styles follow, treats null as
-    // undefined, so a null query, header or cookie value is left out rather
-    // than sent as the string "null". A body property keeps its JSON null.
-    if (
-      value === null &&
-      (mapping.in === "query" ||
-        mapping.in === "header" ||
-        mapping.in === "cookie")
-    ) {
-      continue;
-    }
-
-    switch (mapping.in) {
-      case "body":
-        bodyProps[mapping.name] = value;
-        break;
-      case "cookie": {
-        const pair = `${mapping.name}=${encodeCookieValue(mapping, value)}`;
-        const existing = headers.get("cookie");
-        headers.set("cookie", existing ? `${existing}; ${pair}` : pair);
-        break;
-      }
-      case "header":
-        headers.set(
-          mapping.name,
-          serializeHeaderValue(value, mapping.style, mapping.explode),
-        );
-        break;
-      case "path":
-        pathParams[mapping.name] = encodePathValue(
-          value,
-          mapping.style,
-          mapping.explode,
-        );
-        break;
-      case "query": {
-        const query = new URLSearchParams();
-        appendQueryValue(
-          query,
-          mapping.name,
-          mapping.style,
-          value,
-          mapping.explode,
-        );
-        if (query.size > 0) {
-          queryParts.push(serializeQuery(query, mapping.allowReserved));
-        }
-        break;
-      }
-    }
+  if (
+    mimeType &&
+    !mimeType.startsWith("text/") &&
+    !/(?:\/|\+)(?:json|xml|javascript|ecmascript)$/.test(mimeType) &&
+    mimeType !== "application/x-www-form-urlencoded"
+  ) {
+    return {
+      blob: Buffer.from(await response.arrayBuffer()).toString("base64"),
+      mimeType,
+    };
   }
 
-  let path = options.route.path;
-
-  for (const [name, value] of Object.entries(pathParams)) {
-    path = path.replaceAll(`{${name}}`, value);
+  const { text } = await readTextResponse(response);
+  // Keep content sniffing for textual responses, including JSON returned
+  // without a matching Content-Type, as on the existing resource path.
+  try {
+    JSON.parse(text);
+    return { mimeType: "application/json", text };
+  } catch {
+    return { mimeType: "text/plain", text };
   }
-
-  assertNoSubstitutedDotSegments(options.route, path);
-
-  const url = new URL(baseUrl.replace(/\/$/, "") + path);
-  url.search = queryParts.join("&");
-
-  let body: string | undefined;
-
-  const requiredJsonBody =
-    options.bodyEncoding === "json" &&
-    options.route.requestBody?.required === true &&
-    !options.wholeBodyKey;
-
-  if (Object.keys(bodyProps).length > 0 || requiredJsonBody) {
-    const payload = options.wholeBodyKey
-      ? bodyProps[options.wholeBodyKey]
-      : bodyProps;
-
-    if (options.bodyEncoding === "form") {
-      if (!headers.has("content-type")) {
-        headers.set("content-type", "application/x-www-form-urlencoded");
-      }
-
-      body = encodeFormBody(payload);
-    } else {
-      if (!headers.has("content-type")) {
-        headers.set("content-type", "application/json");
-      }
-
-      body = JSON.stringify(payload);
-    }
-  }
-
-  const response = await options.fetchImpl(url.toString(), {
-    body,
-    headers,
-    method: options.route.method.toUpperCase(),
-    signal: options.signal,
-  });
-
-  const text = await response.text();
-
-  if (!response.ok) {
-    throw new UserError(
-      `${options.route.method.toUpperCase()} ${path} failed with ${response.status}: ${text.slice(0, 2000)}`,
-    );
-  }
-
-  const mediaType = response.headers.get("content-type")?.split(";")[0];
-
-  if (mediaType?.toLowerCase().includes("json")) {
-    try {
-      const json: unknown = JSON.parse(text);
-      return { json, text: JSON.stringify(json, null, 2) };
-    } catch {
-      return { text };
-    }
-  }
-
-  return { text };
 }
 
 /**
@@ -476,6 +373,159 @@ function encodePathValue(
   }
 
   return encodeURIComponent(String(value));
+}
+
+async function fetchResponse(
+  options: ExecuteRequestOptions,
+): Promise<Response> {
+  const baseUrl = resolveBaseUrl(
+    options.servers,
+    options.origin,
+    options.baseUrlOverride,
+  );
+
+  const pathParams: Record<string, string> = Object.create(null);
+  const queryParts: string[] = [];
+  // A plain object keys headers case-sensitively, so a caller-supplied
+  // header (e.g. "Content-Type") wouldn't be recognized as the same header
+  // as one this function sets internally (e.g. "content-type") — `Headers`
+  // normalizes casing, so `.set()` correctly overrides rather than
+  // combining into a comma-joined, malformed value.
+  const headers = new Headers(
+    await resolveHeaders(options.headers, options.context),
+  );
+  const bodyProps: Record<string, unknown> = Object.create(null);
+
+  for (const [key, value] of Object.entries(options.args)) {
+    const mapping = options.parameterMap[key];
+
+    if (!mapping || value === undefined) {
+      continue;
+    }
+
+    // RFC 6570, which OpenAPI's parameter styles follow, treats null as
+    // undefined, so a null query, header or cookie value is left out rather
+    // than sent as the string "null". A body property keeps its JSON null.
+    if (
+      value === null &&
+      (mapping.in === "query" ||
+        mapping.in === "header" ||
+        mapping.in === "cookie")
+    ) {
+      continue;
+    }
+
+    switch (mapping.in) {
+      case "body":
+        bodyProps[mapping.name] = value;
+        break;
+      case "cookie": {
+        const pair = `${mapping.name}=${encodeCookieValue(mapping, value)}`;
+        const existing = headers.get("cookie");
+        headers.set("cookie", existing ? `${existing}; ${pair}` : pair);
+        break;
+      }
+      case "header":
+        headers.set(
+          mapping.name,
+          serializeHeaderValue(value, mapping.style, mapping.explode),
+        );
+        break;
+      case "path":
+        pathParams[mapping.name] = encodePathValue(
+          value,
+          mapping.style,
+          mapping.explode,
+        );
+        break;
+      case "query": {
+        const query = new URLSearchParams();
+        appendQueryValue(
+          query,
+          mapping.name,
+          mapping.style,
+          value,
+          mapping.explode,
+        );
+        if (query.size > 0) {
+          queryParts.push(serializeQuery(query, mapping.allowReserved));
+        }
+        break;
+      }
+    }
+  }
+
+  let path = options.route.path;
+
+  for (const [name, value] of Object.entries(pathParams)) {
+    path = path.replaceAll(`{${name}}`, value);
+  }
+
+  assertNoSubstitutedDotSegments(options.route, path);
+
+  const url = new URL(baseUrl.replace(/\/$/, "") + path);
+  url.search = queryParts.join("&");
+
+  let body: string | undefined;
+
+  const requiredJsonBody =
+    options.bodyEncoding === "json" &&
+    options.route.requestBody?.required === true &&
+    !options.wholeBodyKey;
+
+  if (Object.keys(bodyProps).length > 0 || requiredJsonBody) {
+    const payload = options.wholeBodyKey
+      ? bodyProps[options.wholeBodyKey]
+      : bodyProps;
+
+    if (options.bodyEncoding === "form") {
+      if (!headers.has("content-type")) {
+        headers.set("content-type", "application/x-www-form-urlencoded");
+      }
+
+      body = encodeFormBody(payload);
+    } else {
+      if (!headers.has("content-type")) {
+        headers.set("content-type", "application/json");
+      }
+
+      body = JSON.stringify(payload);
+    }
+  }
+
+  const response = await options.fetchImpl(url.toString(), {
+    body,
+    headers,
+    method: options.route.method.toUpperCase(),
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new UserError(
+      `${options.route.method.toUpperCase()} ${path} failed with ${response.status}: ${text.slice(0, 2000)}`,
+    );
+  }
+
+  return response;
+}
+
+async function readTextResponse(
+  response: Response,
+): Promise<ExecuteRequestResult> {
+  const text = await response.text();
+  const mediaType = response.headers.get("content-type")?.split(";")[0];
+
+  if (mediaType?.toLowerCase().includes("json")) {
+    try {
+      const json: unknown = JSON.parse(text);
+      return { json, text: JSON.stringify(json, null, 2) };
+    } catch {
+      return { text };
+    }
+  }
+
+  return { text };
 }
 
 async function resolveHeaders(
