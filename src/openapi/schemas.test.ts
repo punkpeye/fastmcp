@@ -277,6 +277,63 @@ test("a non-object request body is exposed as a single `body` property", () => {
   expect(flatSchema.required).toContain("body");
 });
 
+test.each(["allOf", "anyOf", "oneOf"])(
+  "a JSON body with %s keeps its own properties and composition together",
+  (composition) => {
+    const schema = {
+      additionalProperties: false,
+      [composition]: [{ required: ["name"] }],
+      properties: { name: { type: "string" } },
+      type: "object",
+    };
+    const { bodyEncoding, flatSchema, parameterMap, wholeBodyKey } =
+      buildFlatSchema(
+        route({
+          requestBody: {
+            content: { "application/json": { schema } },
+            required: true,
+          },
+        }),
+        undefined,
+      );
+
+    expect(bodyEncoding).toBe("json");
+    expect(wholeBodyKey).toBe("body");
+    expect(flatSchema.properties).toEqual({ body: schema });
+    expect(flatSchema.required).toEqual(["body"]);
+    expect(parameterMap).toEqual({ body: { in: "body", name: "body" } });
+  },
+);
+
+test.each(["allOf", "anyOf", "oneOf"])(
+  "a composition inside a JSON body property does not change flattening: %s",
+  (composition) => {
+    const field = { [composition]: [{ type: "string" }] };
+    const { flatSchema, parameterMap, wholeBodyKey } = buildFlatSchema(
+      route({
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { name: field },
+                required: ["name"],
+                type: "object",
+              },
+            },
+          },
+          required: true,
+        },
+      }),
+      undefined,
+    );
+
+    expect(wholeBodyKey).toBeUndefined();
+    expect(flatSchema.properties).toEqual({ name: field });
+    expect(flatSchema.required).toEqual(["name"]);
+    expect(parameterMap).toEqual({ name: { in: "body", name: "name" } });
+  },
+);
+
 test.each([
   { additionalProperties: { type: "string" }, label: "typed values" },
   { additionalProperties: true, label: "unconstrained values" },
