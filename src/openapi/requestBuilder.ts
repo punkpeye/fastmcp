@@ -58,9 +58,12 @@ export async function executeRequest(
 
     // RFC 6570, which OpenAPI's parameter styles follow, treats null as
     // undefined, so a null query, header or cookie value is left out rather
-    // than sent as the string "null". A body property keeps its JSON null.
+    // than sent as the string "null". A body property keeps its JSON null,
+    // and so does a `content: application/json` parameter: null is a JSON
+    // value, not an omitted style expansion.
     if (
       value === null &&
+      mapping.encoding !== "json" &&
       (mapping.in === "query" ||
         mapping.in === "header" ||
         mapping.in === "cookie")
@@ -73,7 +76,11 @@ export async function executeRequest(
         bodyProps[mapping.name] = value;
         break;
       case "cookie": {
-        const pair = `${mapping.name}=${encodeCookieValue(mapping, value)}`;
+        const encoded =
+          mapping.encoding === "json"
+            ? encodePathComponent(JSON.stringify(value))
+            : encodeCookieValue(mapping, value);
+        const pair = `${mapping.name}=${encoded}`;
         const existing = headers.get("cookie");
         headers.set("cookie", existing ? `${existing}; ${pair}` : pair);
         break;
@@ -81,18 +88,28 @@ export async function executeRequest(
       case "header":
         headers.set(
           mapping.name,
-          serializeHeaderValue(value, mapping.style, mapping.explode),
+          mapping.encoding === "json"
+            ? JSON.stringify(value)
+            : serializeHeaderValue(value, mapping.style, mapping.explode),
         );
         break;
       case "path":
-        pathParams[mapping.name] = encodePathValue(
-          value,
-          mapping.style,
-          mapping.explode,
-        );
+        pathParams[mapping.name] =
+          mapping.encoding === "json"
+            ? encodePathComponent(JSON.stringify(value))
+            : encodePathValue(value, mapping.style, mapping.explode);
         break;
       case "query": {
         const query = new URLSearchParams();
+
+        if (mapping.encoding === "json") {
+          // The media type owns this value. `style`, `explode`, and
+          // `allowReserved` would split or decode the JSON.
+          query.append(mapping.name, JSON.stringify(value));
+          queryParts.push(serializeQuery(query, false));
+          break;
+        }
+
         appendQueryValue(
           query,
           mapping.name,

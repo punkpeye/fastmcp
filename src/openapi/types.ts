@@ -133,6 +133,14 @@ export interface HttpRoute {
 export interface OpenApiParameter {
   /** Preserve query-safe reserved characters and percent-encoded triples. */
   allowReserved?: boolean;
+  /**
+   * Alternative to {@link schema}. A parameter uses one or the other. When
+   * this is set and `schema` is absent, only `application/json` is carried:
+   * the argument keeps that media type's schema and is sent as one JSON
+   * value. `style` and `explode` do not apply. Any other media type cannot
+   * be represented, and the operation is skipped.
+   */
+  content?: Record<string, { schema?: OpenApiSchema }>;
   deprecated?: boolean;
   description?: string;
   /**
