@@ -427,6 +427,58 @@ test("closes objects under patternProperties", async () => {
 
 test.each([
   {
+    name: "an object inside array items",
+    schema: {
+      properties: {
+        tags: {
+          items: { properties: { a: { type: "string" } }, type: "object" },
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    withExtra: { tags: [{ a: "v", extra: true }] },
+    withoutExtra: { tags: [{ a: "v" }] },
+  },
+  {
+    name: "an object under patternProperties",
+    schema: {
+      properties: {
+        values: {
+          patternProperties: {
+            "^x-": { properties: { a: { type: "string" } }, type: "object" },
+          },
+          type: "object",
+        },
+      },
+      type: "object",
+    },
+    withExtra: { values: { "x-k": { a: "v", extra: true } } },
+    withoutExtra: { values: { "x-k": { a: "v" } } },
+  },
+  {
+    name: "an object inside a schema-valued additionalProperties",
+    schema: {
+      additionalProperties: {
+        properties: { a: { type: "string" } },
+        type: "object",
+      },
+      type: "object",
+    },
+    withExtra: { anything: { a: "v", extra: true } },
+    withoutExtra: { anything: { a: "v" } },
+  },
+])(
+  "closes $name like every other input object",
+  async ({ schema, withExtra, withoutExtra }) => {
+    const advertised = await listInputSchema(jsonSchemaAdapter(schema));
+    expect(acceptsArguments(advertised, withoutExtra)).toBe(true);
+    expect(acceptsArguments(advertised, withExtra)).toBe(false);
+  },
+);
+
+test.each([
+  {
     acceptsExtra: true,
     name: "allOf",
     schema: {
