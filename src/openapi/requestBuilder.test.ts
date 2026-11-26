@@ -435,28 +435,97 @@ test.each([
   },
 );
 
-test.each(["label", "matrix"])(
-  "unsupported %s path arrays keep their existing encoding",
-  async (style) => {
+// The rows of the OpenAPI "Style Examples" table for `color`, plus RFC 6570
+// percent-encoding of the reserved characters inside each item.
+test.each([
+  { expected: ".blue", explode: false, style: "label", value: "blue" },
+  { expected: ".", explode: false, style: "label", value: "" },
+  {
+    expected: ".blue,black,brown",
+    explode: false,
+    style: "label",
+    value: ["blue", "black", "brown"],
+  },
+  {
+    expected: ".blue.black.brown",
+    explode: true,
+    style: "label",
+    value: ["blue", "black", "brown"],
+  },
+  {
+    expected: ".G,200,R,100",
+    explode: false,
+    style: "label",
+    value: { G: 200, R: 100 },
+  },
+  {
+    expected: ".G=200.R=100",
+    explode: true,
+    style: "label",
+    value: { G: 200, R: 100 },
+  },
+  {
+    expected: ".a%2Cb,c%2Fd",
+    explode: false,
+    style: "label",
+    value: ["a,b", "c/d"],
+  },
+  { expected: "", explode: false, style: "label", value: [] },
+  { expected: ";color=blue", explode: false, style: "matrix", value: "blue" },
+  { expected: ";color", explode: false, style: "matrix", value: "" },
+  {
+    expected: ";color=blue,black,brown",
+    explode: false,
+    style: "matrix",
+    value: ["blue", "black", "brown"],
+  },
+  {
+    expected: ";color=blue;color=black;color=brown",
+    explode: true,
+    style: "matrix",
+    value: ["blue", "black", "brown"],
+  },
+  {
+    expected: ";color=G,200,R,100",
+    explode: false,
+    style: "matrix",
+    value: { G: 200, R: 100 },
+  },
+  {
+    expected: ";G=200;R=100",
+    explode: true,
+    style: "matrix",
+    value: { G: 200, R: 100 },
+  },
+  {
+    expected: ";color=a%3Bb%3Dc",
+    explode: false,
+    style: "matrix",
+    value: "a;b=c",
+  },
+  { expected: "", explode: true, style: "matrix", value: {} },
+])(
+  "$style path values follow the OpenAPI style examples: $value (explode: $explode)",
+  async ({ expected, explode, style, value }) => {
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
 
     await executeRequest({
-      args: { color: ["a,b", "c/d"] },
+      args: { color: value },
       fetchImpl,
-      parameterMap: { color: { in: "path", name: "color", style } },
-      route: route({ path: "/colors/{color}" }),
+      parameterMap: { color: { explode, in: "path", name: "color", style } },
+      route: route({ path: "/colors/x{color}" }),
       servers: [{ url: "https://api.example.com" }],
     });
 
     expect(fetchImpl.mock.calls[0]![0]).toBe(
-      "https://api.example.com/colors/a%2Cb%2Cc%2Fd",
+      `https://api.example.com/colors/x${expected}`,
     );
   },
 );
 
 test.each([
-  { style: "label", value: { R: 100 } },
-  { style: "matrix", value: { R: 100 } },
+  { style: "label", value: { nested: { R: 100 } } },
+  { style: "matrix", value: { nested: { R: 100 } } },
   { style: "simple", value: { nested: { R: 100 } } },
   { style: "simple", value: { nested: [100, 200] } },
 ])(
