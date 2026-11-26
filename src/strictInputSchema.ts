@@ -185,6 +185,7 @@ function strictSchemaNode(
   schema: JsonSchema,
   nested: boolean,
   operand: boolean,
+  preserve = false,
 ): JsonSchema {
   const { $ref, additionalProperties, allOf, anyOf, oneOf, properties } =
     schema;
@@ -202,8 +203,15 @@ function strictSchemaNode(
       additionalProperties === true ||
       (nested && additionalProperties === undefined && !properties));
 
+  // Child-value positions keep an `additionalProperties` the node declares:
+  // a value schema's openness is part of what the collection means, while a
+  // property's own openness is normalized like the root's.
   const closesNode =
-    !operand && !hasComposition && isObjectSchema && !keepsAdditionalProperties;
+    !operand &&
+    !hasComposition &&
+    isObjectSchema &&
+    !keepsAdditionalProperties &&
+    (!preserve || additionalProperties === undefined);
 
   const next: Record<string, unknown> = {
     ...schema,
@@ -216,6 +224,46 @@ function strictSchemaNode(
         key,
         isSchemaRecord(value) ? strictSchemaNode(value, true, false) : value,
       ]),
+    );
+  }
+
+  // Value positions hold ordinary object occurrences, so their nested objects
+  // are closed like any property. Matching positions (`if`, `not`, `contains`,
+  // `propertyNames`, `unevaluated*`) stay as declared: closing them would
+  // change what the constraint matches. `$defs` and `definitions` are also
+  // left alone: a definition may be referenced from a composition operand,
+  // which must keep its own `additionalProperties` to accept keys declared by
+  // sibling branches.
+  for (const keyword of ["items", "additionalItems", "prefixItems"] as const) {
+    const child = (schema as Record<string, unknown>)[keyword];
+    if (Array.isArray(child)) {
+      next[keyword] = child.map((item) =>
+        isSchemaRecord(item) ? strictSchemaNode(item, true, false, true) : item,
+      );
+    } else if (isSchemaRecord(child)) {
+      next[keyword] = strictSchemaNode(child, true, false, true);
+    }
+  }
+
+  const patternProperties = (schema as Record<string, unknown>)
+    .patternProperties;
+  if (isSchemaRecord(patternProperties)) {
+    next.patternProperties = Object.fromEntries(
+      Object.entries(patternProperties).map(([key, value]) => [
+        key,
+        isSchemaRecord(value)
+          ? strictSchemaNode(value, true, false, true)
+          : value,
+      ]),
+    );
+  }
+
+  if (isSchemaRecord(next.additionalProperties)) {
+    next.additionalProperties = strictSchemaNode(
+      next.additionalProperties,
+      true,
+      false,
+      true,
     );
   }
 

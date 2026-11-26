@@ -88,7 +88,9 @@ This means a "get by ID" style endpoint typically becomes a resource template, w
 
 There's no per-operation override for this — an eligible `GET` always maps to a resource when `resources: true`; use `exclude` if you want a specific one to stay a tool instead of being generated at all.
 
-Eligibility doesn't check the response's own content type, only the request shape. A `GET` returning binary data (an image, a PDF, ...) can still become a resource, and its response is read as text, not as the binary-safe `blob` a resource can also return — corrupting non-text bytes. If your spec has binary-returning `GET`s you want as resources, use `exclude` to keep them as tools instead until this is addressed.
+Eligibility checks the request shape, not the response's content type. Resource reads use the HTTP response's `Content-Type`: binary responses (for example, images, PDFs and `application/octet-stream`) return a base64-encoded `blob` with that media type, preserving the original bytes. Static resources, resource templates and `embedded()` all support these results.
+
+`text/*`, JSON, XML, YAML (including `+json`, `+xml` and `+yaml` media types), JavaScript, ECMAScript and form-urlencoded responses retain their existing text handling. JSON detection continues to accept any media type containing `json`, including `application/x-json` and `application/x-ndjson`; common `x-` XML/YAML/JavaScript/ECMAScript aliases also stay textual. Responses without a `Content-Type` keep the existing text/JSON detection; binary endpoints must send a suitable `Content-Type`. Tool responses retain their existing text/structured-output handling.
 
 ## Structured output
 
@@ -121,6 +123,8 @@ Form-style cookie values (the default) are percent-encoded, leaving only letters
 Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded.
 
 Required flattened JSON request bodies are sent as `{}` when no body properties are supplied. A required `application/json` body without a schema also sends `{}`. Omitted optional bodies remain absent.
+
+JSON request bodies with top-level `allOf`, `anyOf`, or `oneOf` are exposed as a single `body` argument, even when they also declare their own `properties`. Call these tools with `{ body: { ... } }`, as for a referenced JSON body: this preserves the composition's fields and validation rules instead of flattening only the directly declared fields. Ordinary flat JSON objects and form-urlencoded bodies keep their existing mapping.
 
 For optional JSON and form-urlencoded bodies, required body properties are enforced only when at least one body field is supplied. Omitting all body fields leaves the body absent; supplying only some required fields is rejected. Path, query, header, and cookie requirements still apply independently.
 
