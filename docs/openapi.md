@@ -41,6 +41,8 @@ Tool inputs combine path, query, header, cookie, and body fields. If a parameter
 
 A top-level parameter or flattened body property named `__proto__` also receives an alias, because the schema validator does not validate that literal property name. For example, a path parameter becomes `__proto____path` and a body property becomes `__proto____body`; occupied aliases receive the same numeric suffixes. The HTTP field name remains `__proto__`. This does not rename properties inside nested or whole-body schemas.
 
+A parameter declared with `content: application/json` instead of `schema` takes that media type's schema as its input and is sent as one JSON value: percent-encoded in a path, query or cookie, and as-is in a header. `style`, `explode` and `allowReserved` don't apply to it, and a `null` is sent as JSON `null`. A parameter declared with any other media type stays a plain string input, sent as given.
+
 HEAD operations become tools too. Like GET, they ignore any declared request body because `fetch` cannot send one. HEAD responses remain empty text results without an `outputSchema`, even when the spec declares a JSON response schema.
 
 ## Choosing which operations become tools
@@ -77,7 +79,8 @@ A `GET` stays a tool instead — even with `resources: true` — when:
 
 - it has any `header` or `cookie` parameter (these can't be expressed in a resource URI, and resource reads have no per-call side channel for them), or
 - any of its path/query parameters is array-typed, including component schema references and nullable arrays (OpenAPI's array query serialization and RFC 6570's don't match), or
-- any of its path/query parameters is object-typed, including component schema references and nullable objects (the URI template parser does not preserve the object shape needed for OpenAPI serialization).
+- any of its path/query parameters is object-typed, including component schema references and nullable objects (the URI template parser does not preserve the object shape needed for OpenAPI serialization), or
+- any of its path/query parameters is declared with `content` instead of `schema` (the URI template parser cannot rebuild the JSON value such a parameter is sent as).
 
 Array/object types inside `allOf`, `anyOf`, and `oneOf` branches, including nested compositions and component references, also keep the operation as a tool. Scalar-only compositions remain eligible for resources.
 

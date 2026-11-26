@@ -1156,3 +1156,88 @@ test.each([
     expect(new URL(calledUrl).search).toBe(expected);
   },
 );
+
+test("a JSON content query parameter is one JSON value, ignoring style and allowReserved", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+  const filter = { color: "brown", type: "dog" };
+
+  await executeRequest({
+    args: { filter },
+    fetchImpl,
+    parameterMap: {
+      filter: {
+        allowReserved: true,
+        encoding: "json",
+        explode: true,
+        in: "query",
+        name: "filter",
+        style: "form",
+      },
+    },
+    route: route({ method: "get", path: "/pets" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [calledUrl] = fetchImpl.mock.calls[0]!;
+  const query = new URL(calledUrl).searchParams;
+  expect(query.get("filter")).toBe(JSON.stringify(filter));
+  expect(query.get("type")).toBeNull();
+  expect(query.get("color")).toBeNull();
+});
+
+test("a JSON content query parameter sends null as JSON null", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+  await executeRequest({
+    args: { filter: null },
+    fetchImpl,
+    parameterMap: {
+      filter: { encoding: "json", in: "query", name: "filter" },
+    },
+    route: route({ method: "get", path: "/pets" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [calledUrl] = fetchImpl.mock.calls[0]!;
+  expect(new URL(calledUrl).searchParams.get("filter")).toBe("null");
+});
+
+test("a JSON content header and cookie are JSON text", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+  const filter = { type: "dog" };
+  const json = JSON.stringify(filter);
+
+  await executeRequest({
+    args: { cookieFilter: filter, headerFilter: filter },
+    fetchImpl,
+    parameterMap: {
+      cookieFilter: { encoding: "json", in: "cookie", name: "filter" },
+      headerFilter: { encoding: "json", in: "header", name: "X-Filter" },
+    },
+    route: route({ path: "/pets" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const headers = new Headers(fetchImpl.mock.calls[0]![1]?.headers);
+  expect(headers.get("x-filter")).toBe(json);
+  expect(headers.get("cookie")).toBe(`filter=${encodeURIComponent(json)}`);
+});
+
+test("a JSON content path parameter is one encoded segment", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+  const filter = { path: "a/b" };
+
+  await executeRequest({
+    args: { filter },
+    fetchImpl,
+    parameterMap: {
+      filter: { encoding: "json", in: "path", name: "filter" },
+    },
+    route: route({ path: "/pets/{filter}" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  expect(fetchImpl.mock.calls[0]![0]).toBe(
+    `https://api.example.com/pets/${encodeURIComponent(JSON.stringify(filter))}`,
+  );
+});

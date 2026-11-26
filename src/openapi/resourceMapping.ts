@@ -74,6 +74,9 @@ export function buildResourceMapping(
  * - An object-typed path/query parameter loses its object shape when the
  *   URI template is parsed, so its OpenAPI serialization receives strings
  *   or arrays instead of an object.
+ * - A parameter declared with `content` (and no `schema`) is one media-type
+ *   value, usually JSON text. The template parser cannot turn that text
+ *   back into the value `encoding: "json"` would send.
  *
  * A route failing any check falls through to the existing tool path —
  * this only ever *removes* operations from the tool list in favor of a
@@ -85,6 +88,10 @@ export function isEligibleForResource(
 ): boolean {
   return route.parameters.every((param) => {
     if (param.in === "header" || param.in === "cookie") {
+      return false;
+    }
+
+    if (param.content && param.schema === undefined) {
       return false;
     }
 
