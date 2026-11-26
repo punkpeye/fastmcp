@@ -3,7 +3,7 @@
  * Provides persistent file-based storage for OAuth tokens and transaction state
  */
 
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import {
   mkdir,
   readdir,
@@ -36,6 +36,16 @@ export interface DiskStoreOptions {
    */
   fileExtension?: string;
 }
+
+/**
+ * Longest encoded key used verbatim as a file name. Leaves room within the
+ * common 255-byte limit for the extension and the temporary and claim
+ * suffixes added to it.
+ */
+const MAX_ENCODED_KEY_LENGTH = 180;
+
+/** The file name length limit of common filesystems. */
+const MAX_FILE_NAME_BYTES = 255;
 
 interface StorageEntry {
   expiresAt: number;
@@ -107,13 +117,14 @@ export class DiskStore implements TokenStorage {
    * Delete a value
    */
   async delete(key: string): Promise<void> {
-    const filePath = this.getFilePath(key);
-    try {
-      await rm(filePath);
-    } catch (error) {
-      // File might not exist, which is fine
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.error(`Failed to delete key ${key}:`, error);
+    for (const filePath of this.getFilePaths(key)) {
+      try {
+        await rm(filePath);
+      } catch (error) {
+        // File might not exist, which is fine
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          console.error(`Failed to delete key ${key}:`, error);
+        }
       }
     }
   }
@@ -132,27 +143,30 @@ export class DiskStore implements TokenStorage {
    * Retrieve a value
    */
   async get(key: string): Promise<null | unknown> {
-    const filePath = this.getFilePath(key);
+    for (const filePath of this.getFilePaths(key)) {
+      try {
+        const content = await readFile(filePath, "utf-8");
+        const entry: StorageEntry = JSON.parse(content);
 
-    try {
-      const content = await readFile(filePath, "utf-8");
-      const entry: StorageEntry = JSON.parse(content);
+        // Check if expired
+        if (entry.expiresAt < Date.now()) {
+          await rm(filePath);
+          return null;
+        }
 
-      // Check if expired
-      if (entry.expiresAt < Date.now()) {
-        await rm(filePath);
+        return entry.value;
+      } catch (error) {
+        // File doesn't exist: try the next candidate path
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          continue;
+        }
+        // File is corrupted
+        console.error(`Failed to read key ${key}:`, error);
         return null;
       }
-
-      return entry.value;
-    } catch (error) {
-      // File doesn't exist or is corrupted
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return null;
-      }
-      console.error(`Failed to read key ${key}:`, error);
-      return null;
     }
+
+    return null;
   }
 
   /**
@@ -190,6 +204,13 @@ export class DiskStore implements TokenStorage {
       console.error(`Failed to save key ${key}:`, error);
       throw error;
     }
+
+    // An entry written under the legacy file name would otherwise be read
+    // again once this one is taken or deleted.
+    const legacyPath = this.getLegacyFilePath(key);
+    if (legacyPath !== undefined && legacyPath !== filePath) {
+      await rm(legacyPath, { force: true });
+    }
   }
 
   /**
@@ -214,18 +235,27 @@ export class DiskStore implements TokenStorage {
    * process shares the directory.
    */
   async take(key: string): Promise<null | unknown> {
-    const filePath = this.getFilePath(key);
-    // Keep the configured extension on the claim file so that if the process
-    // dies between the rename and the unlink, cleanup() still reaps it once
-    // the entry expires rather than leaving it on disk forever.
-    const claimPath = `${filePath}.${randomUUID()}.claim${this.fileExtension}`;
+    let claimPath: string | undefined;
 
-    try {
-      await rename(filePath, claimPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        console.error(`Failed to take key ${key}:`, error);
+    for (const filePath of this.getFilePaths(key)) {
+      // Keep the configured extension on the claim file so that if the
+      // process dies between the rename and the unlink, cleanup() still reaps
+      // it once the entry expires rather than leaving it on disk forever.
+      const candidate = `${filePath}.${randomUUID()}.claim${this.fileExtension}`;
+
+      try {
+        await rename(filePath, candidate);
+        claimPath = candidate;
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          console.error(`Failed to take key ${key}:`, error);
+          return null;
+        }
       }
+    }
+
+    if (claimPath === undefined) {
       return null;
     }
 
@@ -263,12 +293,54 @@ export class DiskStore implements TokenStorage {
   }
 
   /**
-   * Get file path for a key
+   * Get file path for a key.
+   *
+   * The file name must not let a key escape the directory, and distinct keys
+   * must get distinct files. Letters, digits and `-` are kept; every other
+   * UTF-8 byte, `_` included, becomes `_` and two hex digits, so `client:a.b`
+   * and `client:a_b` no longer share a file. Names that would get too long
+   * for common filesystems are replaced by a SHA-256 digest, under a prefix
+   * the escaping above never produces.
    */
   private getFilePath(key: string): string {
-    // Sanitize key to prevent directory traversal
-    const sanitizedKey = key.replace(/[^a-zA-Z0-9_-]/g, "_");
-    return join(this.directory, `${sanitizedKey}${this.fileExtension}`);
+    let name = "";
+    for (const byte of Buffer.from(key, "utf8")) {
+      const char = String.fromCharCode(byte);
+      name += /[a-zA-Z0-9-]/.test(char)
+        ? char
+        : `_${byte.toString(16).padStart(2, "0")}`;
+    }
+
+    if (name.length > MAX_ENCODED_KEY_LENGTH) {
+      name = `_sha256_${createHash("sha256").update(key, "utf8").digest("hex")}`;
+    }
+
+    return join(this.directory, `${name}${this.fileExtension}`);
+  }
+
+  /**
+   * The paths a key's entry may be stored at: its current file, then the
+   * file name earlier versions used. The earlier scheme replaced every other
+   * character with `_`, so distinct keys could share a file; it is still read
+   * so that entries persisted before an upgrade survive it.
+   */
+  private getFilePaths(key: string): string[] {
+    const filePath = this.getFilePath(key);
+    const legacyPath = this.getLegacyFilePath(key);
+    return legacyPath === undefined || legacyPath === filePath
+      ? [filePath]
+      : [filePath, legacyPath];
+  }
+
+  /**
+   * The file name earlier versions stored a key under, or `undefined` when
+   * that name is too long to have ever been written.
+   */
+  private getLegacyFilePath(key: string): string | undefined {
+    const name = `${key.replace(/[^a-zA-Z0-9_-]/g, "_")}${this.fileExtension}`;
+    return Buffer.byteLength(name) > MAX_FILE_NAME_BYTES
+      ? undefined
+      : join(this.directory, name);
   }
 
   /**
