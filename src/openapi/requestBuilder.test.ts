@@ -575,9 +575,13 @@ test.each([
   { args: { ext: "", name: "." }, path: "/files/{name}.{ext}" },
   { args: { ext: ".", name: "" }, path: "/files/{name}.{ext}" },
   { args: { a: ".", b: "." }, path: "/files/{a}{b}" },
+  // A label value starts with ".", so "" or "." filling a whole segment
+  // becomes "." or "..".
+  { args: { id: "" }, path: "/v1/users/{id}/profile", style: "label" },
+  { args: { id: "." }, path: "/v1/users/{id}/profile", style: "label" },
 ])(
   "executeRequest rejects path parameters that resolve to a dot segment: $path $args",
-  async ({ args, path }) => {
+  async ({ args, path, style }) => {
     const fetchImpl = vi.fn<typeof fetch>(
       async () => new Response("{}", { status: 200 }),
     );
@@ -587,7 +591,7 @@ test.each([
         args,
         fetchImpl,
         parameterMap: Object.fromEntries(
-          Object.keys(args).map((name) => [name, { in: "path", name }]),
+          Object.keys(args).map((name) => [name, { in: "path", name, style }]),
         ),
         route: route({ path }),
         servers: [{ url: "https://api.example.com" }],

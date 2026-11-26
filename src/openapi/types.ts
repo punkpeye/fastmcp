@@ -162,6 +162,8 @@ export interface OpenApiParameter {
    * header objects use the same layout (the header default) but are sent as
    * given, without percent-encoding. Cookies are percent-encoded under
    * `"form"` (the cookie default) and sent as given under OAS 3.2 `"cookie"`.
+   * `"label"` and `"matrix"` path values follow the OpenAPI style examples,
+   * e.g. `.blue` and `;color=blue`.
    */
   style?: string;
 }
