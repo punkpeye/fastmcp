@@ -171,6 +171,20 @@ describe("JWKSVerifier", () => {
     });
   });
 
+  describe("invalid jwksUri", () => {
+    it("should report the invalid URI, not a missing jose package, on every call", async () => {
+      const verifier = new JWKSVerifier({ jwksUri: "not a url" });
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await verifier.verify("header.payload.signature");
+
+        expect(result.valid).toBe(false);
+        expect(result.error).toMatch(/Invalid URL/);
+        expect(result.error).not.toMatch(/requires the 'jose' package/);
+      }
+    });
+  });
+
   describe("getJwksUri", () => {
     it("should return the configured URI", () => {
       const verifier = new JWKSVerifier({
