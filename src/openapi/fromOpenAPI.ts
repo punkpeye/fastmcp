@@ -48,7 +48,6 @@ export async function fromOpenAPI(
     method: string;
     path: string;
   }[] = [];
-  const skippedParameterOperations: typeof skippedOperations = [];
 
   for (const route of selected) {
     const name = names.get(route);
@@ -62,18 +61,8 @@ export async function fromOpenAPI(
       flatSchema,
       parameterMap,
       unsupportedBodyContentType,
-      unsupportedParameterContentType,
       wholeBodyKey,
     } = buildFlatSchema(route, sharedDefs);
-
-    if (unsupportedParameterContentType) {
-      skippedParameterOperations.push({
-        contentType: unsupportedParameterContentType,
-        method: route.method,
-        path: route.path,
-      });
-      continue;
-    }
 
     const execOptions = {
       baseUrlOverride: options.baseUrl,
@@ -142,19 +131,6 @@ export async function fromOpenAPI(
         `${skippedOperations.length} operation(s) whose request body can't be turned into tool parameters ` +
         "(supported: application/json, or application/x-www-form-urlencoded with a flat object schema): " +
         skippedOperations
-          .map(
-            (op) => `${op.method.toUpperCase()} ${op.path} (${op.contentType})`,
-          )
-          .join(", "),
-    );
-  }
-
-  if (skippedParameterOperations.length > 0) {
-    console.warn(
-      "fromOpenAPI: skipped " +
-        `${skippedParameterOperations.length} operation(s) whose parameter content can't be turned into tool parameters ` +
-        "(supported: application/json): " +
-        skippedParameterOperations
           .map(
             (op) => `${op.method.toUpperCase()} ${op.path} (${op.contentType})`,
           )

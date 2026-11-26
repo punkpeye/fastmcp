@@ -1573,23 +1573,21 @@ const FILTER_SCHEMA = {
 };
 
 test("a query parameter with application/json content keeps that schema and JSON encoding", () => {
-  const { flatSchema, parameterMap, unsupportedParameterContentType } =
-    buildFlatSchema(
-      route({
-        parameters: [
-          {
-            content: { "application/json": { schema: FILTER_SCHEMA } },
-            in: "query",
-            name: "filter",
-            required: true,
-            style: "form",
-          },
-        ],
-      }),
-      undefined,
-    );
+  const { flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      parameters: [
+        {
+          content: { "application/json": { schema: FILTER_SCHEMA } },
+          in: "query",
+          name: "filter",
+          required: true,
+          style: "form",
+        },
+      ],
+    }),
+    undefined,
+  );
 
-  expect(unsupportedParameterContentType).toBeUndefined();
   expect(flatSchema.properties).toEqual({ filter: FILTER_SCHEMA });
   expect(flatSchema.required).toEqual(["filter"]);
   expect(parameterMap.filter).toMatchObject({
@@ -1646,39 +1644,37 @@ test("a $ref inside application/json parameter content is rewritten into $defs",
 });
 
 test("a parameter schema wins when content is also present", () => {
-  const { flatSchema, parameterMap, unsupportedParameterContentType } =
-    buildFlatSchema(
-      route({
-        parameters: [
-          {
-            content: { "application/json": { schema: FILTER_SCHEMA } },
-            in: "query",
-            name: "filter",
-            schema: { type: "string" },
-          },
-        ],
-      }),
-      undefined,
-    );
-
-  expect(unsupportedParameterContentType).toBeUndefined();
-  expect(flatSchema.properties).toEqual({ filter: { type: "string" } });
-  expect(parameterMap.filter).not.toHaveProperty("encoding");
-});
-
-test("parameter content other than application/json is reported unsupported", () => {
-  const { unsupportedParameterContentType } = buildFlatSchema(
+  const { flatSchema, parameterMap } = buildFlatSchema(
     route({
       parameters: [
         {
-          content: { "application/xml": { schema: FILTER_SCHEMA } },
+          content: { "application/json": { schema: FILTER_SCHEMA } },
           in: "query",
           name: "filter",
+          schema: { type: "string" },
         },
       ],
     }),
     undefined,
   );
 
-  expect(unsupportedParameterContentType).toBe("application/xml");
+  expect(flatSchema.properties).toEqual({ filter: { type: "string" } });
+  expect(parameterMap.filter).not.toHaveProperty("encoding");
 });
+
+test.each<NonNullable<OpenApiParameter["content"]>>([
+  { "application/xml": { schema: FILTER_SCHEMA } },
+  { "text/plain": { schema: { type: "string" } } },
+  {},
+])(
+  "parameter content other than application/json stays a plain string (%o)",
+  (content) => {
+    const { flatSchema, parameterMap } = buildFlatSchema(
+      route({ parameters: [{ content, in: "query", name: "filter" }] }),
+      undefined,
+    );
+
+    expect(flatSchema.properties).toEqual({ filter: { type: "string" } });
+    expect(parameterMap.filter).not.toHaveProperty("encoding");
+  },
+);

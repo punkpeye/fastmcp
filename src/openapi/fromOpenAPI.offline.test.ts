@@ -2857,9 +2857,15 @@ test("a query parameter declared with application/json content is advertised as 
   }
 });
 
-test("an operation whose parameter content is not JSON is skipped", async () => {
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+test("a query parameter whose content is not JSON stays a string tool argument, sent as given", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () =>
+      new Response("{}", { headers: { "content-type": "application/json" } }),
+  );
+  const filter = '<filter type="dog" color="brown"/>';
   const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    resources: true,
     spec: {
       info: { title: "Pets API", version: "1.0.0" },
       openapi: "3.0.3",
@@ -2881,20 +2887,6 @@ test("an operation whose parameter content is not JSON is skipped", async () => 
             responses: { 200: { description: "OK" } },
           },
         },
-        "/pets/{petId}": {
-          get: {
-            operationId: "getPet",
-            parameters: [
-              {
-                in: "path",
-                name: "petId",
-                required: true,
-                schema: { type: "string" },
-              },
-            ],
-            responses: { 200: { description: "OK" } },
-          },
-        },
       },
       servers: [{ url: "https://api.example.com" }],
     },
@@ -2902,18 +2894,20 @@ test("an operation whose parameter content is not JSON is skipped", async () => 
   const client = await connect(server);
 
   try {
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "parameter content can't be turned into tool parameters",
-      ),
-    );
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("GET /pets (application/xml)"),
-    );
     const { tools } = await client.listTools();
-    expect(tools.map((tool) => tool.name)).toEqual(["getPet"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["listPets"]);
+    expect(tools[0]?.inputSchema.properties).toEqual({
+      filter: { type: "string" },
+    });
+
+    const result = await client.callTool({
+      arguments: { filter },
+      name: "listPets",
+    });
+    expect(result.isError).toBeFalsy();
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    expect(new URL(calledUrl).searchParams.get("filter")).toBe(filter);
   } finally {
-    warn.mockRestore();
     await client.close();
     await server.stop();
   }

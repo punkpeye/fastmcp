@@ -77,12 +77,6 @@ export interface FlatSchemaResult {
    */
   unsupportedBodyContentType?: string;
   /**
-   * Set when a parameter declares `content` with no `application/json` media
-   * type. Holds that content type. The caller should skip the operation,
-   * same as {@link unsupportedBodyContentType}.
-   */
-  unsupportedParameterContentType?: string;
-  /**
    * Set when the request body's schema is not a flat object (e.g. an array,
    * a dictionary, or a bare `$ref`) — the whole body is exposed as a single
    * property under this key, rather than flattened into individual properties.
@@ -186,18 +180,6 @@ export function buildFlatSchema(
       const key = collides ? allocateAlias(base) : name;
 
       const input = parameterInput(param);
-
-      if (input.unsupportedContentType) {
-        return {
-          flatSchema: {
-            additionalProperties: false,
-            properties: {},
-            type: "object",
-          },
-          parameterMap: {},
-          unsupportedParameterContentType: input.unsupportedContentType,
-        };
-      }
 
       properties[key] = rewriteComponentRefs(input.schema);
       parameterMap[key] = {
@@ -476,6 +458,39 @@ function componentSchemaName(ref: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Picks the request body's content type and flattens its schema.
+ *
+ * `application/json` wins if a route declares both it and
+ * `application/x-www-form-urlencoded` (a fixed preference, not declaration
+ * order — the latter isn't a reliable signal). A route whose body is only
+ * declared under a content type this module doesn't handle at all (e.g.
+ * `multipart/form-data`) reports `unsupportedBodyContentType` instead of
+ * silently returning an empty property map — that emptiness is exactly what
+ * a real Stripe/Twilio operation (both form-urlencoded-only) looked like
+ * before this function read anything but JSON, and it produced a tool with
+ * no way to carry its actual payload. A bare `content: {}` (no content
+ * types at all) still means "no body," not "unsupported" — and so does a
+ * supported content type with no `schema` at all (a legal, if unusual,
+ * "any JSON body" declaration): the content type itself is fine, there's
+ * just nothing to flatten.
+ *
+ * A form-urlencoded body is very often declared as a bare `$ref` to a
+ * component schema rather than inline — FastAPI emits
+ * `#/components/schemas/Body_<operation>` for every form endpoint, and
+ * Box's OAuth token/refresh/revoke operations do the same. The document is
+ * bundled, not dereferenced (see `loadSpec.ts`), so that `$ref` is resolved
+ * here against `sharedDefs` before deciding whether the body is a flat
+ * object. Only the form path needs this: a JSON body that isn't a flat
+ * object falls back to a single whole-body property, which a `$ref`
+ * satisfies as-is.
+ *
+ * A non-object body (array, `$ref` to a scalar/array, etc.) can't be
+ * form-urlencoded at all — form encoding is inherently flat key/value pairs
+ * — so that combination is also reported as unsupported, rather than
+ * `encodeFormBody` (requestBuilder.ts) silently sending an empty body for
+ * data it has no way to represent.
+ */
 function extractBodyProperties(
   requestBody: OpenApiRequestBody | undefined,
   sharedDefs: Record<string, OpenApiSchema> | undefined,
@@ -782,67 +797,28 @@ function omitReadOnlyRequired(value: unknown, mode: WalkMode): unknown {
 }
 
 /**
- * Picks the request body's content type and flattens its schema.
- *
- * `application/json` wins if a route declares both it and
- * `application/x-www-form-urlencoded` (a fixed preference, not declaration
- * order — the latter isn't a reliable signal). A route whose body is only
- * declared under a content type this module doesn't handle at all (e.g.
- * `multipart/form-data`) reports `unsupportedBodyContentType` instead of
- * silently returning an empty property map — that emptiness is exactly what
- * a real Stripe/Twilio operation (both form-urlencoded-only) looked like
- * before this function read anything but JSON, and it produced a tool with
- * no way to carry its actual payload. A bare `content: {}` (no content
- * types at all) still means "no body," not "unsupported" — and so does a
- * supported content type with no `schema` at all (a legal, if unusual,
- * "any JSON body" declaration): the content type itself is fine, there's
- * just nothing to flatten.
- *
- * A form-urlencoded body is very often declared as a bare `$ref` to a
- * component schema rather than inline — FastAPI emits
- * `#/components/schemas/Body_<operation>` for every form endpoint, and
- * Box's OAuth token/refresh/revoke operations do the same. The document is
- * bundled, not dereferenced (see `loadSpec.ts`), so that `$ref` is resolved
- * here against `sharedDefs` before deciding whether the body is a flat
- * object. Only the form path needs this: a JSON body that isn't a flat
- * object falls back to a single whole-body property, which a `$ref`
- * satisfies as-is.
- *
- * A non-object body (array, `$ref` to a scalar/array, etc.) can't be
- * form-urlencoded at all — form encoding is inherently flat key/value pairs
- * — so that combination is also reported as unsupported, rather than
- * `encodeFormBody` (requestBuilder.ts) silently sending an empty body for
- * data it has no way to represent.
- */
-/**
  * The schema a parameter contributes to the tool, and how its value is
  * serialized.
  *
  * `schema` and `content` are mutually exclusive. A parameter that only has
- * `content` is an `application/json` value (one JSON string, not form or
- * `deepObject` expansion). Other media types are reported unsupported so
- * the operation is skipped instead of being advertised as a plain string.
- * A `schema` wins when both are present: that document is not a valid
- * parameter, and this keeps the shape the module already carried.
+ * `content: application/json` takes that media type's schema and is sent as
+ * one JSON value (not form or `deepObject` expansion). Any other media type
+ * keeps the plain string input it always had, sent as given: a string can
+ * carry text such as XML, so the operation stays usable instead of being
+ * skipped. A `schema` wins when both are present: that document is not a
+ * valid parameter, and this keeps the shape the module already carried.
  */
 function parameterInput(param: OpenApiParameter): {
   encoding?: "json";
   schema: OpenApiSchema;
-  unsupportedContentType?: string;
 } {
-  if (param.schema || !param.content) {
-    return { schema: param.schema ?? { type: "string" } };
-  }
-
-  const json = findMediaType(param.content, "application/json");
+  const json =
+    param.schema === undefined
+      ? findMediaType(param.content, "application/json")
+      : undefined;
 
   if (!json) {
-    const [contentType] = Object.keys(param.content);
-
-    return {
-      schema: { type: "string" },
-      unsupportedContentType: contentType ?? "unspecified",
-    };
+    return { schema: param.schema ?? { type: "string" } };
   }
 
   // No schema means any JSON value, which an empty schema accepts.
