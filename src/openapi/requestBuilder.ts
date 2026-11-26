@@ -58,7 +58,8 @@ export async function executeRequest(
 
     // RFC 6570, which OpenAPI's parameter styles follow, treats null as
     // undefined, so a null query, header or cookie value is left out rather
-    // than sent as the string "null". A body property keeps its JSON null.
+    // than sent as the string "null". A JSON body property keeps its null;
+    // `encodeFormBody` drops it from a form-urlencoded body.
     if (
       value === null &&
       (mapping.in === "query" ||
@@ -413,11 +414,13 @@ function encodeFormBody(payload: unknown): string {
     for (const [key, value] of Object.entries(
       payload as Record<string, unknown>,
     )) {
-      if (value === undefined) {
+      // Form encoding follows RFC 6570 form expansion, as a query does, so a
+      // null field or member is left out rather than sent as "null".
+      if (value === undefined || value === null) {
         continue;
       }
 
-      appendBracketPairs(params, key, value);
+      appendBracketPairs(params, key, withoutNullMembers(value));
     }
   }
 

@@ -115,7 +115,7 @@ Form-style, `spaceDelimited` and `pipeDelimited` query objects support scalar pr
 
 Form-style cookie values (the default) are percent-encoded, leaving only letters, digits and `-._~` as they are, so a value such as `a; b=c` is sent as `a%3B%20b%3Dc` and cannot add a cookie of its own. With OpenAPI 3.2 `style: cookie` the value is sent as given, already escaped by the caller, and a value holding `;` or `,` is refused. Array items are encoded, or checked, one at a time and joined with commas.
 
-Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded.
+Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded. A null field, array item or object member of a form-urlencoded body is left out, as it is in a query, rather than sent as the string `"null"`.
 
 Required flattened JSON request bodies are sent as `{}` when no body properties are supplied. A required `application/json` body without a schema also sends `{}`. Omitted optional bodies remain absent.
 

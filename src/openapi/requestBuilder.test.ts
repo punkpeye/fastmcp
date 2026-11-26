@@ -736,6 +736,34 @@ test("an array-valued form body property is sent as repeated keys", async () => 
   expect(body.getAll("tag")).toEqual(["a", "b"]);
 });
 
+test("a null form body field or member is left out like an undefined one", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response("{}", { status: 200 }),
+  );
+
+  await executeRequest({
+    args: {
+      description: null,
+      metadata: { order: "7", ref: null },
+      name: "Rex",
+      tag: ["a", null, "b"],
+    },
+    bodyEncoding: "form",
+    fetchImpl,
+    parameterMap: {
+      description: { in: "body", name: "description" },
+      metadata: { in: "body", name: "metadata" },
+      name: { in: "body", name: "name" },
+      tag: { in: "body", name: "tag" },
+    },
+    route: route({ method: "post" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [, calledInit] = fetchImpl.mock.calls[0]!;
+  expect(calledInit!.body).toBe("metadata%5Border%5D=7&name=Rex&tag=a&tag=b");
+});
+
 test.each([
   { expected: "x/y", value: "x/y" },
   { expected: ":/?@!$%27()*,;~", value: ":/?@!$'()*,;~" },
