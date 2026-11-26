@@ -1848,6 +1848,27 @@ server.addTool({
 });
 ```
 
+#### Loaders that use auth
+
+`embedded()` is called on the server, not on a session, so by default the loader gets no `auth`. Pass the tool's `context` and the loader sees the same `auth` and load context it would get from `resources/read`:
+
+```js
+server.addTool({
+  name: "get_my_profile",
+  parameters: z.object({}),
+  execute: async (args, context) => {
+    return {
+      content: [
+        {
+          type: "resource",
+          resource: await server.embedded("user://me", context),
+        },
+      ],
+    };
+  },
+});
+```
+
 ### Prompts
 
 [Prompts](https://modelcontextprotocol.io/docs/concepts/prompts) enable servers to define reusable prompt templates and workflows that clients can easily surface to users and LLMs. They provide a powerful way to standardize and share common LLM interactions.
