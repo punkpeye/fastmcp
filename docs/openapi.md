@@ -87,7 +87,7 @@ There's no per-operation override for this — an eligible `GET` always maps to 
 
 Eligibility checks the request shape, not the response's content type. Resource reads use the HTTP response's `Content-Type`: binary responses (for example, images, PDFs and `application/octet-stream`) return a base64-encoded `blob` with that media type, preserving the original bytes. Static resources, resource templates and `embedded()` all support these results.
 
-`text/*`, JSON, XML (including `+json` and `+xml` media types), JavaScript, ECMAScript and form-urlencoded responses retain their existing text handling. JSON detection continues to accept any media type containing `json`, including `application/x-json` and `application/x-ndjson`; common `x-` XML/JavaScript/ECMAScript aliases also stay textual. Responses without a `Content-Type` keep the existing text/JSON detection; binary endpoints must send a suitable `Content-Type`. Tool responses retain their existing text/structured-output handling.
+`text/*`, JSON, XML, YAML (including `+json`, `+xml` and `+yaml` media types), JavaScript, ECMAScript and form-urlencoded responses retain their existing text handling. JSON detection continues to accept any media type containing `json`, including `application/x-json` and `application/x-ndjson`; common `x-` XML/YAML/JavaScript/ECMAScript aliases also stay textual. Responses without a `Content-Type` keep the existing text/JSON detection; binary endpoints must send a suitable `Content-Type`. Tool responses retain their existing text/structured-output handling.
 
 ## Structured output
 

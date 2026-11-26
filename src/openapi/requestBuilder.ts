@@ -53,7 +53,7 @@ export async function executeResourceRequest(
     mimeType &&
     !mimeType.startsWith("text/") &&
     !mimeType.includes("json") &&
-    !/(?:\/|\+)(?:x-)?(?:xml|javascript|ecmascript)$/.test(mimeType) &&
+    !/(?:\/|\+)(?:x-)?(?:xml|yaml|javascript|ecmascript)$/.test(mimeType) &&
     mimeType !== "application/x-www-form-urlencoded"
   ) {
     return {
