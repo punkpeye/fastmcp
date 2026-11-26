@@ -136,7 +136,9 @@ Each property key and scalar value is percent-encoded separately before adding t
 
 Simple-style arrays also encode each item separately, then join them with commas, for either `explode` value. For example, `["blue,green", "red/white"]` becomes `blue%2Cgreen,red%2Fwhite`, preserving the difference between a comma inside an item and a separator. Empty arrays expand to an empty path value. Scalar path parameters keep their existing encoding.
 
-Nested object/array properties and other path styles (such as `matrix` and `label`) remain unsupported: these objects are still sent as the literal string `"[object Object]"`.
+`style: label` and `style: matrix` follow the OpenAPI style examples. For a parameter named `color`, `"blue"` becomes `.blue` or `;color=blue`; `["blue", "black"]` becomes `.blue,black` or `;color=blue,black`, and with `explode: true` `.blue.black` or `;color=blue;color=black`; `{ R: 100, G: 200 }` becomes `.R,100,G,200` or `;color=R,100,G,200`, and with `explode: true` `.R=100.G=200` or `;R=100;G=200`. Items, keys and values are percent-encoded one at a time, as for `simple`. An empty array or object expands to nothing.
+
+Nested object/array properties remain unsupported for every path style: these objects are still sent as the literal string `"[object Object]"`.
 
 ## Header parameter serialization
 

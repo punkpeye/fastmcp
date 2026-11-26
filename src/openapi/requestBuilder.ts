@@ -332,16 +332,26 @@ function encodePathComponent(value: string): string {
 
 /**
  * Simple-style arrays use comma-separated items; flat objects use alternating
- * keys/values, or key=value pairs when exploded. Encode each component before
- * adding separators so commas, equals signs and slashes in the data cannot
- * become serialization structure.
+ * keys/values, or key=value pairs when exploded. Label and matrix styles add
+ * their `.` or `;name=` prefixes (see `encodePrefixedPathValue`). Encode each
+ * component before adding separators so commas, equals signs and slashes in
+ * the data cannot become serialization structure.
  * Other styles/shapes retain their existing whole-value encoding.
  */
 function encodePathValue(
+  name: string,
   value: unknown,
   style: string | undefined,
   explode: boolean | undefined,
 ): string {
+  if (style === "label" || style === "matrix") {
+    const prefixed = encodePrefixedPathValue(name, value, style, explode);
+
+    if (prefixed !== undefined) {
+      return prefixed;
+    }
+  }
+
   if (
     (style === undefined || style === "simple") &&
     Array.isArray(value) &&
@@ -374,6 +384,85 @@ function encodePathValue(
   }
 
   return encodeURIComponent(String(value));
+}
+
+/**
+ * RFC 6570 label (`{.name}`) and path-style (`{;name}`) expansion, which the
+ * OpenAPI `label` and `matrix` path styles follow. A string, number or boolean
+ * becomes `.blue` or `;color=blue` (`;color` when empty). A flat array becomes
+ * `.blue,black` or `;color=blue,black`, and with `explode: true` `.blue.black`
+ * or `;color=blue;color=black`. A flat object becomes `.R,100,G,200` or
+ * `;color=R,100,G,200`, and with `explode: true` `.R=100.G=200` or
+ * `;R=100;G=200`. An empty array or object expands to nothing. Returns
+ * `undefined` for null and nested values, which keep the whole-value fallback.
+ */
+function encodePrefixedPathValue(
+  name: string,
+  value: unknown,
+  style: "label" | "matrix",
+  explode: boolean | undefined,
+): string | undefined {
+  const isFlat = (item: unknown) => item === null || typeof item !== "object";
+  const encodedName = encodePathComponent(name);
+  const named = (key: string, encoded: string) =>
+    encoded === "" ? key : `${key}=${encoded}`;
+
+  if (value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== "object") {
+    const encoded = encodePathComponent(String(value));
+    return style === "label"
+      ? `.${encoded}`
+      : `;${named(encodedName, encoded)}`;
+  }
+
+  let items: string[];
+  let pairs: [string, string][] | undefined;
+
+  if (Array.isArray(value)) {
+    if (!value.every(isFlat)) {
+      return undefined;
+    }
+
+    items = value.map((item) => encodePathComponent(String(item)));
+  } else {
+    const entries = Object.entries(value as Record<string, unknown>);
+
+    if (!entries.every(([, item]) => isFlat(item))) {
+      return undefined;
+    }
+
+    pairs = entries.map(([key, item]) => [
+      encodePathComponent(key),
+      encodePathComponent(String(item)),
+    ]);
+    items = pairs.flat();
+  }
+
+  if (items.length === 0) {
+    return "";
+  }
+
+  if (explode !== true) {
+    const joined = items.join(",");
+    return style === "label" ? `.${joined}` : `;${encodedName}=${joined}`;
+  }
+
+  if (pairs) {
+    return pairs
+      .map(([key, encoded]) =>
+        style === "label" ? `.${key}=${encoded}` : `;${named(key, encoded)}`,
+      )
+      .join("");
+  }
+
+  return items
+    .map((encoded) =>
+      style === "label" ? `.${encoded}` : `;${named(encodedName, encoded)}`,
+    )
+    .join("");
 }
 
 async function fetchResponse(
@@ -445,7 +534,12 @@ async function fetchResponse(
         pathParams[mapping.name] =
           mapping.encoding === "json"
             ? encodePathComponent(JSON.stringify(value))
-            : encodePathValue(value, mapping.style, mapping.explode);
+            : encodePathValue(
+                mapping.name,
+                value,
+                mapping.style,
+                mapping.explode,
+              );
         break;
       case "query": {
         const query = new URLSearchParams();
