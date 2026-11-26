@@ -2,6 +2,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   CallToolResultSchema,
   LATEST_PROTOCOL_VERSION,
@@ -16,6 +17,8 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { z as z3 } from "zod/v3";
 
+import { FastMCP } from "../FastMCP.js";
+import { jsonSchemaAdapter } from "../jsonSchemaAdapter.js";
 import { EdgeFastMCP } from "./index.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -637,6 +640,71 @@ describe("EdgeFastMCP", () => {
       ),
     );
   });
+
+  it.each([
+    {
+      name: "jsonSchemaAdapter",
+      parameters: jsonSchemaAdapter({
+        $defs: { name: { description: "Name to greet", type: "string" } },
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        additionalProperties: false,
+        properties: { name: { $ref: "#/$defs/name" } },
+        required: ["name"],
+        type: "object",
+      }),
+    },
+    { name: "ArkType", parameters: type({ name: "string" }) },
+  ])(
+    "lists Standard JSON Schema parameters from $name as FastMCP does",
+    async ({ parameters }) => {
+      const server = new EdgeFastMCP({ name: "Inputs", version: "1.0.0" });
+      const core = new FastMCP({ name: "Inputs", version: "1.0.0" });
+      const execute = vi.fn(async (args: unknown) => JSON.stringify(args));
+      const tool = {
+        description: "Greet someone",
+        execute,
+        name: "greet",
+        parameters,
+      };
+      server.addTool(tool);
+      core.addTool(tool);
+
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "inputs-client", version: "1.0.0" });
+      const [session] = await Promise.all([
+        core.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+
+      try {
+        const listed = await postResult(server, "tools/list");
+        expect(listed.tools[0].inputSchema).toEqual(
+          (await client.listTools()).tools[0].inputSchema,
+        );
+        expect(listed.tools[0].inputSchema.required).toEqual(["name"]);
+
+        expect(
+          await postResult(server, "tools/call", {
+            arguments: { name: "World" },
+            name: "greet",
+          }),
+        ).toEqual({
+          content: [{ text: '{"name":"World"}', type: "text" }],
+        });
+        expect(
+          await postResult(server, "tools/call", {
+            arguments: { name: 42 },
+            name: "greet",
+          }),
+        ).toMatchObject({ isError: true });
+        expect(execute).toHaveBeenCalledExactlyOnceWith({ name: "World" });
+      } finally {
+        await client.close();
+        await session.close();
+      }
+    },
+  );
 
   it("keeps the generic Standard Schema fallback in tools/list", async () => {
     const server = new EdgeFastMCP({ name: "TestServer", version: "1.0.0" });
