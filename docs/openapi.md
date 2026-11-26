@@ -119,6 +119,8 @@ Request bodies get the same bracket-notation treatment for nested objects/arrays
 
 Required flattened JSON request bodies are sent as `{}` when no body properties are supplied. A required `application/json` body without a schema also sends `{}`. Omitted optional bodies remain absent.
 
+JSON request bodies with top-level `allOf`, `anyOf`, or `oneOf` are exposed as a single `body` argument, even when they also declare their own `properties`. Call these tools with `{ body: { ... } }`, as for a referenced JSON body: this preserves the composition's fields and validation rules instead of flattening only the directly declared fields. Ordinary flat JSON objects and form-urlencoded bodies keep their existing mapping.
+
 For optional JSON and form-urlencoded bodies, required body properties are enforced only when at least one body field is supplied. Omitting all body fields leaves the body absent; supplying only some required fields is rejected. Path, query, header, and cookie requirements still apply independently.
 
 ## Path parameter serialization
