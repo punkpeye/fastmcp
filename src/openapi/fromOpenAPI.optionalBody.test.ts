@@ -182,6 +182,164 @@ test.each([
   },
 );
 
+test.each(
+  ["3.0.3", "3.1.0"].flatMap((openapi) =>
+    ["allOf", "anyOf", "oneOf"].flatMap((composition) =>
+      [false, true].flatMap((required) =>
+        [false, true].map((referenced) => ({
+          composition,
+          openapi,
+          referenced,
+          required,
+        })),
+      ),
+    ),
+  ),
+)(
+  "$openapi JSON $composition body (required=$required, referenced=$referenced) preserves branch requirements",
+  async ({ composition, openapi, referenced, required }) => {
+    const bodySchema = {
+      [composition]: [
+        { $ref: "#/components/schemas/Tenant" },
+        {
+          properties: { queue: { type: "string" } },
+          required: ["queue"],
+          type: "object",
+        },
+      ],
+      properties: { name: { type: "string" } },
+      required: ["name"],
+      type: "object",
+    };
+    const requests: { body: string; contentType?: string; url?: string }[] = [];
+    const upstream = createServer(async (request, response) => {
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      requests.push({
+        body,
+        contentType: request.headers["content-type"],
+        url: request.url,
+      });
+      response.end("accepted");
+    });
+    const client = new Client({ name: "test-client", version: "1.0.0" });
+    let server: FastMCP | undefined;
+    try {
+      upstream.listen(0, "127.0.0.1");
+      await once(upstream, "listening");
+      const address = upstream.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected a TCP listener");
+      }
+      server = await fromOpenAPI({
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        spec: {
+          components: {
+            schemas: {
+              Job: bodySchema,
+              Tenant: {
+                properties: { tenant_id: { type: "string" } },
+                required: ["tenant_id"],
+                type: "object",
+              },
+            },
+          },
+          info: { title: "Jobs API", version: "1.0.0" },
+          openapi,
+          paths: {
+            "/jobs/{id}": {
+              post: {
+                operationId: "runJob",
+                parameters: [
+                  {
+                    in: "path",
+                    name: "id",
+                    required: true,
+                    schema: { type: "string" },
+                  },
+                  {
+                    in: "query",
+                    name: "body",
+                    required: true,
+                    schema: { type: "string" },
+                  },
+                ],
+                requestBody: {
+                  content: {
+                    "application/json": {
+                      schema: referenced
+                        ? { $ref: "#/components/schemas/Job" }
+                        : bodySchema,
+                    },
+                  },
+                  required,
+                },
+                responses: { 200: { description: "OK" } },
+              },
+            },
+          },
+        },
+      });
+      const [clientTransport, serverTransport] =
+        InMemoryTransport.createLinkedPair();
+      await Promise.all([
+        server.connect(serverTransport),
+        client.connect(clientTransport),
+      ]);
+      const { tools } = await client.listTools();
+      const advertised = jsonSchemaAdapter(tools[0].inputSchema)["~standard"];
+      const parameters = { body__query: "dry run", id: "job-1" };
+      const samples = [
+        { body: undefined, valid: !required },
+        { body: {}, valid: false },
+        { body: { name: "nightly" }, valid: false },
+        {
+          body: { name: "nightly", tenant_id: "team-1" },
+          valid: composition !== "allOf",
+        },
+        {
+          body: { name: "nightly", queue: "batch" },
+          valid: composition !== "allOf",
+        },
+        {
+          body: { name: "nightly", queue: "batch", tenant_id: "team-1" },
+          valid: composition !== "oneOf",
+        },
+        { body: { queue: "batch", tenant_id: "team-1" }, valid: false },
+        { body: { name: "nightly", queue: 42, tenant_id: 42 }, valid: false },
+      ];
+      for (const { body, valid } of samples) {
+        const args = { ...parameters, ...(body === undefined ? {} : { body }) };
+        const requestCount = requests.length;
+        const validation = await advertised.validate(args);
+        const result = await client.callTool({
+          arguments: args,
+          name: "runJob",
+        });
+        if (valid) {
+          expect(validation.issues).toBeUndefined();
+          expect(result.isError).not.toBe(true);
+          expect(requests).toHaveLength(requestCount + 1);
+          expect(requests.at(-1)).toEqual({
+            body: body === undefined ? "" : JSON.stringify(body),
+            contentType: body === undefined ? undefined : "application/json",
+            url: "/jobs/job-1?body=dry+run",
+          });
+        } else {
+          expect(validation.issues).toBeDefined();
+          expect(result.isError).toBe(true);
+          expect(requests).toHaveLength(requestCount);
+        }
+      }
+    } finally {
+      await client.close();
+      await server?.stop();
+      upstream.closeAllConnections();
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  },
+);
+
 test("optional body requirements follow aliased property names", async () => {
   const { flatSchema } = buildFlatSchema(
     {

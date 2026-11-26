@@ -9,6 +9,8 @@ import type { PKCEPair } from "../types.js";
 
 import { equalsConstantTime } from "./constantTime.js";
 
+const CODE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
+
 /**
  * PKCE utility class for generating and validating code challenges
  */
@@ -82,6 +84,11 @@ export class PKCEUtils {
     method: string,
   ): boolean {
     if (!verifier || !challenge) {
+      return false;
+    }
+
+    // RFC 7636 §4.1: code-verifier = 43*128unreserved
+    if (!CODE_VERIFIER.test(verifier)) {
       return false;
     }
 

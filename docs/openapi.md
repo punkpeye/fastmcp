@@ -41,6 +41,8 @@ Tool inputs combine path, query, header, cookie, and body fields. If a parameter
 
 A top-level parameter or flattened body property named `__proto__` also receives an alias, because the schema validator does not validate that literal property name. For example, a path parameter becomes `__proto____path` and a body property becomes `__proto____body`; occupied aliases receive the same numeric suffixes. The HTTP field name remains `__proto__`. This does not rename properties inside nested or whole-body schemas.
 
+A parameter declared with `content: application/json` instead of `schema` takes that media type's schema as its input and is sent as one JSON value: percent-encoded in a path, query or cookie, and as-is in a header. `style`, `explode` and `allowReserved` don't apply to it, and a `null` is sent as JSON `null`. A parameter declared with any other media type stays a plain string input, sent as given.
+
 HEAD operations become tools too. Like GET, they ignore any declared request body because `fetch` cannot send one. HEAD responses remain empty text results without an `outputSchema`, even when the spec declares a JSON response schema.
 
 ## Choosing which operations become tools
@@ -77,7 +79,8 @@ A `GET` stays a tool instead — even with `resources: true` — when:
 
 - it has any `header` or `cookie` parameter (these can't be expressed in a resource URI, and resource reads have no per-call side channel for them), or
 - any of its path/query parameters is array-typed, including component schema references and nullable arrays (OpenAPI's array query serialization and RFC 6570's don't match), or
-- any of its path/query parameters is object-typed, including component schema references and nullable objects (the URI template parser does not preserve the object shape needed for OpenAPI serialization).
+- any of its path/query parameters is object-typed, including component schema references and nullable objects (the URI template parser does not preserve the object shape needed for OpenAPI serialization), or
+- any of its path/query parameters is declared with `content` instead of `schema` (the URI template parser cannot rebuild the JSON value such a parameter is sent as).
 
 Array/object types inside `allOf`, `anyOf`, and `oneOf` branches, including nested compositions and component references, also keep the operation as a tool. Scalar-only compositions remain eligible for resources.
 
@@ -85,7 +88,9 @@ This means a "get by ID" style endpoint typically becomes a resource template, w
 
 There's no per-operation override for this — an eligible `GET` always maps to a resource when `resources: true`; use `exclude` if you want a specific one to stay a tool instead of being generated at all.
 
-Eligibility doesn't check the response's own content type, only the request shape. A `GET` returning binary data (an image, a PDF, ...) can still become a resource, and its response is read as text, not as the binary-safe `blob` a resource can also return — corrupting non-text bytes. If your spec has binary-returning `GET`s you want as resources, use `exclude` to keep them as tools instead until this is addressed.
+Eligibility checks the request shape, not the response's content type. Resource reads use the HTTP response's `Content-Type`: binary responses (for example, images, PDFs and `application/octet-stream`) return a base64-encoded `blob` with that media type, preserving the original bytes. Static resources, resource templates and `embedded()` all support these results.
+
+`text/*`, JSON, XML, YAML (including `+json`, `+xml` and `+yaml` media types), JavaScript, ECMAScript and form-urlencoded responses retain their existing text handling. JSON detection continues to accept any media type containing `json`, including `application/x-json` and `application/x-ndjson`; common `x-` XML/YAML/JavaScript/ECMAScript aliases also stay textual. Responses without a `Content-Type` keep the existing text/JSON detection; binary endpoints must send a suitable `Content-Type`. Tool responses retain their existing text/structured-output handling.
 
 ## Structured output
 
@@ -118,6 +123,8 @@ Form-style cookie values (the default) are percent-encoded, leaving only letters
 Request bodies get the same bracket-notation treatment for nested objects/arrays (e.g. Stripe's `metadata[key]=value`) when form-urlencoded.
 
 Required flattened JSON request bodies are sent as `{}` when no body properties are supplied. A required `application/json` body without a schema also sends `{}`. Omitted optional bodies remain absent.
+
+JSON request bodies with top-level `allOf`, `anyOf`, or `oneOf` are exposed as a single `body` argument, even when they also declare their own `properties`. Call these tools with `{ body: { ... } }`, as for a referenced JSON body: this preserves the composition's fields and validation rules instead of flattening only the directly declared fields. Ordinary flat JSON objects and form-urlencoded bodies keep their existing mapping.
 
 For optional JSON and form-urlencoded bodies, required body properties are enforced only when at least one body field is supplied. Omitting all body fields leaves the body absent; supplying only some required fields is rejected. Path, query, header, and cookie requirements still apply independently.
 

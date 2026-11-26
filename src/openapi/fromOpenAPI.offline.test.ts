@@ -2783,3 +2783,132 @@ test.each(["3.0.3", "3.1.0"])(
     }
   },
 );
+
+test("a query parameter declared with application/json content is advertised as that object and sent as one JSON value", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () =>
+      new Response("{}", { headers: { "content-type": "application/json" } }),
+  );
+  const filter = { color: "brown", type: "dog" };
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    resources: true,
+    spec: {
+      info: { title: "Pets API", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "listPets",
+            parameters: [
+              {
+                content: {
+                  "application/json": {
+                    schema: {
+                      properties: {
+                        color: { type: "string" },
+                        type: { type: "string" },
+                      },
+                      required: ["type"],
+                      type: "object",
+                    },
+                  },
+                },
+                in: "query",
+                name: "filter",
+                required: true,
+              },
+            ],
+            responses: { 200: { description: "OK" } },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.com" }],
+    },
+  });
+  const client = await connect(server);
+
+  try {
+    const { tools } = await client.listTools();
+    expect(tools.map((tool) => tool.name)).toEqual(["listPets"]);
+    expect(tools[0]?.inputSchema.properties).toMatchObject({
+      filter: {
+        properties: {
+          color: { type: "string" },
+          type: { type: "string" },
+        },
+        required: ["type"],
+        type: "object",
+      },
+    });
+
+    const result = await client.callTool({
+      arguments: { filter },
+      name: "listPets",
+    });
+    expect(result.isError).toBeFalsy();
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    expect(new URL(calledUrl).searchParams.get("filter")).toBe(
+      JSON.stringify(filter),
+    );
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});
+
+test("a query parameter whose content is not JSON stays a string tool argument, sent as given", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () =>
+      new Response("{}", { headers: { "content-type": "application/json" } }),
+  );
+  const filter = '<filter type="dog" color="brown"/>';
+  const server = await fromOpenAPI({
+    fetch: fetchImpl,
+    resources: true,
+    spec: {
+      info: { title: "Pets API", version: "1.0.0" },
+      openapi: "3.0.3",
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "listPets",
+            parameters: [
+              {
+                content: {
+                  "application/xml": {
+                    schema: { type: "object" },
+                  },
+                },
+                in: "query",
+                name: "filter",
+              },
+            ],
+            responses: { 200: { description: "OK" } },
+          },
+        },
+      },
+      servers: [{ url: "https://api.example.com" }],
+    },
+  });
+  const client = await connect(server);
+
+  try {
+    const { tools } = await client.listTools();
+    expect(tools.map((tool) => tool.name)).toEqual(["listPets"]);
+    expect(tools[0]?.inputSchema.properties).toEqual({
+      filter: { type: "string" },
+    });
+
+    const result = await client.callTool({
+      arguments: { filter },
+      name: "listPets",
+    });
+    expect(result.isError).toBeFalsy();
+    const [calledUrl] = fetchImpl.mock.calls[0]!;
+    expect(new URL(calledUrl).searchParams.get("filter")).toBe(filter);
+  } finally {
+    await client.close();
+    await server.stop();
+  }
+});

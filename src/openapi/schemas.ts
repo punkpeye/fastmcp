@@ -78,8 +78,9 @@ export interface FlatSchemaResult {
   unsupportedBodyContentType?: string;
   /**
    * Set when the request body's schema is not a flat object (e.g. an array,
-   * a dictionary, or a bare `$ref`) — the whole body is exposed as a single
-   * property under this key, rather than flattened into individual properties.
+   * a dictionary, a composition, or a bare `$ref`) — the whole body is exposed
+   * as a single property under this key, rather than flattened into individual
+   * properties.
    */
   wholeBodyKey?: string;
 }
@@ -87,6 +88,12 @@ export interface FlatSchemaResult {
 export interface ParameterMapping {
   /** Only meaningful for `in: "query"` — see `OpenApiParameter.allowReserved`. */
   allowReserved?: boolean;
+  /**
+   * Set when the parameter is declared with `content: application/json`
+   * instead of `schema`. The value is one JSON string; `style` and
+   * `explode` do not apply.
+   */
+  encoding?: "json";
   explode?: boolean;
   in: "body" | ParameterLocation;
   name: string;
@@ -173,11 +180,12 @@ export function buildFlatSchema(
       const base = collides ? `${name}__${param.in}` : name;
       const key = collides ? allocateAlias(base) : name;
 
-      properties[key] = rewriteComponentRefs(
-        param.schema ?? { type: "string" },
-      );
+      const input = parameterInput(param);
+
+      properties[key] = rewriteComponentRefs(input.schema);
       parameterMap[key] = {
         allowReserved: param.allowReserved,
+        ...(input.encoding ? { encoding: input.encoding } : {}),
         explode: param.explode,
         in: param.in,
         name,
@@ -532,10 +540,16 @@ function extractBodyProperties(
   const schemaProperties = schema.properties as
     | Record<string, OpenApiSchema>
     | undefined;
+  // Flattening only properties/required would discard the composition's
+  // fields and constraints. Keep the existing whole-body JSON path instead.
+  const composedJsonBody =
+    bodyEncoding === "json" &&
+    ["allOf", "anyOf", "oneOf"].some((key) => Array.isArray(schema[key]));
 
   // An empty properties map doesn't close a JSON object: dictionary entries
   // still need the whole-body path when additional properties are allowed.
   if (
+    !composedJsonBody &&
     schema.type === "object" &&
     schemaProperties &&
     (bodyEncoding === "form" ||
@@ -563,8 +577,8 @@ function extractBodyProperties(
     };
   }
 
-  // JSON bodies without flattenable properties (arrays, dictionaries, bare
-  // $refs, etc.) are exposed as a single "body" property.
+  // JSON bodies without flattenable properties (arrays, dictionaries,
+  // compositions, bare $refs, etc.) are exposed as a single "body" property.
   properties.set("body", {
     required: requestBody?.required ?? false,
     schema,
@@ -787,6 +801,35 @@ function omitReadOnlyRequired(value: unknown, mode: WalkMode): unknown {
   }
 
   return node;
+}
+
+/**
+ * The schema a parameter contributes to the tool, and how its value is
+ * serialized.
+ *
+ * `schema` and `content` are mutually exclusive. A parameter that only has
+ * `content: application/json` takes that media type's schema and is sent as
+ * one JSON value (not form or `deepObject` expansion). Any other media type
+ * keeps the plain string input it always had, sent as given: a string can
+ * carry text such as XML, so the operation stays usable instead of being
+ * skipped. A `schema` wins when both are present: that document is not a
+ * valid parameter, and this keeps the shape the module already carried.
+ */
+function parameterInput(param: OpenApiParameter): {
+  encoding?: "json";
+  schema: OpenApiSchema;
+} {
+  const json =
+    param.schema === undefined
+      ? findMediaType(param.content, "application/json")
+      : undefined;
+
+  if (!json) {
+    return { schema: param.schema ?? { type: "string" } };
+  }
+
+  // No schema means any JSON value, which an empty schema accepts.
+  return { encoding: "json", schema: json.schema ?? {} };
 }
 
 /**

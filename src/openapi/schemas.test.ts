@@ -277,6 +277,63 @@ test("a non-object request body is exposed as a single `body` property", () => {
   expect(flatSchema.required).toContain("body");
 });
 
+test.each(["allOf", "anyOf", "oneOf"])(
+  "a JSON body with %s keeps its own properties and composition together",
+  (composition) => {
+    const schema = {
+      additionalProperties: false,
+      [composition]: [{ required: ["name"] }],
+      properties: { name: { type: "string" } },
+      type: "object",
+    };
+    const { bodyEncoding, flatSchema, parameterMap, wholeBodyKey } =
+      buildFlatSchema(
+        route({
+          requestBody: {
+            content: { "application/json": { schema } },
+            required: true,
+          },
+        }),
+        undefined,
+      );
+
+    expect(bodyEncoding).toBe("json");
+    expect(wholeBodyKey).toBe("body");
+    expect(flatSchema.properties).toEqual({ body: schema });
+    expect(flatSchema.required).toEqual(["body"]);
+    expect(parameterMap).toEqual({ body: { in: "body", name: "body" } });
+  },
+);
+
+test.each(["allOf", "anyOf", "oneOf"])(
+  "a composition inside a JSON body property does not change flattening: %s",
+  (composition) => {
+    const field = { [composition]: [{ type: "string" }] };
+    const { flatSchema, parameterMap, wholeBodyKey } = buildFlatSchema(
+      route({
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { name: field },
+                required: ["name"],
+                type: "object",
+              },
+            },
+          },
+          required: true,
+        },
+      }),
+      undefined,
+    );
+
+    expect(wholeBodyKey).toBeUndefined();
+    expect(flatSchema.properties).toEqual({ name: field });
+    expect(flatSchema.required).toEqual(["name"]);
+    expect(parameterMap).toEqual({ name: { in: "body", name: "name" } });
+  },
+);
+
 test.each([
   { additionalProperties: { type: "string" }, label: "typed values" },
   { additionalProperties: true, label: "unconstrained values" },
@@ -1566,3 +1623,115 @@ test("buildOutputSchema resolves a bare $ref whose name needs a JSON Pointer esc
   // resolves to `type: "object"`, and the outputSchema is silently dropped.
   expect(schema).toEqual({ type: "object" });
 });
+
+const FILTER_SCHEMA = {
+  properties: { color: { type: "string" }, type: { type: "string" } },
+  type: "object",
+};
+
+test("a query parameter with application/json content keeps that schema and JSON encoding", () => {
+  const { flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      parameters: [
+        {
+          content: { "application/json": { schema: FILTER_SCHEMA } },
+          in: "query",
+          name: "filter",
+          required: true,
+          style: "form",
+        },
+      ],
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties).toEqual({ filter: FILTER_SCHEMA });
+  expect(flatSchema.required).toEqual(["filter"]);
+  expect(parameterMap.filter).toMatchObject({
+    encoding: "json",
+    in: "query",
+    name: "filter",
+  });
+});
+
+test("application/json parameter content matches a media type with parameters", () => {
+  const { flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      parameters: [
+        {
+          content: {
+            "Application/JSON; charset=utf-8": { schema: FILTER_SCHEMA },
+          },
+          in: "query",
+          name: "filter",
+        },
+      ],
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties).toEqual({ filter: FILTER_SCHEMA });
+  expect(parameterMap.filter).toMatchObject({ encoding: "json" });
+});
+
+test("a $ref inside application/json parameter content is rewritten into $defs", () => {
+  const document: BundledOpenApiDocument = {
+    components: { schemas: { Filter: FILTER_SCHEMA } },
+  };
+  const { flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      parameters: [
+        {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Filter" },
+            },
+          },
+          in: "query",
+          name: "filter",
+        },
+      ],
+    }),
+    buildSharedDefs(document),
+  );
+
+  expect(flatSchema.properties?.filter).toEqual({ $ref: "#/$defs/Filter" });
+  expect(flatSchema.$defs).toEqual({ Filter: FILTER_SCHEMA });
+  expect(parameterMap.filter).toMatchObject({ encoding: "json" });
+});
+
+test("a parameter schema wins when content is also present", () => {
+  const { flatSchema, parameterMap } = buildFlatSchema(
+    route({
+      parameters: [
+        {
+          content: { "application/json": { schema: FILTER_SCHEMA } },
+          in: "query",
+          name: "filter",
+          schema: { type: "string" },
+        },
+      ],
+    }),
+    undefined,
+  );
+
+  expect(flatSchema.properties).toEqual({ filter: { type: "string" } });
+  expect(parameterMap.filter).not.toHaveProperty("encoding");
+});
+
+test.each<NonNullable<OpenApiParameter["content"]>>([
+  { "application/xml": { schema: FILTER_SCHEMA } },
+  { "text/plain": { schema: { type: "string" } } },
+  {},
+])(
+  "parameter content other than application/json stays a plain string (%o)",
+  (content) => {
+    const { flatSchema, parameterMap } = buildFlatSchema(
+      route({ parameters: [{ content, in: "query", name: "filter" }] }),
+      undefined,
+    );
+
+    expect(flatSchema.properties).toEqual({ filter: { type: "string" } });
+    expect(parameterMap.filter).not.toHaveProperty("encoding");
+  },
+);
