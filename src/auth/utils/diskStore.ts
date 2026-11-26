@@ -296,17 +296,19 @@ export class DiskStore implements TokenStorage {
    * Get file path for a key.
    *
    * The file name must not let a key escape the directory, and distinct keys
-   * must get distinct files. Letters, digits and `-` are kept; every other
-   * UTF-8 byte, `_` included, becomes `_` and two hex digits, so `client:a.b`
-   * and `client:a_b` no longer share a file. Names that would get too long
-   * for common filesystems are replaced by a SHA-256 digest, under a prefix
-   * the escaping above never produces.
+   * must get distinct files, also on case-insensitive filesystems (the macOS
+   * and Windows defaults). Lowercase letters, digits and `-` are kept; every
+   * other UTF-8 byte, uppercase letters and `_` included, becomes `_` and two
+   * lowercase hex digits, so neither `client:a.b` and `client:a_b` nor
+   * `code:A` and `code:a` share a file. Names that would get too long for
+   * common filesystems are replaced by a SHA-256 digest, under a prefix the
+   * escaping above never produces.
    */
   private getFilePath(key: string): string {
     let name = "";
     for (const byte of Buffer.from(key, "utf8")) {
       const char = String.fromCharCode(byte);
-      name += /[a-zA-Z0-9-]/.test(char)
+      name += /[a-z0-9-]/.test(char)
         ? char
         : `_${byte.toString(16).padStart(2, "0")}`;
     }

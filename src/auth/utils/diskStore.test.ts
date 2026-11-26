@@ -167,6 +167,21 @@ describe("DiskStore", () => {
     store.destroy();
   });
 
+  it("should keep keys that differ only in letter case apart", async () => {
+    const store = new DiskStore({ directory: TEST_DIR });
+
+    await store.save("code:Ab", "upper");
+    await store.save("code:ab", "lower");
+
+    expect(await store.get("code:Ab")).toBe("upper");
+    expect(await store.get("code:ab")).toBe("lower");
+    // Distinct even where the filesystem folds case (macOS, Windows).
+    const files = await readdir(TEST_DIR);
+    expect(new Set(files.map((file) => file.toLowerCase())).size).toBe(2);
+
+    store.destroy();
+  });
+
   it("should store a long key under a bounded file name", async () => {
     const store = new DiskStore({ directory: TEST_DIR });
     const key = `client:https://example.com/${"a/".repeat(200)}`;
