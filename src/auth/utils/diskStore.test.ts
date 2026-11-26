@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readdir, rm, stat } from "fs/promises";
+import { chmod, mkdtemp, readdir, rm, stat, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -142,9 +142,95 @@ describe("DiskStore", () => {
     // Verify file was created in the correct directory
     const files = await readdir(TEST_DIR);
     expect(files.length).toBe(1);
-    expect(files[0]).toMatch(/^_________malicious\.json$/);
+    expect(files[0]).toBe("_2e_2e_2f_2e_2e_2f_2e_2e_2fmalicious.json");
 
     store.destroy();
+  });
+
+  it("should keep keys that differ only in escaped characters apart", async () => {
+    const store = new DiskStore({ directory: TEST_DIR });
+
+    await store.save("client:a.b", "dot");
+    await store.save("client:a_b", "underscore");
+    await store.save("client/a/b", "slash");
+
+    expect(await store.get("client:a.b")).toBe("dot");
+    expect(await store.get("client:a_b")).toBe("underscore");
+    expect(await store.get("client/a/b")).toBe("slash");
+    expect(await store.size()).toBe(3);
+
+    await store.delete("client:a.b");
+
+    expect(await store.get("client:a.b")).toBeNull();
+    expect(await store.get("client:a_b")).toBe("underscore");
+
+    store.destroy();
+  });
+
+  it("should keep keys that differ only in letter case apart", async () => {
+    const store = new DiskStore({ directory: TEST_DIR });
+
+    await store.save("code:Ab", "upper");
+    await store.save("code:ab", "lower");
+
+    expect(await store.get("code:Ab")).toBe("upper");
+    expect(await store.get("code:ab")).toBe("lower");
+    // Distinct even where the filesystem folds case (macOS, Windows).
+    const files = await readdir(TEST_DIR);
+    expect(new Set(files.map((file) => file.toLowerCase())).size).toBe(2);
+
+    store.destroy();
+  });
+
+  it("should store a long key under a bounded file name", async () => {
+    const store = new DiskStore({ directory: TEST_DIR });
+    const key = `client:https://example.com/${"a/".repeat(200)}`;
+
+    await store.save(key, "value");
+
+    expect(await store.get(key)).toBe("value");
+    const files = await readdir(TEST_DIR);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/^_sha256_[0-9a-f]{64}\.json$/);
+    expect(await store.take(key)).toBe("value");
+    expect(await readdir(TEST_DIR)).toHaveLength(0);
+
+    store.destroy();
+  });
+
+  describe("entries written under the legacy file name", () => {
+    const legacyEntry = (value: unknown) =>
+      JSON.stringify({ expiresAt: Number.MAX_SAFE_INTEGER, value });
+
+    it("should still be read, taken and deleted", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+      await store.size(); // creates the directory
+      await writeFile(join(TEST_DIR, "code_abc.json"), legacyEntry("old"));
+
+      expect(await store.get("code:abc")).toBe("old");
+      expect(await store.take("code:abc")).toBe("old");
+      expect(await store.get("code:abc")).toBeNull();
+
+      await writeFile(join(TEST_DIR, "code_abc.json"), legacyEntry("old"));
+      await store.delete("code:abc");
+      expect(await readdir(TEST_DIR)).toHaveLength(0);
+
+      store.destroy();
+    });
+
+    it("should be replaced, not shadowed, by a new save", async () => {
+      const store = new DiskStore({ directory: TEST_DIR });
+      await store.size(); // creates the directory
+      await writeFile(join(TEST_DIR, "code_abc.json"), legacyEntry("old"));
+
+      await store.save("code:abc", "new");
+
+      expect(await store.take("code:abc")).toBe("new");
+      expect(await store.get("code:abc")).toBeNull();
+      expect(await readdir(TEST_DIR)).toHaveLength(0);
+
+      store.destroy();
+    });
   });
 
   it("should handle concurrent operations", async () => {
