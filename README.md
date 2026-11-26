@@ -117,8 +117,6 @@ npx fastmcp dev src/examples/addition.ts
 npx fastmcp inspect src/examples/addition.ts
 ```
 
-If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
-
 ### Remote Server Options
 
 FastMCP supports multiple transport options for remote communication, allowing an MCP hosted on a remote machine to be accessed over the network.
@@ -2856,13 +2854,8 @@ Refer to this [issue](https://github.com/punkpeye/fastmcp/issues/25#issuecomment
 >
 > If you've developed a server using FastMCP, please [submit a PR](https://github.com/punkpeye/fastmcp) to showcase it here!
 
-> [!NOTE]
->
-> If you are looking for a boilerplate repository to build your own MCP server, check out [fastmcp-boilerplate](https://github.com/punkpeye/fastmcp-boilerplate).
-
 - [apinetwork/piapi-mcp-server](https://github.com/apinetwork/piapi-mcp-server) - generate media using Midjourney/Flux/Kling/LumaLabs/Udio/Chrip/Trellis
 - [domdomegg/computer-use-mcp](https://github.com/domdomegg/computer-use-mcp) - controls your computer
-- [LiterallyBlah/Dradis-MCP](https://github.com/LiterallyBlah/Dradis-MCP) – manages projects and vulnerabilities in Dradis
 - [Meeting-Baas/meeting-mcp](https://github.com/Meeting-Baas/meeting-mcp) - create meeting bots, search transcripts, and manage recording data
 - [drumnation/unsplash-smart-mcp-server](https://github.com/drumnation/unsplash-smart-mcp-server) – enables AI agents to seamlessly search, recommend, and deliver professional stock photos from Unsplash
 - [ssmanji89/halopsa-workflows-mcp](https://github.com/ssmanji89/halopsa-workflows-mcp) - HaloPSA Workflows integration with AI assistants
