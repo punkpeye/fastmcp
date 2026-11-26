@@ -423,6 +423,52 @@ describe("EdgeFastMCP", () => {
     expect(body.result.serverInfo.version).toBe("1.0.0");
   });
 
+  it("advertises the configured description in serverInfo", async () => {
+    const initialize = async (server: EdgeFastMCP) => {
+      const response = await server.fetch(
+        new Request("http://localhost/mcp", {
+          body: JSON.stringify({
+            id: 1,
+            jsonrpc: "2.0",
+            method: "initialize",
+            params: {
+              capabilities: {},
+              clientInfo: { name: "test-client", version: "1.0.0" },
+              protocolVersion: LATEST_PROTOCOL_VERSION,
+            },
+          }),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+      const body: JsonResponse = await response.json();
+      return body.result.serverInfo;
+    };
+
+    expect(
+      await initialize(
+        new EdgeFastMCP({
+          description: "MCP server running on Cloudflare Workers",
+          name: "TestServer",
+          version: "1.0.0",
+        }),
+      ),
+    ).toEqual({
+      description: "MCP server running on Cloudflare Workers",
+      name: "TestServer",
+      version: "1.0.0",
+    });
+
+    expect(
+      await initialize(
+        new EdgeFastMCP({ name: "TestServer", version: "1.0.0" }),
+      ),
+    ).toEqual({ name: "TestServer", version: "1.0.0" });
+  });
+
   it("answers initialize with the protocol version the client asked for", async () => {
     const server = new EdgeFastMCP({
       name: "TestServer",

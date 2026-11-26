@@ -56,6 +56,10 @@ export type {
  * Options for EdgeFastMCP
  */
 export interface EdgeFastMCPOptions {
+  /**
+   * Human-readable description of the server, advertised to clients in
+   * `serverInfo.description` during `initialize`.
+   */
   description?: string;
   logger?: EdgeLogger;
   /**
@@ -143,6 +147,7 @@ export interface EdgeTool<TParams = unknown> {
  * It uses web-standard APIs only (no Node.js dependencies).
  */
 export class EdgeFastMCP {
+  #description: string | undefined;
   #honoApp = new Hono();
   #logger: EdgeLogger;
   #mcpPath: string;
@@ -153,6 +158,7 @@ export class EdgeFastMCP {
   #version: string;
 
   constructor(options: EdgeFastMCPOptions) {
+    this.#description = options.description;
     this.#name = options.name;
     this.#version = options.version;
     this.#logger = options.logger ?? console;
@@ -330,6 +336,9 @@ export class EdgeFastMCP {
         },
         protocolVersion,
         serverInfo: {
+          ...(this.#description !== undefined && {
+            description: this.#description,
+          }),
           name: this.#name,
           version: this.#version,
         },
