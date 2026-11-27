@@ -100,6 +100,8 @@ When several success responses are declared, their object schemas are combined w
 
 The response is checked against the advertised schema _before_ being returned as structured content. When a tool has an `outputSchema` but the response doesn't match, isn't a JSON object, is served as `text/plain`, or has an empty body, the call returns a tool error (`isError: true`) containing the response text. This keeps the response visible to clients that validate calls against the advertised schema. Tools without an `outputSchema` keep returning plain-text successes; for example, an array-typed response schema is never wired to `outputSchema` in the first place.
 
+Properties marked `writeOnly: true` are not required in responses, including nested objects and component schemas. Their request-side requirements remain unchanged; `readOnly` properties remain required in responses when the schema declares them so.
+
 An operation whose response schema is unusually large (more than 50 transitively-referenced component schemas — real for some "core" resource objects in large APIs) doesn't get `outputSchema` wired at all, both to keep `tools/list` fast and because a schema that large has limited practical value as structured output anyway.
 
 ## Query and form-body serialization

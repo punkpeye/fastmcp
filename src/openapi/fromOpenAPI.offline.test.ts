@@ -2784,6 +2784,112 @@ test.each(["3.0.3", "3.1.0"])(
   },
 );
 
+test.each(
+  ["3.0.3", "3.1.0"].flatMap((openapi) =>
+    ["inline", "reference", "nested reference"].map((shape) => ({
+      openapi,
+      shape,
+    })),
+  ),
+)(
+  "write-only fields stay required in requests, not successful responses ($openapi, $shape)",
+  async ({ openapi, shape }) => {
+    const account = {
+      properties: {
+        id: { readOnly: true, type: "integer" },
+        name: { type: "string" },
+        password: { type: "string", writeOnly: true },
+      },
+      required: ["id", "name", "password"],
+      type: "object",
+    };
+    const reference = { $ref: "#/components/schemas/Account" };
+    const schema =
+      shape === "inline"
+        ? account
+        : shape === "reference"
+          ? reference
+          : {
+              properties: { account: reference },
+              required: ["account"],
+              type: "object",
+            };
+    const payload = (value: Record<string, unknown>) =>
+      shape === "nested reference" ? { account: value } : value;
+    const args = (value: Record<string, unknown>) =>
+      shape === "reference" ? { body: value } : payload(value);
+    const response = payload({ id: 7, name: "alice" });
+    const jsonResponse = (value: unknown) =>
+      new Response(JSON.stringify(value), {
+        headers: { "content-type": "application/json" },
+        status: 201,
+      });
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(response));
+    const server = await fromOpenAPI({
+      fetch: fetchImpl,
+      spec: {
+        components: { schemas: { Account: account } },
+        info: { title: "Accounts API", version: "1.0.0" },
+        openapi,
+        paths: {
+          "/accounts": {
+            post: {
+              operationId: "createAccount",
+              requestBody: {
+                content: { "application/json": { schema } },
+                required: true,
+              },
+              responses: {
+                201: {
+                  content: { "application/json": { schema } },
+                  description: "Created",
+                },
+              },
+            },
+          },
+        },
+        servers: [{ url: "https://api.example.com" }],
+      },
+    });
+    const client = await connect(server);
+
+    try {
+      // The SDK client validates structured content against tools/list too.
+      await client.listTools();
+      const input = { name: "alice", password: "fixture-password" };
+      const result = await client.callTool({
+        arguments: args(input),
+        name: "createAccount",
+      });
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual(response);
+      expect(fetchImpl.mock.calls[0][1]?.body).toBe(
+        JSON.stringify(payload(input)),
+      );
+
+      const missingPassword = await client.callTool({
+        arguments: args({ name: "alice" }),
+        name: "createAccount",
+      });
+      expect(missingPassword.isError).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      // A read-only property is still required in the response.
+      fetchImpl.mockResolvedValueOnce(jsonResponse(payload({ name: "alice" })));
+      const missingId = await client.callTool({
+        arguments: args(input),
+        name: "createAccount",
+      });
+      expect(missingId.isError).toBe(true);
+      expect(missingId.structuredContent).toBeUndefined();
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      await client.close();
+      await server.stop();
+    }
+  },
+);
+
 test("a query parameter declared with application/json content is advertised as that object and sent as one JSON value", async () => {
   const fetchImpl = vi.fn<typeof fetch>(
     async () =>
