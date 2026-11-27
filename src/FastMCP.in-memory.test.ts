@@ -3,6 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   ContentBlockSchema,
   ListRootsRequestSchema,
+  PingRequestSchema,
   PromptListChangedNotificationSchema,
   ResourceLink,
   ResourceLinkSchema,
@@ -987,6 +988,64 @@ describe("FastMCP in-memory transport", () => {
       { name: "Frontend", uri: "file:///frontend" },
     ]);
     expect(session.isReady).toBe(true);
+
+    await client.close();
+  });
+
+  it("learns the capabilities and roots of a client that initializes late", async () => {
+    const logger = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      log: vi.fn(),
+      warn: vi.fn(),
+    };
+    const server = new FastMCP({
+      logger,
+      name: "Test",
+      ping: { enabled: true, intervalMs: 50 },
+      version: "1.0.0",
+    });
+
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+
+    const client = new Client(
+      { name: "test-client", version: "0.0.0" },
+      { capabilities: { roots: { listChanged: true } } },
+    );
+
+    client.setRequestHandler(ListRootsRequestSchema, () => ({
+      roots: [{ name: "Frontend", uri: "file:///frontend" }],
+    }));
+
+    const onPing = vi.fn().mockReturnValue({});
+
+    client.setRequestHandler(PingRequestSchema, onPing);
+
+    // The client initializes only after the session stopped waiting for it,
+    // as behind a gateway that starts the server before any client connects.
+    const session = await server.connect(serverTransport);
+    const rootsChanged = vi.fn();
+
+    session.on("rootsChanged", rootsChanged);
+
+    await client.connect(clientTransport);
+
+    await vi.waitFor(() => {
+      expect(rootsChanged).toHaveBeenCalledWith({
+        roots: [{ name: "Frontend", uri: "file:///frontend" }],
+      });
+    });
+    expect(session.clientCapabilities).toEqual({
+      roots: { listChanged: true },
+    });
+    expect(session.roots).toEqual([
+      { name: "Frontend", uri: "file:///frontend" },
+    ]);
+    await vi.waitFor(() => {
+      expect(onPing).toHaveBeenCalled();
+    });
 
     await client.close();
   });
