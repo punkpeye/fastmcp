@@ -1192,6 +1192,146 @@ test("buildOutputSchema ignores non-success response schemas", () => {
   });
 });
 
+test.each([true, false, undefined])(
+  "buildOutputSchema only excludes required properties marked writeOnly: true (%s)",
+  (writeOnly) => {
+    const account = {
+      properties: {
+        id: { readOnly: true, type: "integer" },
+        name: { type: "string" },
+        password: { type: "string", writeOnly },
+        writeOnly: { type: "string" },
+      },
+      required: ["id", "name", "password", "writeOnly"],
+      type: "object",
+    };
+    const original = structuredClone(account);
+    const schema = buildOutputSchema(
+      route({
+        responses: {
+          "200": { content: { "application/json": { schema: account } } },
+        },
+      }),
+      undefined,
+    );
+
+    expect(schema?.required).toEqual(
+      writeOnly === true ? ["id", "name", "writeOnly"] : account.required,
+    );
+    expect(schema?.properties).toEqual(account.properties);
+    expect(account).toEqual(original);
+  },
+);
+
+test("buildOutputSchema omits required when every required property is write-only", () => {
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { password: { type: "string", writeOnly: true } },
+                required: ["password"],
+                type: "object",
+              },
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(schema).toEqual({
+    properties: { password: { type: "string", writeOnly: true } },
+    type: "object",
+  });
+});
+
+test.each(["allOf", "anyOf", "oneOf"])(
+  "buildOutputSchema handles write-only properties in nested %s schemas and shared definitions without mutating them",
+  (keyword) => {
+    const account = {
+      properties: {
+        id: { readOnly: true, type: "integer" },
+        password: { type: "string", writeOnly: true },
+      },
+      required: ["id", "password"],
+      type: "object",
+    };
+    const defs = { Account: account };
+    const original = structuredClone(defs);
+    const envelope = {
+      properties: {
+        accounts: {
+          items: { [keyword]: [account], type: "object" },
+          type: "array",
+        },
+        owner: { $ref: "#/$defs/Account" },
+      },
+      required: ["accounts", "owner"],
+      type: "object",
+    };
+    const schema = buildOutputSchema(
+      route({
+        responses: {
+          "200": { content: { "application/json": { schema: envelope } } },
+          "201": { content: { "application/json": { schema: account } } },
+        },
+      }),
+      defs,
+    );
+
+    expect(schema).toMatchObject({
+      $defs: { Account: { required: ["id"] } },
+      anyOf: [
+        {
+          properties: {
+            accounts: { items: { [keyword]: [{ required: ["id"] }] } },
+          },
+          required: ["accounts", "owner"],
+        },
+        { required: ["id"] },
+      ],
+    });
+    expect(defs).toEqual(original);
+    expect(envelope.properties.accounts.items[keyword][0]).toEqual(account);
+  },
+);
+
+test("buildOutputSchema leaves schema-shaped default, const and enum data intact", () => {
+  const data = {
+    properties: { secret: { writeOnly: true } },
+    required: ["secret"],
+  };
+  const properties = {
+    payload: { const: data, default: data, enum: [data], type: "object" },
+    token: { type: "string", writeOnly: true },
+  };
+  const schema = buildOutputSchema(
+    route({
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: {
+                properties,
+                required: ["payload", "token"],
+                type: "object",
+              },
+            },
+          },
+        },
+      },
+    }),
+    undefined,
+  );
+
+  expect(schema?.required).toEqual(["payload"]);
+  expect(schema?.properties).toEqual(properties);
+});
+
 test("buildOutputSchema combines all success schemas and retains their referenced definitions", () => {
   const completed = {
     properties: { result: { $ref: "#/$defs/Result" } },

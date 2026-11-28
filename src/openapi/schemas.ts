@@ -202,9 +202,10 @@ export function buildFlatSchema(
   const requiredBodyKeys: string[] = [];
   for (const [name, { required: isRequired, schema }] of bodyProperties) {
     const key = name === "__proto__" ? allocateAlias(`${name}__body`) : name;
-    properties[key] = omitReadOnlyRequired(
+    properties[key] = omitRequiredByAnnotation(
       rewriteComponentRefs(schema),
       "schema",
+      "readOnly",
     ) as OpenApiSchema;
     parameterMap[key] = { in: "body", name };
     bodyKeys.push(key);
@@ -239,10 +240,11 @@ export function buildFlatSchema(
   const usedDefs = sharedDefs && filterReferencedDefs(properties, sharedDefs);
 
   if (usedDefs) {
-    flatSchema.$defs = omitReadOnlyRequired(usedDefs, "schemaMap") as Record<
-      string,
-      OpenApiSchema
-    >;
+    flatSchema.$defs = omitRequiredByAnnotation(
+      usedDefs,
+      "schemaMap",
+      "readOnly",
+    ) as Record<string, OpenApiSchema>;
   }
 
   return {
@@ -374,7 +376,7 @@ export function buildOutputSchema(
     return undefined;
   }
 
-  return {
+  const outputSchema = {
     ...normalized,
     ...(usedDefs
       ? {
@@ -384,7 +386,13 @@ export function buildOutputSchema(
           >,
         }
       : {}),
-  } as JsonSchemaObject;
+  };
+
+  return omitRequiredByAnnotation(
+    outputSchema,
+    "schema",
+    "writeOnly",
+  ) as JsonSchemaObject;
 }
 
 /**
@@ -751,28 +759,33 @@ function normalizeNullable(
 }
 
 /**
- * OpenAPI 3.0 (Schema Object, `readOnly`): a read-only property "SHOULD NOT be
- * sent as part of the request", and if it is in a `required` list, "the
- * required will take effect on the response only". A tool's input is the
- * request, so its read-only names are dropped from every `required` list in
- * it. Builds new nodes rather than editing them: the shared definitions are
- * also used by output schemas, where the requirement stands.
+ * OpenAPI's required read-only properties apply only to responses; required
+ * write-only properties apply only to requests. Drop the matching annotation's
+ * names from required lists in the opposite direction. Build new nodes rather
+ * than editing shared definitions, which serve both input and output schemas.
  */
-function omitReadOnlyRequired(value: unknown, mode: WalkMode): unknown {
+function omitRequiredByAnnotation(
+  value: unknown,
+  mode: WalkMode,
+  annotation: "readOnly" | "writeOnly",
+): unknown {
   if (mode === "data" || !value || typeof value !== "object") {
     return value;
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => omitReadOnlyRequired(item, "schema"));
+    return value.map((item) =>
+      omitRequiredByAnnotation(item, "schema", annotation),
+    );
   }
 
   const node = Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, child]) => [
       key,
-      omitReadOnlyRequired(
+      omitRequiredByAnnotation(
         child,
         mode === "schemaMap" ? "schema" : childMode(key),
+        annotation,
       ),
     ]),
   );
@@ -784,17 +797,18 @@ function omitReadOnlyRequired(value: unknown, mode: WalkMode): unknown {
     properties &&
     typeof properties === "object"
   ) {
-    const writable = required.filter(
+    const remaining = required.filter(
       (name) =>
         !(
           typeof name === "string" &&
           Object.hasOwn(properties, name) &&
-          (properties as Record<string, OpenApiSchema>)[name]?.readOnly === true
+          (properties as Record<string, OpenApiSchema>)[name]?.[annotation] ===
+            true
         ),
     );
 
-    if (writable.length > 0) {
-      node.required = writable;
+    if (remaining.length > 0) {
+      node.required = remaining;
     } else {
       delete node.required;
     }
