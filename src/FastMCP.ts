@@ -2311,8 +2311,13 @@ export class FastMCPSession<
       const capabilities = this.#server.getClientCapabilities();
 
       // A repeated initialized must not start a second ping, and one sent
-      // without initialize has no capabilities to act on.
-      if (!capabilities || this.#clientCapabilities) {
+      // without initialize has no capabilities to act on. Nothing would clear
+      // a ping started after the session closed.
+      if (
+        !capabilities ||
+        this.#clientCapabilities ||
+        this.#connectionState === "closed"
+      ) {
         return;
       }
 
