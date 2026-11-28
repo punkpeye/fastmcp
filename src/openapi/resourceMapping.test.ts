@@ -304,3 +304,32 @@ test("a collision-suffixed flat key rewrites every occurrence of a repeated path
     "openapi://getMirror/accounts/{id__path}/mirrors/{id__path}{?id__query}",
   );
 });
+
+test.each(["object", "string"] as const)(
+  "a parameter declared with application/json content (%s) is not a resource",
+  (type) => {
+    expect(
+      isEligibleForResource(
+        route({
+          parameters: [
+            {
+              content: {
+                "application/json": {
+                  schema:
+                    type === "object"
+                      ? {
+                          properties: { type: { type: "string" } },
+                          type: "object",
+                        }
+                      : { type: "string" },
+                },
+              },
+              in: "query",
+              name: "filter",
+            },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  },
+);

@@ -133,6 +133,14 @@ export interface HttpRoute {
 export interface OpenApiParameter {
   /** Preserve query-safe reserved characters and percent-encoded triples. */
   allowReserved?: boolean;
+  /**
+   * Alternative to {@link schema}. A parameter uses one or the other. When
+   * this is set and `schema` is absent, an `application/json` argument keeps
+   * that media type's schema and is sent as one JSON value; `style` and
+   * `explode` do not apply. Any other media type stays a plain string
+   * argument, sent as given.
+   */
+  content?: Record<string, { schema?: OpenApiSchema }>;
   deprecated?: boolean;
   description?: string;
   /**
@@ -154,6 +162,8 @@ export interface OpenApiParameter {
    * header objects use the same layout (the header default) but are sent as
    * given, without percent-encoding. Cookies are percent-encoded under
    * `"form"` (the cookie default) and sent as given under OAS 3.2 `"cookie"`.
+   * `"label"` and `"matrix"` path values follow the OpenAPI style examples,
+   * e.g. `.blue` and `;color=blue`.
    */
   style?: string;
 }

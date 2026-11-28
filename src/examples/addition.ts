@@ -5,8 +5,6 @@
  * - Basic tool with type-safe parameters
  * - Streaming-enabled tool for incremental output
  * - Advanced tool annotations
- *
- * For a complete project template, see https://github.com/punkpeye/fastmcp-boilerplate
  */
 import { type } from "arktype";
 import * as v from "valibot";

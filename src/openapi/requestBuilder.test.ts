@@ -435,28 +435,97 @@ test.each([
   },
 );
 
-test.each(["label", "matrix"])(
-  "unsupported %s path arrays keep their existing encoding",
-  async (style) => {
+// The rows of the OpenAPI "Style Examples" table for `color`, plus RFC 6570
+// percent-encoding of the reserved characters inside each item.
+test.each([
+  { expected: ".blue", explode: false, style: "label", value: "blue" },
+  { expected: ".", explode: false, style: "label", value: "" },
+  {
+    expected: ".blue,black,brown",
+    explode: false,
+    style: "label",
+    value: ["blue", "black", "brown"],
+  },
+  {
+    expected: ".blue.black.brown",
+    explode: true,
+    style: "label",
+    value: ["blue", "black", "brown"],
+  },
+  {
+    expected: ".G,200,R,100",
+    explode: false,
+    style: "label",
+    value: { G: 200, R: 100 },
+  },
+  {
+    expected: ".G=200.R=100",
+    explode: true,
+    style: "label",
+    value: { G: 200, R: 100 },
+  },
+  {
+    expected: ".a%2Cb,c%2Fd",
+    explode: false,
+    style: "label",
+    value: ["a,b", "c/d"],
+  },
+  { expected: "", explode: false, style: "label", value: [] },
+  { expected: ";color=blue", explode: false, style: "matrix", value: "blue" },
+  { expected: ";color", explode: false, style: "matrix", value: "" },
+  {
+    expected: ";color=blue,black,brown",
+    explode: false,
+    style: "matrix",
+    value: ["blue", "black", "brown"],
+  },
+  {
+    expected: ";color=blue;color=black;color=brown",
+    explode: true,
+    style: "matrix",
+    value: ["blue", "black", "brown"],
+  },
+  {
+    expected: ";color=G,200,R,100",
+    explode: false,
+    style: "matrix",
+    value: { G: 200, R: 100 },
+  },
+  {
+    expected: ";G=200;R=100",
+    explode: true,
+    style: "matrix",
+    value: { G: 200, R: 100 },
+  },
+  {
+    expected: ";color=a%3Bb%3Dc",
+    explode: false,
+    style: "matrix",
+    value: "a;b=c",
+  },
+  { expected: "", explode: true, style: "matrix", value: {} },
+])(
+  "$style path values follow the OpenAPI style examples: $value (explode: $explode)",
+  async ({ expected, explode, style, value }) => {
     const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
 
     await executeRequest({
-      args: { color: ["a,b", "c/d"] },
+      args: { color: value },
       fetchImpl,
-      parameterMap: { color: { in: "path", name: "color", style } },
-      route: route({ path: "/colors/{color}" }),
+      parameterMap: { color: { explode, in: "path", name: "color", style } },
+      route: route({ path: "/colors/x{color}" }),
       servers: [{ url: "https://api.example.com" }],
     });
 
     expect(fetchImpl.mock.calls[0]![0]).toBe(
-      "https://api.example.com/colors/a%2Cb%2Cc%2Fd",
+      `https://api.example.com/colors/x${expected}`,
     );
   },
 );
 
 test.each([
-  { style: "label", value: { R: 100 } },
-  { style: "matrix", value: { R: 100 } },
+  { style: "label", value: { nested: { R: 100 } } },
+  { style: "matrix", value: { nested: { R: 100 } } },
   { style: "simple", value: { nested: { R: 100 } } },
   { style: "simple", value: { nested: [100, 200] } },
 ])(
@@ -506,9 +575,13 @@ test.each([
   { args: { ext: "", name: "." }, path: "/files/{name}.{ext}" },
   { args: { ext: ".", name: "" }, path: "/files/{name}.{ext}" },
   { args: { a: ".", b: "." }, path: "/files/{a}{b}" },
+  // A label value starts with ".", so "" or "." filling a whole segment
+  // becomes "." or "..".
+  { args: { id: "" }, path: "/v1/users/{id}/profile", style: "label" },
+  { args: { id: "." }, path: "/v1/users/{id}/profile", style: "label" },
 ])(
   "executeRequest rejects path parameters that resolve to a dot segment: $path $args",
-  async ({ args, path }) => {
+  async ({ args, path, style }) => {
     const fetchImpl = vi.fn<typeof fetch>(
       async () => new Response("{}", { status: 200 }),
     );
@@ -518,7 +591,7 @@ test.each([
         args,
         fetchImpl,
         parameterMap: Object.fromEntries(
-          Object.keys(args).map((name) => [name, { in: "path", name }]),
+          Object.keys(args).map((name) => [name, { in: "path", name, style }]),
         ),
         route: route({ path }),
         servers: [{ url: "https://api.example.com" }],
@@ -1184,3 +1257,88 @@ test.each([
     expect(new URL(calledUrl).search).toBe(expected);
   },
 );
+
+test("a JSON content query parameter is one JSON value, ignoring style and allowReserved", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+  const filter = { color: "brown", type: "dog" };
+
+  await executeRequest({
+    args: { filter },
+    fetchImpl,
+    parameterMap: {
+      filter: {
+        allowReserved: true,
+        encoding: "json",
+        explode: true,
+        in: "query",
+        name: "filter",
+        style: "form",
+      },
+    },
+    route: route({ method: "get", path: "/pets" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [calledUrl] = fetchImpl.mock.calls[0]!;
+  const query = new URL(calledUrl).searchParams;
+  expect(query.get("filter")).toBe(JSON.stringify(filter));
+  expect(query.get("type")).toBeNull();
+  expect(query.get("color")).toBeNull();
+});
+
+test("a JSON content query parameter sends null as JSON null", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+
+  await executeRequest({
+    args: { filter: null },
+    fetchImpl,
+    parameterMap: {
+      filter: { encoding: "json", in: "query", name: "filter" },
+    },
+    route: route({ method: "get", path: "/pets" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const [calledUrl] = fetchImpl.mock.calls[0]!;
+  expect(new URL(calledUrl).searchParams.get("filter")).toBe("null");
+});
+
+test("a JSON content header and cookie are JSON text", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+  const filter = { type: "dog" };
+  const json = JSON.stringify(filter);
+
+  await executeRequest({
+    args: { cookieFilter: filter, headerFilter: filter },
+    fetchImpl,
+    parameterMap: {
+      cookieFilter: { encoding: "json", in: "cookie", name: "filter" },
+      headerFilter: { encoding: "json", in: "header", name: "X-Filter" },
+    },
+    route: route({ path: "/pets" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  const headers = new Headers(fetchImpl.mock.calls[0]![1]?.headers);
+  expect(headers.get("x-filter")).toBe(json);
+  expect(headers.get("cookie")).toBe(`filter=${encodeURIComponent(json)}`);
+});
+
+test("a JSON content path parameter is one encoded segment", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response("{}"));
+  const filter = { path: "a/b" };
+
+  await executeRequest({
+    args: { filter },
+    fetchImpl,
+    parameterMap: {
+      filter: { encoding: "json", in: "path", name: "filter" },
+    },
+    route: route({ path: "/pets/{filter}" }),
+    servers: [{ url: "https://api.example.com" }],
+  });
+
+  expect(fetchImpl.mock.calls[0]![0]).toBe(
+    `https://api.example.com/pets/${encodeURIComponent(JSON.stringify(filter))}`,
+  );
+});
