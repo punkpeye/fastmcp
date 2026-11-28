@@ -2190,7 +2190,8 @@ export class FastMCPSession<
         );
         this.#roots = roots?.roots || [];
 
-        if (streamableHttp) {
+        // Nobody awaits a load that runs after the session is ready.
+        if (streamableHttp || this.#connectionState === "ready") {
           this.emit("rootsChanged", { roots: this.#roots });
         }
 
@@ -2300,6 +2301,42 @@ export class FastMCPSession<
       });
   }
 
+  /**
+   * A gateway can start a stdio server long before any client connects and
+   * forward the first initialize only then, after #setUpSession stopped
+   * waiting for it. Finish the setup when that client initializes.
+   */
+  #setUpLateClient(streamableHttp: boolean) {
+    const finish = () => {
+      const capabilities = this.#server.getClientCapabilities();
+
+      // A repeated initialized must not start a second ping, and one sent
+      // without initialize has no capabilities to act on. Nothing would clear
+      // a ping started after the session closed.
+      if (
+        !capabilities ||
+        this.#clientCapabilities ||
+        this.#connectionState === "closed"
+      ) {
+        return;
+      }
+
+      this.#clientCapabilities = capabilities;
+      void this.#loadRoots(streamableHttp);
+      this.#startPing();
+    };
+
+    const oninitialized = this.#server.oninitialized;
+
+    this.#server.oninitialized = () => {
+      oninitialized?.();
+      finish();
+    };
+
+    // The client may have initialized after the poll's last check.
+    finish();
+  }
+
   async #setUpSession(streamableHttp: boolean) {
     // Skipped in stateless mode: a session there serves one request, and the
     // initialize that carried the client's capabilities was handled by a
@@ -2351,47 +2388,55 @@ export class FastMCPSession<
     }
 
     if (this.#clientCapabilities) {
-      const pingConfig = this.#getPingConfig();
-
-      if (pingConfig.enabled) {
-        this.#pingInterval = setInterval(async () => {
-          if (this.#pingInFlight) {
-            return;
-          }
-
-          this.#pingInFlight = true;
-
-          try {
-            await this.#server.ping();
-          } catch {
-            // The reason we are not emitting an error here is because some clients
-            // seem to not respond to the ping request, and we don't want to crash the server,
-            // e.g., https://github.com/punkpeye/fastmcp/issues/38.
-            const logLevel = pingConfig.logLevel;
-
-            if (logLevel === "debug") {
-              this.#logger.debug("[FastMCP debug] server ping failed");
-            } else if (logLevel === "warning") {
-              this.#logger.warn(
-                "[FastMCP warning] server is not responding to ping",
-              );
-            } else if (logLevel === "error") {
-              this.#logger.error(
-                "[FastMCP error] server is not responding to ping",
-              );
-            } else {
-              this.#logger.info("[FastMCP info] server ping failed");
-            }
-          } finally {
-            this.#pingInFlight = false;
-          }
-        }, pingConfig.intervalMs);
-      }
+      this.#startPing();
     }
 
     // Mark connection as ready and emit event
     this.#connectionState = "ready";
     this.emit("ready");
+
+    if (!this.#stateless && !this.#clientCapabilities) {
+      this.#setUpLateClient(streamableHttp);
+    }
+  }
+
+  #startPing() {
+    const pingConfig = this.#getPingConfig();
+
+    if (pingConfig.enabled) {
+      this.#pingInterval = setInterval(async () => {
+        if (this.#pingInFlight) {
+          return;
+        }
+
+        this.#pingInFlight = true;
+
+        try {
+          await this.#server.ping();
+        } catch {
+          // The reason we are not emitting an error here is because some clients
+          // seem to not respond to the ping request, and we don't want to crash the server,
+          // e.g., https://github.com/punkpeye/fastmcp/issues/38.
+          const logLevel = pingConfig.logLevel;
+
+          if (logLevel === "debug") {
+            this.#logger.debug("[FastMCP debug] server ping failed");
+          } else if (logLevel === "warning") {
+            this.#logger.warn(
+              "[FastMCP warning] server is not responding to ping",
+            );
+          } else if (logLevel === "error") {
+            this.#logger.error(
+              "[FastMCP error] server is not responding to ping",
+            );
+          } else {
+            this.#logger.info("[FastMCP info] server ping failed");
+          }
+        } finally {
+          this.#pingInFlight = false;
+        }
+      }, pingConfig.intervalMs);
+    }
   }
 
   /**
